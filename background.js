@@ -167,8 +167,127 @@ const ALLOWED = new Set([
   "ATTACH","DETACH","INTERCEPT_ON","INTERCEPT_OFF",
   "FORWARD","DROP","SEND_REQUEST",
   "GET_DATA","GET_INTERCEPTED","REPORT","CLEAR",
-  "LOOKUP",
+  "LOOKUP","CRAWL_START","CRAWL_STOP",
 ]);
+
+// ── Crawler ────────────────────────────────────────────────────────────────
+let crawlAbortCtrl = null;
+
+function crawlGuessType(url) {
+  const u = url.toLowerCase().split("?")[0];
+  if (/\/api\/|\/v\d+\/|\/graphql|\/rest\//.test(u)) return "api";
+  if (/\.(js|mjs)$/.test(u)) return "script";
+  if (/\.(css|woff2?|ttf|eot|png|jpe?g|gif|webp|ico|svg)$/.test(u)) return null;
+  return "link";
+}
+
+function crawlExtractUrls(html, pageUrl, origin) {
+  const found = new Set();
+  const attrRe = /(?:href|src|action|data-url|data-href)\s*=\s*["']([^"'\s>]+)["']/gi;
+  const jsRe   = /(?:fetch|axios\.(?:get|post|put|patch|delete)|\.open)\s*\(\s*["'`]([^"'`\s]+)["'`]/gi;
+  for (const re of [attrRe, jsRe]) {
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      try {
+        const raw = m[1].trim();
+        if (!raw || raw.startsWith("javascript:") || raw.startsWith("mailto:") || raw.startsWith("data:")) continue;
+        const u = new URL(raw, pageUrl);
+        if (u.origin !== origin) continue;
+        u.hash = "";
+        found.add(u.href);
+      } catch {}
+    }
+  }
+  return [...found];
+}
+
+async function startCrawl(tabId, origin, seeds, maxPages) {
+  crawlAbortCtrl = new AbortController();
+  const signal = crawlAbortCtrl.signal;
+  const visited = new Set();
+  const epSeen  = new Set(seeds);
+  const queue   = [...new Set(seeds)];
+
+  if (tabId) {
+    const t = getTab(tabId);
+    const tSeen = new Set(t.endpoints.map(e => e.url));
+    for (const url of seeds) {
+      if (!tSeen.has(url)) {
+        t.endpoints.push({ url, method: "GET", type: crawlGuessType(url) || "link" });
+        tSeen.add(url);
+      }
+    }
+  }
+
+  while (queue.length > 0 && visited.size < maxPages && !signal.aborted) {
+    const url = queue.shift();
+    if (visited.has(url)) continue;
+    visited.add(url);
+
+    chrome.runtime.sendMessage({
+      type: "CRAWL_PROGRESS",
+      visited: visited.size,
+      total: Math.min(queue.length + visited.size, maxPages),
+      currentUrl: url,
+      newEndpoints: [],
+    }).catch(() => {});
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 7000);
+      signal.addEventListener("abort", () => controller.abort(), { once: true });
+
+      const resp = await fetch(url, {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: { "Accept": "text/html,application/xhtml+xml,*/*;q=0.9" },
+      });
+      clearTimeout(timer);
+
+      const ct = resp.headers.get("content-type") || "";
+      if (!ct.includes("html")) continue;
+
+      const html = await resp.text();
+      const links = crawlExtractUrls(html, url, origin);
+      const newEndpoints = [];
+
+      for (const link of links) {
+        const type = crawlGuessType(link);
+        if (type === null) continue;
+        if (!epSeen.has(link)) {
+          epSeen.add(link);
+          newEndpoints.push({ url: link, method: "GET", type });
+        }
+        if (!visited.has(link) && type === "link") queue.push(link);
+      }
+
+      if (newEndpoints.length) {
+        if (tabId) {
+          const t = getTab(tabId);
+          const tSeen = new Set(t.endpoints.map(e => e.url));
+          for (const ep of newEndpoints) {
+            if (!tSeen.has(ep.url)) { t.endpoints.push(ep); tSeen.add(ep.url); }
+          }
+        }
+        chrome.runtime.sendMessage({
+          type: "CRAWL_PROGRESS",
+          visited: visited.size,
+          total: Math.min(queue.length + visited.size, maxPages),
+          currentUrl: url,
+          newEndpoints,
+        }).catch(() => {});
+      }
+    } catch { /* timeout / abort — skip */ }
+  }
+
+  chrome.runtime.sendMessage({
+    type: "CRAWL_DONE",
+    visited: visited.size,
+    stopped: signal.aborted,
+  }).catch(() => {});
+  crawlAbortCtrl = null;
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg?.type || !ALLOWED.has(msg.type)) return;
@@ -661,6 +780,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse(result);
       })();
       return true;
+    }
+
+    // ── Crawler ──────────────────────────────────────────────────────────────
+    case "CRAWL_START": {
+      if (crawlAbortCtrl) crawlAbortCtrl.abort(); // stop any running crawl
+      const { origin, seeds = [], maxPages = 60 } = msg;
+      if (!origin) { sendResponse({ ok: false, error: "no origin" }); break; }
+      startCrawl(tabId, origin, seeds, maxPages);
+      sendResponse({ ok: true });
+      break;
+    }
+
+    case "CRAWL_STOP": {
+      if (crawlAbortCtrl) crawlAbortCtrl.abort();
+      sendResponse({ ok: true });
+      break;
     }
   }
 

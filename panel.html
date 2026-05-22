@@ -128,6 +128,15 @@
         <option value="link">Link</option>
       </select>
       <button id="ep-copy-all" class="btn btn-sm btn-ghost">Copy All</button>
+      <button id="ep-crawl"    class="btn btn-sm btn-accent">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        Crawl
+      </button>
+    </div>
+    <div id="ep-crawl-bar" class="crawl-bar hidden">
+      <div class="crawl-progress-wrap"><div id="ep-crawl-fill" class="crawl-fill" style="width:0%"></div></div>
+      <span id="ep-crawl-status" class="crawl-status-text">Starting…</span>
+      <button id="ep-crawl-stop" class="btn btn-xs btn-danger">Stop</button>
     </div>
     <div id="ep-list"   class="req-list"></div>
     <div id="ep-empty"  class="empty hidden">No endpoints — interact with the page or refresh</div>

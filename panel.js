@@ -1532,6 +1532,77 @@ document.addEventListener("DOMContentLoaded", () => {
     navigator.clipboard.writeText(urls);
   });
 
+  // ── Crawl ──────────────────────────────────────────────────────────────────
+  let crawlRunning = false;
+
+  function setCrawlUI(running) {
+    crawlRunning = running;
+    const btn  = document.getElementById("ep-crawl");
+    const bar  = document.getElementById("ep-crawl-bar");
+    btn.disabled = running;
+    btn.style.opacity = running ? "0.5" : "";
+    bar.classList.toggle("hidden", !running);
+    if (!running) {
+      document.getElementById("ep-crawl-fill").style.width = "0%";
+      document.getElementById("ep-crawl-status").textContent = "";
+    }
+  }
+
+  document.getElementById("ep-crawl").addEventListener("click", async () => {
+    const tab = await new Promise(r => chrome.tabs.get(TAB_ID, r));
+    let origin;
+    try { origin = new URL(tab.url).origin; } catch { return; }
+
+    // Use already-discovered link endpoints as seeds + the current page URL
+    const seeds = [tab.url, ...(state.endpoints || [])
+      .filter(e => e.type === "link" || e.type === "api")
+      .map(e => e.url)
+      .filter(u => u.startsWith(origin))
+    ].filter((u, i, a) => a.indexOf(u) === i).slice(0, 80);
+
+    setCrawlUI(true);
+    document.getElementById("ep-crawl-status").textContent = "Starting crawl…";
+
+    bg({ type: "CRAWL_START", origin, seeds, maxPages: 60 });
+  });
+
+  document.getElementById("ep-crawl-stop").addEventListener("click", () => {
+    bg({ type: "CRAWL_STOP" });
+    setCrawlUI(false);
+  });
+
+  // Listen for crawl progress messages from background
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === "CRAWL_PROGRESS") {
+      const pct = msg.total > 0 ? Math.round((msg.visited / msg.total) * 100) : 0;
+      document.getElementById("ep-crawl-fill").style.width = `${pct}%`;
+      document.getElementById("ep-crawl-status").textContent =
+        `Crawling… ${msg.visited}${msg.total ? "/" + msg.total : ""} pages`;
+
+      if (msg.newEndpoints && msg.newEndpoints.length) {
+        const seen = new Set((state.endpoints || []).map(e => e.url));
+        let added = false;
+        for (const ep of msg.newEndpoints) {
+          if (!seen.has(ep.url)) {
+            state.endpoints = state.endpoints || [];
+            state.endpoints.push(ep);
+            seen.add(ep.url);
+            added = true;
+          }
+        }
+        if (added) renderEndpoints();
+      }
+    }
+
+    if (msg.type === "CRAWL_DONE") {
+      const status = document.getElementById("ep-crawl-status");
+      status.textContent = `Done — ${msg.visited} pages crawled`;
+      document.getElementById("ep-crawl-fill").style.width = "100%";
+      setTimeout(() => setCrawlUI(false), 2000);
+      renderEndpoints();
+    }
+  });
+
   // Tech tab: WHOIS scan + raw toggle
   document.getElementById("btn-lookup").addEventListener("click", doLookup);
   document.getElementById("whois-toggle").addEventListener("click", () => {
