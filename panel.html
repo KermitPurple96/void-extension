@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Tab bar ── -->
+  <div class="tabbar">
+    <button class="tab active" data-tab="intercept">Intercept <span class="bdg hidden" id="bdg-intercept">0</span></button>
+    <button class="tab"        data-tab="repeater" >Repeater</button>
+    <button class="tab"        data-tab="endpoints">Endpoints <span class="bdg" id="bdg-endpoints">0</span></button>
+    <button class="tab"        data-tab="tech"     >Tech <span class="bdg" id="bdg-tech">0</span></button>
+    <button class="tab"        data-tab="headers"  >Headers</button>
+    <div class="tabbar-gap"></div>
+    <span id="site-host" class="site-host">—</span>
+    <button class="ico-btn" id="btn-refresh" title="Refresh recon data">↻</button>
+    <button class="ico-btn" id="btn-export"  title="Export JSON">⬇</button>
+  </div>
+
+  <!-- ═══════════════════════════ INTERCEPT ══════════════════════════════════ -->
+  <div id="tab-intercept" class="tab-panel active">
+
+    <div class="toolbar">
+      <div class="status-row">
+        <span class="dot" id="dbg-dot"></span>
+        <span id="dbg-label">Detached</span>
+      </div>
+      <div class="btn-row">
+        <button id="btn-attach" class="btn">Attach Debugger</button>
+        <button id="btn-intercept" class="btn" disabled>Intercept: OFF</button>
+        <button id="btn-fwd-all"   class="btn btn-ghost" disabled>Forward All</button>
+      </div>
+    </div>
+
+    <div id="warn-bar" class="warn-bar hidden">
+      ⚠ Debugger attached — Chrome shows a banner on the tab. Test only on authorised targets.
+    </div>
+
+    <!-- Request list -->
+    <div id="ic-list"  class="req-list"></div>
+    <div id="ic-empty" class="empty">
+      No paused requests.<br>
+      Attach debugger → turn Intercept ON → interact with the page.
+    </div>
+
+    <!-- Inline editor (replaces list when editing) -->
+    <div id="ic-editor" class="ic-editor hidden">
+      <div class="editor-topbar">
+        <button id="ed-back"    class="btn btn-sm btn-ghost">← Back</button>
+        <select id="ed-method"  class="method-sel"></select>
+        <input  id="ed-url"     class="url-inp" type="text" spellcheck="false" autocomplete="off">
+        <button id="ed-forward" class="btn btn-sm btn-success">Forward →</button>
+        <button id="ed-to-rep"  class="btn btn-sm btn-ghost">→ Repeater</button>
+        <button id="ed-drop"    class="btn btn-sm btn-danger">Drop ✕</button>
+      </div>
+      <div class="split-v">
+        <div class="split-pane">
+          <div class="pane-label">Headers</div>
+          <textarea id="ed-headers" class="raw-ta" spellcheck="false"></textarea>
+        </div>
+        <div class="split-pane">
+          <div class="pane-label">Body</div>
+          <textarea id="ed-body" class="raw-ta" spellcheck="false" placeholder="(empty)"></textarea>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════════════ REPEATER ═══════════════════════════════════ -->
+  <div id="tab-repeater" class="tab-panel hidden">
+
+    <div class="rep-topbar">
+      <select id="rep-method" class="method-sel"></select>
+      <input  id="rep-url"    class="url-inp flex1" type="text"
+              placeholder="https://target.com/api/…" spellcheck="false" autocomplete="off">
+      <button id="rep-send"   class="btn btn-send">Send</button>
+      <button id="rep-clear"  class="btn btn-sm btn-ghost" title="Clear response">✕</button>
+    </div>
+
+    <div class="rep-body">
+
+      <!-- Request pane -->
+      <div class="rep-req" id="rep-req-pane">
+        <div class="pane-label">REQUEST HEADERS</div>
+        <textarea id="rep-headers" class="raw-ta" spellcheck="false"
+                  placeholder="Content-Type: application/json&#10;Authorization: Bearer …"></textarea>
+        <div class="pane-label pane-label-body">BODY</div>
+        <textarea id="rep-body-ta" class="raw-ta body-ta" spellcheck="false"
+                  placeholder='{"key": "value"}'></textarea>
+      </div>
+
+      <!-- Drag handle -->
+      <div class="rep-resizer" id="rep-resizer"></div>
+
+      <!-- Response pane -->
+      <div class="rep-resp" id="rep-resp-pane">
+        <div class="pane-label" id="resp-label">RESPONSE</div>
+        <div class="resp-sub-tabs hidden" id="resp-sub-tabs">
+          <button class="sub-tab active" data-resp="body">Body</button>
+          <button class="sub-tab"        data-resp="hdrs">Headers</button>
+          <button class="sub-tab"        data-resp="raw" >Raw</button>
+        </div>
+        <div id="resp-pane-body" class="resp-pane active"><pre id="resp-body-pre"></pre></div>
+        <div id="resp-pane-hdrs" class="resp-pane hidden"><pre id="resp-hdrs-pre"></pre></div>
+        <div id="resp-pane-raw"  class="resp-pane hidden"><pre id="resp-raw-pre"></pre></div>
+        <div id="resp-empty" class="empty">Hit Send to see response</div>
+        <div id="resp-loading" class="loading hidden">Sending…</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ ENDPOINTS ══════════════════════════════════ -->
+  <div id="tab-endpoints" class="tab-panel hidden">
+    <div class="filter-bar">
+      <input  id="ep-filter" type="text" placeholder="Filter by URL…" spellcheck="false" autocomplete="off">
+      <select id="ep-type"   class="filter-sel">
+        <option value="">All types</option>
+        <option value="api">API</option>
+        <option value="form">Form</option>
+        <option value="script">Script</option>
+        <option value="link">Link</option>
+      </select>
+      <button id="ep-copy-all" class="btn btn-sm btn-ghost">Copy All</button>
+    </div>
+    <div id="ep-list"   class="req-list"></div>
+    <div id="ep-empty"  class="empty hidden">No endpoints — interact with the page or refresh</div>
+  </div>
+
+  <!-- ═══════════════════════════ TECH ═══════════════════════════════════════ -->
+  <div id="tab-tech" class="tab-panel hidden">
+
+    <div class="tech-toolbar">
+      <span id="tech-domain-label" class="tech-domain">—</span>
+      <button id="btn-lookup" class="btn btn-accent">⚡ Scan WHOIS + DNS</button>
+      <span   id="lookup-status" class="lookup-status"></span>
+    </div>
+
+    <div class="tech-layout">
+
+      <!-- Left: Target info -->
+      <div class="tech-sidebar" id="tech-sidebar">
+
+        <div class="info-card" id="card-ip">
+          <div class="info-card-title">IP / Geo</div>
+          <div id="ip-rows" class="info-rows"></div>
+          <div id="ip-empty" class="info-empty">Run scan to populate</div>
+        </div>
+
+        <div class="info-card" id="card-dns">
+          <div class="info-card-title">DNS Records</div>
+          <div id="dns-rows" class="info-rows"></div>
+          <div id="dns-empty" class="info-empty">Run scan to populate</div>
+        </div>
+
+        <div class="info-card" id="card-whois">
+          <div class="info-card-title">
+            WHOIS
+            <button id="whois-toggle" class="btn btn-xs btn-ghost">▼</button>
+          </div>
+          <div id="whois-parsed" class="info-rows"></div>
+          <pre  id="whois-raw"    class="whois-raw hidden"></pre>
+          <div id="whois-empty"  class="info-empty">Run scan to populate</div>
+        </div>
+
+      </div>
+
+      <!-- Right: Tech stack -->
+      <div class="tech-main" id="tech-main">
+        <div id="tech-stack"  class="tech-stack"></div>
+        <div id="tech-empty"  class="empty hidden">Interact with page or click Refresh</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ HEADERS ════════════════════════════════════ -->
+  <div id="tab-headers" class="tab-panel hidden">
+    <div id="hdr-list"   class="req-list"></div>
+    <div id="hdr-empty"  class="empty hidden">
+      No headers captured.<br>
+      Attach debugger — headers are captured from network responses.
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ FOOTER ════════════════════════════════════ -->
+  <div class="social-footer">
+    <span class="social-by">Ahmad Alanazi</span>
+    <div class="social-links">
+
+      <!-- X / Twitter -->
+      <button class="social-btn" id="link-x" title="X  @0x4161">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.747l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+        </svg>
+        <span>0x4161</span>
+      </button>
+
+      <!-- Instagram -->
+      <button class="social-btn" id="link-insta" title="Instagram  @fx_py3">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/>
+        </svg>
+        <span>fx_py3</span>
+      </button>
+
+      <!-- LinkedIn -->
+      <button class="social-btn" id="link-li" title="LinkedIn  Ahmad Alanazi">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+        </svg>
+        <span>Ahmad Alanazi</span>
+      </button>
+
+    </div>
+  </div>
+
+</div>
+<script src="panel.js"></script>
+</body>
+</html>
