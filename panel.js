@@ -1621,8 +1621,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a    = el("a");
     a.href     = URL.createObjectURL(blob);
-    try { a.download = `bughunter-${new URL(tab?.url || "http://x").hostname}-${Date.now()}.json`; }
-    catch { a.download = `bughunter-${Date.now()}.json`; }
+    try { a.download = `void-${new URL(tab?.url || "http://x").hostname}-${Date.now()}.json`; }
+    catch { a.download = `void-${Date.now()}.json`; }
     a.click();
     URL.revokeObjectURL(a.href);
   });

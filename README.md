@@ -74,7 +74,7 @@ In the top-right corner of the Extensions page, toggle **Developer mode** ON.
 2. Browse to the folder you cloned/extracted (the folder that contains `manifest.json`)
 3. Click **Select Folder**
 
-The extension will appear in your list with the name **BugHunter Pro**.
+The extension will appear in your list with the name **Void Extension**.
 
 ---
 
@@ -83,7 +83,7 @@ The extension will appear in your list with the name **BugHunter Pro**.
 1. Go to any website you have permission to test
 2. Press `F12` (or `Ctrl+Shift+I` / `Cmd+Option+I` on Mac) to open DevTools
 3. Click the **»** arrow at the right of the DevTools tab bar
-4. Select **BugHunter Pro** from the dropdown
+4. Select **Void** from the dropdown
 
 The panel will open with all five tabs ready to use.
 
