@@ -1,5 +1,5 @@
 chrome.devtools.panels.create(
-  "BugHunter",
+  "Void",
   "icons/icon16.png",
   "panel.html",
   () => {}
