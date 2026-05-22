@@ -34,13 +34,13 @@ A professional Chrome DevTools extension built for bug bounty hunters and securi
 
 **Option A — Clone with Git**
 ```bash
-git clone https://github.com/0x4161/bughunter-pro.git
+git clone https://github.com/0x4161/void-extension.git
 ```
 
 **Option B — Download ZIP**
 1. Click the green **Code** button at the top of this page
 2. Choose **Download ZIP**
-3. Extract the ZIP anywhere on your computer (e.g. `Desktop/bughunter-pro`)
+3. Extract the ZIP anywhere on your computer (e.g. `Desktop/void-extension`)
 
 ---
 
@@ -144,7 +144,7 @@ The panel will open with all five tabs ready to use.
 ## Project Structure
 
 ```
-bughunter-pro/
+void-extension/
 ├── manifest.json      # Extension manifest (MV3)
 ├── devtools.html      # DevTools page entry point
 ├── devtools.js        # Creates the DevTools panel
