@@ -87,7 +87,8 @@ function showTab(name) {
   });
   if (name === "intercept") startPoll(); else stopPoll();
   if (name === "history") startHistPoll(); else stopHistPoll();
-  if (name === "target") { pollHistory().then(() => renderSiteMap()); }
+  if (name === "target") { pollHistory().then(() => renderSiteMap()); renderEndpoints(); }
+  if (name === "probe" && probeInjected) probeStartPoll(); else probeStopPoll();
 }
 
 // ── Polling for paused requests ───────────────────────────────────────────────
@@ -237,16 +238,18 @@ function renderInterceptList() {
     const btnEdit = txt("button", "btn btn-xs btn-ghost",   "Edit");
     const btnRep  = txt("button", "btn btn-xs btn-ghost",   "→ Rep");
     const btnIntr = txt("button", "btn btn-xs btn-ghost",   "→ Intr");
+    const btnOpen = txt("button", "btn btn-xs btn-ghost",   "↗"); btnOpen.title = "Open in new tab";
     const btnFwd  = txt("button", "btn btn-xs btn-success", "Forward →");
     const btnDrop = txt("button", "btn btn-xs btn-danger",  "Drop");
 
     btnEdit.addEventListener("click", e => { e.stopPropagation(); openEditor(req); });
     btnRep.addEventListener("click",  e => { e.stopPropagation(); sendToRepeater(req); });
     btnIntr.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder(req); });
+    btnOpen.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: req.url }); });
     btnFwd.addEventListener("click",  e => { e.stopPropagation(); doForward(req.requestId, null); });
     btnDrop.addEventListener("click", e => { e.stopPropagation(); doDrop(req.requestId); });
 
-    ap(acts, btnEdit, btnRep, btnIntr, btnFwd, btnDrop);
+    ap(acts, btnEdit, btnRep, btnIntr, btnOpen, btnFwd, btnDrop);
     row.appendChild(acts);
     row.addEventListener("click", () => openEditor(req));
     list.appendChild(row);
@@ -756,8 +759,8 @@ function clearRespPanes() {
 
 function switchRespPane(name) {
   activeSubResp = name;
-  document.querySelectorAll(".sub-tab").forEach(t => t.classList.toggle("active", t.dataset.resp === name));
-  document.querySelectorAll(".resp-pane").forEach(p => {
+  document.querySelectorAll("#resp-sub-tabs .sub-tab").forEach(t => t.classList.toggle("active", t.dataset.resp === name));
+  document.querySelectorAll("#rep-resp-pane .resp-pane").forEach(p => {
     p.classList.toggle("active", p.id === `resp-pane-${name}`);
     p.classList.toggle("hidden", p.id !== `resp-pane-${name}`);
   });
@@ -826,10 +829,12 @@ function renderEndpoints() {
       });
     });
     const intrBtn = txt("button", "btn btn-xs btn-ghost", "→ Intr");
+    const openBtn = txt("button", "btn btn-xs btn-ghost", "↗"); openBtn.title = "Open in new tab";
     repBtn.addEventListener("click", () => sendToRepeater(ep));
     intrBtn.addEventListener("click", () => intrSendToIntruder(ep));
+    openBtn.addEventListener("click", () => chrome.tabs.create({ url: ep.url }));
 
-    ap(acts, cpyBtn, repBtn, intrBtn);
+    ap(acts, cpyBtn, repBtn, intrBtn, openBtn);
     row.appendChild(acts);
     list.appendChild(row);
   });
@@ -1157,7 +1162,28 @@ function tgtFileIcon(name) {
 }
 
 function renderSiteMap() {
+  // Merge history + endpoint data for a complete site map
   let entries = [...historyData];
+
+  // Add endpoints that aren't already in history (by URL)
+  const histUrls = new Set(entries.map(e => e.url));
+  for (const ep of (state.endpoints || [])) {
+    if (ep?.url && !histUrls.has(ep.url)) {
+      entries.push({
+        url: ep.url, method: ep.method || "GET",
+        host: "", path: "", status: null, statusText: "",
+        headers: {}, respHeaders: {}, body: "", respBody: "",
+        length: 0, mimeType: "", time: 0, elapsed: 0,
+        resourceType: ep.type || "other",
+      });
+      // Parse host/path
+      try {
+        const u = new URL(ep.url);
+        entries[entries.length - 1].host = u.host;
+        entries[entries.length - 1].path = u.pathname + u.search;
+      } catch {}
+    }
+  }
 
   if (tgtFilter) {
     const q = tgtFilter.toLowerCase();
@@ -1200,8 +1226,8 @@ function tgtRenderNode(label, node, depth, fullPath, isHost) {
 
   const icon = document.createElement("span");
   icon.className = "tgt-icon";
-  if (isHost) { icon.textContent = "◆"; }
-  else if (hasChildren) { icon.textContent = "▪"; }
+  if (isHost) { icon.textContent = "\u{1F310}"; }
+  else if (hasChildren) { icon.textContent = ""; }
   else {
     const ftype = tgtFileIcon(label);
     if (ftype) {
@@ -1291,9 +1317,12 @@ function tgtRenderTable(entries) {
     actTd.style.whiteSpace = "nowrap";
     const repBtn = txt("button", "btn btn-xs btn-ghost", "→ Rep");
     const intrBtn = txt("button", "btn btn-xs btn-ghost", "→ Intr");
+    const openBtn = txt("button", "btn btn-xs btn-ghost", "↗");
+    openBtn.title = "Open in new tab";
     repBtn.addEventListener("click", e => { e.stopPropagation(); sendToRepeater({ method: entry.method, url: entry.url, headers: entry.headers || {}, body: entry.body || "" }); });
     intrBtn.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder({ method: entry.method, url: entry.url, headers: entry.headers || {}, body: entry.body || "" }); });
-    ap(actTd, repBtn, intrBtn);
+    openBtn.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: entry.url }); });
+    ap(actTd, repBtn, intrBtn, openBtn);
     tr.appendChild(actTd);
     tr.style.cursor = "pointer";
     tbody.appendChild(tr);
@@ -1560,6 +1589,377 @@ function intrSendToIntruder(req) {
   document.getElementById("intr-request").value = raw;
   intrCountPositions();
   showTab("intruder");
+}
+
+// ═══════════════════════════ PROBE (DOM XSS Hunter) ══════════════════════════
+
+let probeInjected = false;
+let probeLogFrom = 0;
+let probePollTimer = null;
+let probeFindingsData = null;
+
+function probeScan() {
+  const btn = document.getElementById("probe-scan");
+  btn.disabled = true; btn.textContent = "Scanning\u2026";
+  bg({ type: "PROBE_INJECT" }).then(res => {
+    btn.disabled = false; btn.textContent = "Scan Page";
+    if (res?.ok) {
+      probeInjected = true; probeUpdateStatus("scanning");
+      document.getElementById("probe-empty").classList.add("hidden");
+      document.getElementById("probe-rescan").disabled = false;
+      probeStartPoll();
+    } else { probeUpdateStatus("error", res?.error); }
+  });
+}
+
+function probeCmd(command, args) { bg({ type: "PROBE_CMD", command, args: args ?? null }); }
+
+function probeUpdateStatus(status, error) {
+  const dot = document.getElementById("probe-dot");
+  const label = document.getElementById("probe-label");
+  dot.className = "dot";
+  if (status === "error") { dot.classList.add("dot-off"); label.textContent = "Error: " + (error || "unknown"); }
+  else if (status === "scanning") { dot.classList.add("dot-scanning"); label.textContent = "Scanning\u2026"; }
+  else if (status === "ready") { dot.classList.add("dot-intercepting"); label.textContent = "Scan complete"; }
+  else { dot.classList.add("dot-off"); label.textContent = "Ready to scan"; }
+}
+
+function probeUpdateStats(data) {
+  if (!data?.injected) return;
+  document.getElementById("probe-stats").classList.remove("hidden");
+  document.getElementById("probe-sources").textContent = data.sources || 0;
+  document.getElementById("probe-sinks").textContent = data.sinks || 0;
+  document.getElementById("probe-flows").textContent = data.flows || 0;
+  document.getElementById("probe-likely").textContent = data.likelyFlows || 0;
+  document.getElementById("probe-runtime").textContent = data.runtimeCalls || 0;
+  setBadge("bdg-p-src", data.sources || 0); setBadge("bdg-p-snk", data.sinks || 0);
+  setBadge("bdg-p-flw", data.flows || 0); setBadge("bdg-p-rt", data.runtimeCalls || 0);
+  setBadge("bdg-probe", (data.likelyFlows || 0) > 0 ? data.likelyFlows : (data.flows || 0));
+  document.getElementById("probe-empty").classList.add("hidden");
+}
+
+function probeStartPoll() { if (probePollTimer) return; probePollTimer = setInterval(probePollStatus, 1200); probePollStatus(); }
+function probeStopPoll() { clearInterval(probePollTimer); probePollTimer = null; }
+
+let probePrevTotal = -1;
+let probeStableCount = 0;
+
+async function probePollStatus() {
+  const res = await bg({ type: "PROBE_STATUS", logFrom: probeLogFrom });
+  if (!res) return;
+  if (res.injected) {
+    probeUpdateStats(res);
+    // Auto-load findings when counts change or stabilize after scan
+    const curTotal = (res.sources || 0) + (res.sinks || 0);
+    if (curTotal !== probePrevTotal) {
+      probeStableCount = 0;
+      probePrevTotal = curTotal;
+      if (curTotal > 0) probeLoadFindings();
+    } else if (probeStableCount < 3) {
+      probeStableCount++;
+      if (probeStableCount === 2) probeUpdateStatus("ready");
+    }
+  }
+  if (res.log?.length > 0) { probeRenderLog(res.log); probeLogFrom = res.log[res.log.length - 1].id + 1; }
+}
+
+// ── Structured findings ──────────────────────────────────────────────────────
+
+async function probeLoadFindings() {
+  const data = await bg({ type: "PROBE_FINDINGS" });
+  if (!data) return;
+  probeFindingsData = data;
+  probeRenderSources(data.sources); probeRenderSinks(data.sinks);
+  probeRenderFlows(data.flows); probeRenderRuntime(data.runtimeCalls);
+  probeRenderFrameworks(data.frameworks);
+}
+
+function probeManipIcon(m) { return m === "full" ? "\u{1F3AF}" : m === "partial" ? "\u26A0\uFE0F" : "\u2014"; }
+function probeManipCls(m) { return m === "full" ? "probe-manip-full" : m === "partial" ? "probe-manip-partial" : "probe-manip-none"; }
+function probeSevCls(s) { return (s === "critical" || s === "high") ? "probe-sev-critical" : s === "medium" ? "probe-sev-medium" : "probe-sev-low"; }
+function probeShortFile(f) { return !f ? "" : f.length > 30 ? "\u2026" + f.slice(-30) : f; }
+
+function probeRenderSources(sources) {
+  const tbody = document.getElementById("probe-src-tbody");
+  const empty = document.getElementById("probe-src-empty");
+  tbody.replaceChildren();
+  if (!sources?.length) { empty.classList.remove("hidden"); return; }
+  empty.classList.add("hidden");
+  const sorted = [...sources].sort((a, b) => ({ full: 0, partial: 1 }[a.manipulable] ?? 2) - ({ full: 0, partial: 1 }[b.manipulable] ?? 2));
+  for (const s of sorted) {
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    ap(tr,
+      txt("td", "hist-td-num", String(s.id)),
+      txt("td", probeManipCls(s.manipulable), probeManipIcon(s.manipulable)),
+      txt("td", probeSevCls(s.sev), (s.sev || "").toUpperCase()),
+      txt("td", "", s.cat),
+      txt("td", "", s.match),
+      txt("td", "hist-td-mime", probeShortFile(s.file)),
+      txt("td", "hist-td-num", String(s.line)),
+    );
+    tr.title = s.file + ":" + s.line;
+    tr.addEventListener("click", () => probeShowDetail("source", s));
+    tbody.appendChild(tr);
+  }
+}
+
+function probeRenderSinks(sinks) {
+  const tbody = document.getElementById("probe-snk-tbody");
+  const empty = document.getElementById("probe-snk-empty");
+  tbody.replaceChildren();
+  if (!sinks?.length) { empty.classList.remove("hidden"); return; }
+  empty.classList.add("hidden");
+  for (const s of sinks) {
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    ap(tr,
+      txt("td", "hist-td-num", String(s.id)),
+      txt("td", probeSevCls(s.sev), (s.sev || "").toUpperCase()),
+      txt("td", "", s.cat),
+      txt("td", "", s.match),
+      txt("td", "hist-td-mime", probeShortFile(s.file)),
+      txt("td", "hist-td-num", String(s.line)),
+    );
+    tr.title = s.file + ":" + s.line;
+    tr.addEventListener("click", () => probeShowDetail("sink", s));
+    tbody.appendChild(tr);
+  }
+}
+
+function probeRenderFlows(flows) {
+  const tbody = document.getElementById("probe-flw-tbody");
+  const empty = document.getElementById("probe-flw-empty");
+  tbody.replaceChildren();
+  if (!flows?.length) { empty.classList.remove("hidden"); return; }
+  empty.classList.add("hidden");
+  const sorted = [...flows].sort((a, b) => ({ likely: 0, possible: 1 }[a.expl] ?? 2) - ({ likely: 0, possible: 1 }[b.expl] ?? 2));
+  for (const f of sorted) {
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    const explIcon = f.expl === "likely" ? "\uD83D\uDD25" : f.expl === "possible" ? "\u26A0\uFE0F" : "\u2753";
+    const explCls = f.expl === "likely" ? "probe-expl-likely" : f.expl === "possible" ? "probe-expl-possible" : "probe-expl-unlikely";
+    ap(tr,
+      txt("td", explCls, explIcon),
+      txt("td", "", f.srcMatch),
+      txt("td", probeManipCls(f.srcManip), probeManipIcon(f.srcManip)),
+      txt("td", "", f.snkMatch),
+      txt("td", "", f.snkCat),
+      txt("td", "hist-td-mime", probeShortFile(f.file)),
+      txt("td", "hist-td-num", f.dist === 0 ? "\u26A1SAME" : f.dist + "L"),
+      txt("td", "hist-td-num", String(f.score ?? "")),
+    );
+    tr.addEventListener("click", () => probeShowDetail("flow", f));
+    tbody.appendChild(tr);
+  }
+}
+
+function probeRenderRuntime(calls) {
+  const tbody = document.getElementById("probe-rt-tbody");
+  const empty = document.getElementById("probe-rt-empty");
+  tbody.replaceChildren();
+  if (!calls?.length) { empty.classList.remove("hidden"); return; }
+  empty.classList.add("hidden");
+  for (const r of calls) {
+    const tr = document.createElement("tr");
+    ap(tr,
+      txt("td", "hist-td-num", String(r.id)),
+      txt("td", probeSevCls(r.sev), (r.sev || "").toUpperCase()),
+      txt("td", "", r.hook),
+      txt("td", "", (r.value || "").slice(0, 100)),
+    );
+    tbody.appendChild(tr);
+  }
+}
+
+function probeRenderFrameworks(fw) {
+  const c = document.getElementById("probe-fw-pills");
+  c.replaceChildren();
+  if (!fw) return;
+  for (const [name, info] of Object.entries(fw)) {
+    if (!info.detected) continue;
+    const pill = el("span", "probe-fw-pill");
+    pill.textContent = name.charAt(0).toUpperCase() + name.slice(1) + (info.version ? " " + info.version : "");
+    c.appendChild(pill);
+  }
+}
+
+// ── Detail pane (DOM-built, no innerHTML) ────────────────────────────────────
+
+function probeDetailKV(pairs) {
+  const dl = el("dl", "probe-detail-kv");
+  for (const [k, v, cls] of pairs) {
+    const dt = el("dt"); dt.textContent = k;
+    const dd = el("dd"); dd.textContent = v; if (cls) dd.className = cls;
+    ap(dl, dt, dd);
+  }
+  return dl;
+}
+
+function probeDetailCode(label, code) {
+  const sec = el("div", "probe-detail-section");
+  ap(sec, txt("div", "probe-detail-section-title", label));
+  const pre = el("div", "probe-detail-code"); pre.textContent = code;
+  sec.appendChild(pre);
+  return sec;
+}
+
+function probeShowDetail(type, item) {
+  const pane = document.getElementById("probe-detail");
+  const title = document.getElementById("probe-detail-title");
+  const body = document.getElementById("probe-detail-body");
+  body.replaceChildren();
+
+  if (type === "source") {
+    title.textContent = "Source #" + item.id + " \u2014 " + item.match;
+    const sec = el("div", "probe-detail-section");
+    sec.appendChild(probeDetailKV([
+      ["ID", item.id], ["Severity", (item.sev || "").toUpperCase(), probeSevCls(item.sev)],
+      ["Category", item.cat], ["Controllable", probeManipIcon(item.manipulable) + " " + item.manipulable, probeManipCls(item.manipulable)],
+      ["File", item.file], ["Line", item.line], ["Why", item.why],
+    ]));
+    body.appendChild(sec);
+    body.appendChild(probeDetailCode("Match", item.match));
+    if (item.code) body.appendChild(probeDetailCode("Code Context", item.code));
+    if (item.context) body.appendChild(probeDetailCode("Context", item.context));
+    // Nearby sinks
+    if (probeFindingsData?.sinks) {
+      const nearby = probeFindingsData.sinks.filter(s => s.file === item.file && Math.abs(s.line - item.line) <= 10);
+      if (nearby.length) {
+        const nsec = el("div", "probe-detail-section");
+        const ntitle = el("div", "probe-detail-section-title"); ntitle.textContent = "Nearby Sinks (within 10 lines)"; ntitle.style.color = "var(--red)";
+        nsec.appendChild(ntitle);
+        for (const s of nearby) {
+          const d = Math.abs(s.line - item.line);
+          const row = el("div"); row.style.cssText = "padding:2px 0";
+          row.textContent = "[" + s.id + "] L" + s.line + " " + s.match + " (" + s.cat + ") \u2014 " + (d === 0 ? "\u26A1 SAME LINE" : d + " lines away");
+          nsec.appendChild(row);
+        }
+        body.appendChild(nsec);
+      }
+    }
+  } else if (type === "sink") {
+    title.textContent = "Sink #" + item.id + " \u2014 " + item.match;
+    const sec = el("div", "probe-detail-section");
+    sec.appendChild(probeDetailKV([
+      ["ID", item.id], ["Severity", (item.sev || "").toUpperCase(), probeSevCls(item.sev)],
+      ["Category", item.cat], ["File", item.file], ["Line", item.line],
+    ]));
+    body.appendChild(sec);
+    if (item.code) body.appendChild(probeDetailCode("Code", item.code));
+  } else if (type === "flow") {
+    const explIcon = item.expl === "likely" ? "\uD83D\uDD25" : item.expl === "possible" ? "\u26A0\uFE0F" : "\u2753";
+    title.textContent = "Flow \u2014 " + explIcon + " " + (item.expl || "").toUpperCase();
+    const srcSec = el("div", "probe-detail-section");
+    const srcTitle = txt("div", "probe-detail-section-title", "Source \u2192 [" + item.srcId + "] " + item.srcMatch);
+    srcTitle.style.color = "var(--accent)";
+    srcSec.appendChild(srcTitle);
+    srcSec.appendChild(probeDetailKV([
+      ["Line", item.srcLine], ["Controllable", probeManipIcon(item.srcManip) + " " + item.srcManip, probeManipCls(item.srcManip)],
+      ["Why", item.srcWhy],
+    ]));
+    body.appendChild(srcSec);
+    const snkSec = el("div", "probe-detail-section");
+    const snkTitle = txt("div", "probe-detail-section-title", "Sink \u2192 [" + item.snkId + "] " + item.snkMatch);
+    snkTitle.style.color = "var(--red)";
+    snkSec.appendChild(snkTitle);
+    snkSec.appendChild(probeDetailKV([["Line", item.snkLine], ["Category", item.snkCat]]));
+    body.appendChild(snkSec);
+    const metaSec = el("div", "probe-detail-section");
+    metaSec.appendChild(probeDetailKV([
+      ["File", item.file], ["Distance", item.dist === 0 ? "\u26A1 SAME LINE" : item.dist + " lines"],
+      ["Score", item.score ?? "N/A"],
+      ["Exploitability", explIcon + " " + (item.expl || "").toUpperCase(),
+        item.expl === "likely" ? "probe-expl-likely" : item.expl === "possible" ? "probe-expl-possible" : ""],
+    ]));
+    body.appendChild(metaSec);
+  }
+  pane.classList.remove("hidden");
+}
+
+function probeCloseDetail() { document.getElementById("probe-detail").classList.add("hidden"); }
+
+// ── Sub-tab switching ────────────────────────────────────────────────────────
+
+function probeSwitchSub(name) {
+  document.querySelectorAll(".probe-sub-bar .sub-tab").forEach(t => t.classList.toggle("active", t.dataset.probesub === name));
+  document.querySelectorAll(".probe-sub-panel").forEach(p => {
+    p.classList.toggle("active", p.id === "probe-" + name);
+    p.classList.toggle("hidden", p.id !== "probe-" + name);
+  });
+}
+
+function probeSwitchFind(name) {
+  probeCloseDetail();
+  document.querySelectorAll(".probe-findings-bar .sub-tab").forEach(t => t.classList.toggle("active", t.dataset.findtab === name));
+  document.querySelectorAll(".probe-find-panel").forEach(p => {
+    p.classList.toggle("active", p.id === "probe-find-" + name);
+    p.classList.toggle("hidden", p.id !== "probe-find-" + name);
+  });
+}
+
+// ── Console ──────────────────────────────────────────────────────────────────
+
+function probeRenderLog(entries) {
+  const container = document.getElementById("probe-console");
+  const autoScroll = document.getElementById("probe-autoscroll").checked;
+  const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 30;
+  for (const entry of entries) {
+    if (entry.type === "clear") { container.replaceChildren(); continue; }
+    if (entry.type === "groupEnd") continue;
+    const div = el("div");
+    if (entry.type === "table") {
+      div.className = "probe-line probe-line-table";
+      try {
+        const data = JSON.parse(entry.text);
+        if (typeof data === "object" && data !== null) {
+          const lines = [];
+          if (Array.isArray(data)) {
+            for (const row of data) { lines.push(typeof row === "object" && row !== null ? Object.entries(row).map(([k,v]) => k + ": " + (v ?? "")).join("  |  ") : String(row)); }
+          } else { for (const [k, v] of Object.entries(data)) lines.push("  " + k + ": " + v); }
+          div.textContent = lines.join("\n");
+        } else { div.textContent = entry.text; }
+      } catch { div.textContent = entry.text; }
+      container.appendChild(div); continue;
+    }
+    div.className = "probe-line" + (entry.type === "warn" ? " probe-line-warn" : "") + (entry.type === "group" ? " probe-line-group" : "");
+    if (entry.styles?.length > 0 && entry.text.includes("\x00STYLE\x00")) {
+      const parts = entry.text.split("\x00STYLE\x00");
+      for (let i = 0; i < parts.length; i++) {
+        if (!parts[i]) continue;
+        const span = el("span", "probe-s"); span.textContent = parts[i];
+        if (i > 0 && i - 1 < entry.styles.length) {
+          const style = entry.styles[i - 1];
+          if (style) {
+            const cm = style.match(/color\s*:\s*([^;]+)/), wm = style.match(/font-weight\s*:\s*([^;]+)/), sm = style.match(/font-size\s*:\s*([^;]+)/);
+            if (cm) span.style.color = cm[1].trim(); if (wm) span.style.fontWeight = wm[1].trim(); if (sm) span.style.fontSize = sm[1].trim();
+          }
+        }
+        div.appendChild(span);
+      }
+    } else { div.textContent = entry.text; }
+    container.appendChild(div);
+  }
+  if (autoScroll && wasAtBottom) container.scrollTop = container.scrollHeight;
+  if (container.children.length > 0) document.getElementById("probe-empty").classList.add("hidden");
+}
+
+function probeClearConsole() { document.getElementById("probe-console").replaceChildren(); probeLogFrom = 0; }
+
+function probeClearAll() {
+  probeStopPoll();
+  probeCmd("clear"); probeClearConsole();
+  probeInjected = false; probeFindingsData = null;
+  probePrevTotal = -1; probeStableCount = 0;
+  probeUpdateStatus("idle");
+  document.getElementById("probe-stats").classList.add("hidden");
+  document.getElementById("probe-rescan").disabled = true;
+  setBadge("bdg-probe", 0);
+  ["probe-src-tbody","probe-snk-tbody","probe-flw-tbody","probe-rt-tbody"].forEach(id => document.getElementById(id).replaceChildren());
+  ["probe-src-empty","probe-snk-empty","probe-flw-empty","probe-rt-empty"].forEach(id => document.getElementById(id).classList.remove("hidden"));
+  document.getElementById("probe-fw-pills").replaceChildren();
+  document.getElementById("probe-empty").classList.remove("hidden");
+  probeCloseDetail();
 }
 
 // ═══════════════════════════ DECODER ══════════════════════════════════════════
@@ -1863,6 +2263,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     closeHistDetail();
   });
+  document.getElementById("hist-detail-open").addEventListener("click", () => {
+    if (histDetailEntry?.url) chrome.tabs.create({ url: histDetailEntry.url });
+  });
 
   // History detail sub-tab switching (request and response sides)
   document.getElementById("hist-detail").addEventListener("click", e => {
@@ -2126,6 +2529,47 @@ document.addEventListener("DOMContentLoaded", () => {
     settings = { ...DEFAULT_SETTINGS };
     loadSettingsUI();
     saveSettings();
+  });
+
+  // ── Probe tab ───────────────────────────────────────────────────────────────
+  document.getElementById("probe-scan").addEventListener("click", probeScan);
+  document.getElementById("probe-rescan").addEventListener("click", () => { probeCmd("scan"); probePrevTotal = -1; probeStableCount = 0; });
+  document.getElementById("probe-export").addEventListener("click", () => probeCmd("export"));
+  document.getElementById("probe-clear").addEventListener("click", probeClearAll);
+  document.getElementById("probe-console-clear").addEventListener("click", probeClearConsole);
+  document.getElementById("probe-detail-close").addEventListener("click", probeCloseDetail);
+
+  // Sub-tab switching
+  document.querySelectorAll(".probe-sub-bar .sub-tab[data-probesub]").forEach(t =>
+    t.addEventListener("click", () => probeSwitchSub(t.dataset.probesub))
+  );
+  document.querySelectorAll(".probe-findings-bar .sub-tab[data-findtab]").forEach(t =>
+    t.addEventListener("click", () => probeSwitchFind(t.dataset.findtab))
+  );
+
+  // Command buttons
+  document.querySelectorAll(".probe-btn[data-cmd]").forEach(btn =>
+    btn.addEventListener("click", () => probeCmd(btn.dataset.cmd))
+  );
+
+  // Toggles
+  const probeToggleMap = [
+    ["probe-autofill", "probeAutofill", "autofill.toggle"],
+    ["probe-csti", "probeCsti", "csti.toggle"],
+    ["probe-ssti", "probeSsti", "ssti.toggle"],
+    ["probe-protopoll", "probeProtoPollution", "protopollution.toggle"],
+  ];
+  for (const [elId, storageKey, cmd] of probeToggleMap) {
+    document.getElementById(elId).addEventListener("change", e => {
+      chrome.storage.local.set({ [storageKey]: e.target.checked });
+      probeCmd(cmd, e.target.checked);
+    });
+  }
+  chrome.storage.local.get(["probeAutofill", "probeCsti", "probeSsti", "probeProtoPollution"], r => {
+    if (r.probeAutofill) document.getElementById("probe-autofill").checked = true;
+    if (r.probeCsti) document.getElementById("probe-csti").checked = true;
+    if (r.probeSsti) document.getElementById("probe-ssti").checked = true;
+    if (r.probeProtoPollution) document.getElementById("probe-protopoll").checked = true;
   });
 
   // Boot

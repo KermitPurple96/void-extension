@@ -350,10 +350,11 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === "loading") {
     const t = tabs.get(tabId);
     if (t) { t.endpoints = []; t.technologies = []; t.headers = {}; t.pending = {}; }
+    probeInjectedTabs.delete(tabId);
   }
 });
 
-chrome.tabs.onRemoved.addListener(id => tabs.delete(id));
+chrome.tabs.onRemoved.addListener(id => { tabs.delete(id); probeInjectedTabs.delete(id); });
 
 // ── Message handler ───────────────────────────────────────────────────────────
 
@@ -363,7 +364,96 @@ const ALLOWED = new Set([
   "FORWARD","DROP","SEND_REQUEST",
   "GET_DATA","GET_INTERCEPTED","GET_HISTORY","CLEAR_HISTORY","REPORT","CLEAR",
   "LOOKUP","CRAWL_START","CRAWL_STOP","UPDATE_SETTINGS","GET_COOKIES",
+  "PROBE_INJECT","PROBE_CMD","PROBE_STATUS","PROBE_FINDINGS",
 ]);
+
+// ── Probe (DOM XSS Hunter) ─────────────────────────────────────────────────
+const PROBE_SCRIPTS = [
+  'probe/config.js', 'probe/utils.js', 'probe/highlighter.js',
+  'probe/scanner.js', 'probe/flows.js', 'probe/hooks.js',
+  'probe/probe.js', 'probe/fuzzer-helpers.js', 'probe/fuzzer-core.js',
+  'probe/fuzzer-tools.js', 'probe/fuzzer-autofill.js',
+  'probe/frameworks.js', 'probe/reporter.js', 'probe/main.js',
+];
+const probeInjectedTabs = new Set();
+
+// Shared console hook function (runs in MAIN world)
+const PROBE_CONSOLE_HOOK = () => {
+  if (window.__probeLog) return;
+  window.__probeLog = [];
+  window.__probeLogIdx = 0;
+  const origLog = console.log.bind(console);
+  const origInfo = console.info.bind(console);
+  const origWarn = console.warn.bind(console);
+  const origGroup = console.group.bind(console);
+  const origGroupEnd = console.groupEnd.bind(console);
+  const origTable = console.table.bind(console);
+  const origClear = console.clear.bind(console);
+
+  function stripC(args) {
+    if (!args.length) return { text: "", styles: [] };
+    const first = args[0];
+    if (typeof first !== "string") {
+      return { text: args.map(a => typeof a === "object" ? JSON.stringify(a, null, 2) : String(a)).join(" "), styles: [] };
+    }
+    const styles = [];
+    let si = 1;
+    const text = first.replace(/%c/g, () => {
+      const style = si < args.length ? String(args[si]) : "";
+      si++;
+      styles.push(style);
+      return "\x00STYLE\x00";
+    });
+    return { text, styles };
+  }
+
+  function capture(type, args) {
+    const { text, styles } = stripC(args);
+    window.__probeLog.push({ id: window.__probeLogIdx++, type, text, styles, ts: Date.now() });
+    if (window.__probeLog.length > 2000) window.__probeLog.splice(0, 500);
+  }
+
+  console.log = function(...a) { capture("log", a); return origLog(...a); };
+  console.info = function(...a) { capture("info", a); return origInfo(...a); };
+  console.warn = function(...a) { capture("warn", a); return origWarn(...a); };
+  console.group = function(...a) { capture("group", a); return origGroup(...a); };
+  console.groupEnd = function(...a) { capture("groupEnd", a); return origGroupEnd(...a); };
+  console.table = function(data, ...rest) {
+    try {
+      const text = typeof data === "object" ? JSON.stringify(data, null, 2) : String(data);
+      window.__probeLog.push({ id: window.__probeLogIdx++, type: "table", text, styles: [], ts: Date.now() });
+    } catch {}
+    return origTable(data, ...rest);
+  };
+  console.clear = function() {
+    window.__probeLog.push({ id: window.__probeLogIdx++, type: "clear", text: "", styles: [], ts: Date.now() });
+    return origClear();
+  };
+};
+
+// Shared script injection function (runs in ISOLATED world, creates <script> tags in MAIN world)
+const PROBE_INJECT_SCRIPTS_FN = (urls) => {
+  return new Promise((resolve) => {
+    let i = 0;
+    function next() {
+      if (i >= urls.length) { resolve(); return; }
+      const s = document.createElement("script");
+      s.src = urls[i];
+      s.onload = () => { s.remove(); i++; next(); };
+      s.onerror = () => { s.remove(); i++; next(); };
+      (document.head || document.documentElement).appendChild(s);
+    }
+    next();
+  });
+};
+
+// Bootstrap: install console hook + inject scripts
+async function probeBootstrap(tabId) {
+  await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", func: PROBE_CONSOLE_HOOK });
+  const scriptUrls = PROBE_SCRIPTS.map(f => chrome.runtime.getURL(f));
+  await chrome.scripting.executeScript({ target: { tabId }, func: PROBE_INJECT_SCRIPTS_FN, args: [scriptUrls] });
+  probeInjectedTabs.add(tabId);
+}
 
 // ── Crawler ────────────────────────────────────────────────────────────────
 let crawlAbortCtrl = null;
@@ -1053,6 +1143,166 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (crawlAbortCtrl) crawlAbortCtrl.abort();
       sendResponse({ ok: true });
       break;
+    }
+
+    // ── Probe: inject DOM XSS Hunter scripts ─────────────────────────────────
+    case "PROBE_INJECT": {
+      if (!tabId) { sendResponse({ ok: false, error: "no tabId" }); break; }
+      (async () => {
+        try {
+          await probeBootstrap(tabId);
+
+          // Apply saved toggle settings
+          const { probeAutofill, probeCsti, probeSsti, probeProtoPollution } =
+            await chrome.storage.local.get(["probeAutofill", "probeCsti", "probeSsti", "probeProtoPollution"]);
+          const toggleCmds = [];
+          if (probeAutofill)      toggleCmds.push("autofill.toggle");
+          if (probeCsti)          toggleCmds.push("csti.toggle");
+          if (probeSsti)          toggleCmds.push("ssti.toggle");
+          if (probeProtoPollution) toggleCmds.push("protopollution.toggle");
+
+          for (const cmd of toggleCmds) {
+            await chrome.scripting.executeScript({
+              target: { tabId }, world: "MAIN",
+              func: (c) => { window.postMessage({ __domxss_cmd: true, command: c, args: true }, "*"); },
+              args: [cmd],
+            });
+          }
+
+          sendResponse({ ok: true });
+        } catch (error) {
+          sendResponse({ ok: false, error: error.message });
+        }
+      })();
+      return true;
+    }
+
+    // ── Probe: dispatch command ──────────────────────────────────────────────
+    case "PROBE_CMD": {
+      if (!tabId) { sendResponse({ ok: false, error: "no tabId" }); break; }
+      const { command: probeCommand, args: probeArgs } = msg;
+      (async () => {
+        try {
+          if (!probeInjectedTabs.has(tabId)) await probeBootstrap(tabId);
+
+          await chrome.scripting.executeScript({
+            target: { tabId }, world: "MAIN",
+            func: (cmd, cmdArgs) => {
+              window.postMessage({ __domxss_cmd: true, command: cmd, args: cmdArgs }, "*");
+            },
+            args: [probeCommand, probeArgs ?? null],
+          });
+          sendResponse({ ok: true });
+        } catch (error) {
+          sendResponse({ ok: false, error: error.message });
+        }
+      })();
+      return true;
+    }
+
+    // ── Probe: check injection status ────────────────────────────────────────
+    case "PROBE_STATUS": {
+      if (!tabId) { sendResponse({ injected: false }); break; }
+      (async () => {
+        try {
+          // Read status + log from MAIN world in one call
+          const results = await chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: (fromId) => {
+              // Get findings stats directly from window.domxss
+              let status = { injected: false };
+              if (window.domxss && window.domxss.findings) {
+                const f = window.domxss.findings;
+                status = {
+                  injected: true,
+                  sources: f.sources.length,
+                  sinks: f.sinks.length,
+                  flows: f.flows.length,
+                  runtimeCalls: f.runtimeCalls.length,
+                  likelyFlows: f.flows.filter(fl => fl.exploitability === "likely").length,
+                  possibleFlows: f.flows.filter(fl => fl.exploitability === "possible").length,
+                };
+              }
+              // Get console log entries (id-based to survive splice)
+              const arr = window.__probeLog || [];
+              let log;
+              if (fromId <= 0) { log = arr; }
+              else {
+                let lo = 0;
+                for (lo = 0; lo < arr.length; lo++) { if (arr[lo].id >= fromId) break; }
+                log = arr.slice(lo);
+              }
+              status.log = log;
+              return status;
+            },
+            args: [msg.logFrom || 0],
+          });
+          const status = results[0]?.result || { injected: false, log: [] };
+          sendResponse(status);
+        } catch (error) {
+          sendResponse({ injected: false, error: error.message, log: [] });
+        }
+      })();
+      return true; // async
+    }
+
+    // ── Probe: get full structured findings ──────────────────────────────────
+    case "PROBE_FINDINGS": {
+      if (!tabId) { sendResponse(null); break; }
+      (async () => {
+        try {
+          const results = await chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: () => {
+              if (!window.domxss || !window.domxss.findings) return null;
+              const f = window.domxss.findings;
+              const fw = window.__DOMXSS?.state?.frameworks;
+              return {
+                sources: f.sources.map(s => ({
+                  id: s.id, sev: s.severity, cat: s.category,
+                  file: s.file, line: s.line, match: s.match,
+                  manipulable: s.manipulable, why: s.why || "",
+                  code: (s.code || "").slice(0, 300),
+                  context: (s.context || "").slice(0, 300),
+                  url: s.url || "",
+                })),
+                sinks: f.sinks.map(s => ({
+                  id: s.id, sev: s.severity, cat: s.category,
+                  file: s.file, line: s.line, match: s.match,
+                  code: (s.code || "").slice(0, 300),
+                })),
+                flows: f.flows.map(fl => ({
+                  id: fl.id, expl: fl.exploitability,
+                  srcId: fl.source?.id, srcMatch: fl.source?.match || "",
+                  srcManip: fl.source?.manipulable || "none", srcLine: fl.source?.line,
+                  srcWhy: fl.source?.why || "",
+                  snkId: fl.sink?.id, snkMatch: fl.sink?.match || "",
+                  snkCat: fl.sink?.category || "", snkLine: fl.sink?.line,
+                  file: fl.file, dist: fl.distance, score: fl.combinedScore,
+                })),
+                runtimeCalls: f.runtimeCalls.map(r => ({
+                  id: r.id, sev: r.severity, hook: r.hook,
+                  value: (r.value || r.args || "").slice(0, 200),
+                })),
+                frameworks: fw ? {
+                  angular: { detected: !!fw.angular?.detected, version: fw.angular?.version || null },
+                  jquery: { detected: !!fw.jquery?.detected, version: fw.jquery?.version || null },
+                  vue: { detected: !!fw.vue?.detected, version: fw.vue?.version || null },
+                  react: { detected: !!fw.react?.detected, version: fw.react?.version || null },
+                  alpine: { detected: !!fw.alpine?.detected },
+                  htmx: { detected: !!fw.htmx?.detected },
+                } : null,
+              };
+            },
+          });
+          sendResponse(results[0]?.result || null);
+        } catch {
+          sendResponse(null);
+        }
+      })();
+      return true;
     }
   }
 

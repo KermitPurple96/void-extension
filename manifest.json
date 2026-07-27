@@ -32,6 +32,27 @@
   "content_security_policy": {
     "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src *"
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "probe/config.js",
+        "probe/utils.js",
+        "probe/highlighter.js",
+        "probe/scanner.js",
+        "probe/flows.js",
+        "probe/hooks.js",
+        "probe/probe.js",
+        "probe/fuzzer-helpers.js",
+        "probe/fuzzer-core.js",
+        "probe/fuzzer-tools.js",
+        "probe/fuzzer-autofill.js",
+        "probe/frameworks.js",
+        "probe/reporter.js",
+        "probe/main.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

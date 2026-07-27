@@ -16,7 +16,7 @@
     <button class="tab"        data-tab="history"  >History <span class="bdg" id="bdg-history">0</span></button>
     <button class="tab"        data-tab="repeater" >Repeater</button>
     <button class="tab"        data-tab="intruder" >Intruder</button>
-    <button class="tab"        data-tab="endpoints">Endpoints <span class="bdg" id="bdg-endpoints">0</span></button>
+    <button class="tab"        data-tab="probe"    >Probe <span class="bdg" id="bdg-probe">0</span></button>
     <button class="tab"        data-tab="headers"  >Headers</button>
     <button class="tab"        data-tab="decoder"  >Decoder</button>
     <button class="tab"        data-tab="settings" >Settings</button>
@@ -29,9 +29,10 @@
   <!-- ═══════════════════════════ TARGET ══════════════════════════════════════ -->
   <div id="tab-target" class="tab-panel hidden">
 
-    <!-- Sub-tabs: Site Map | Scope -->
+    <!-- Sub-tabs: Site Map | Endpoints | Scope -->
     <div class="tgt-sub-bar">
       <button class="sub-tab active" data-tgtsub="sitemap">Site Map</button>
+      <button class="sub-tab" data-tgtsub="endpoints">Endpoints <span class="bdg" id="bdg-endpoints">0</span></button>
       <button class="sub-tab" data-tgtsub="scope">Scope</button>
       <div class="tabbar-gap"></div>
       <input id="tgt-filter" type="text" class="tgt-filter-inp" placeholder="Filter URLs…" spellcheck="false" autocomplete="off">
@@ -65,6 +66,32 @@
           <div id="tgt-table-empty" class="empty">Select a node from the tree</div>
         </div>
       </div>
+    </div>
+
+    <!-- Endpoints sub-panel -->
+    <div id="tgt-endpoints" class="tgt-sub-panel hidden">
+      <div class="filter-bar">
+        <input  id="ep-filter" type="text" placeholder="Filter by URL…" spellcheck="false" autocomplete="off">
+        <select id="ep-type"   class="filter-sel">
+          <option value="">All types</option>
+          <option value="api">API</option>
+          <option value="form">Form</option>
+          <option value="script">Script</option>
+          <option value="link">Link</option>
+        </select>
+        <button id="ep-copy-all" class="btn btn-sm btn-ghost">Copy All</button>
+        <button id="ep-crawl"    class="btn btn-sm btn-accent">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+          Crawl
+        </button>
+      </div>
+      <div id="ep-crawl-bar" class="crawl-bar hidden">
+        <div class="crawl-progress-wrap"><div id="ep-crawl-fill" class="crawl-fill" style="width:0%"></div></div>
+        <span id="ep-crawl-status" class="crawl-status-text">Starting…</span>
+        <button id="ep-crawl-stop" class="btn btn-xs btn-danger">Stop</button>
+      </div>
+      <div id="ep-list"   class="req-list"></div>
+      <div id="ep-empty"  class="empty hidden">No endpoints — interact with the page or refresh</div>
     </div>
 
     <!-- Scope sub-panel -->
@@ -206,6 +233,7 @@
         <span id="hist-detail-title" class="hist-detail-title"></span>
         <button id="hist-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
         <button id="hist-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+        <button id="hist-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">↗ Open</button>
       </div>
       <div class="hist-detail-body">
         <!-- Request side -->
@@ -375,30 +403,238 @@
     </div>
   </div>
 
-  <!-- ═══════════════════════════ ENDPOINTS ══════════════════════════════════ -->
-  <div id="tab-endpoints" class="tab-panel hidden">
-    <div class="filter-bar">
-      <input  id="ep-filter" type="text" placeholder="Filter by URL…" spellcheck="false" autocomplete="off">
-      <select id="ep-type"   class="filter-sel">
-        <option value="">All types</option>
-        <option value="api">API</option>
-        <option value="form">Form</option>
-        <option value="script">Script</option>
-        <option value="link">Link</option>
-      </select>
-      <button id="ep-copy-all" class="btn btn-sm btn-ghost">Copy All</button>
-      <button id="ep-crawl"    class="btn btn-sm btn-accent">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-        Crawl
-      </button>
+  <!-- ═══════════════════════════ PROBE (DOM XSS Hunter) ═══════════════════ -->
+  <div id="tab-probe" class="tab-panel hidden">
+
+    <!-- Top toolbar -->
+    <div class="probe-toolbar">
+      <div class="probe-status-row">
+        <span class="dot" id="probe-dot"></span>
+        <span id="probe-label">Ready to scan</span>
+      </div>
+      <button id="probe-scan" class="btn btn-accent">Scan Page</button>
+      <button id="probe-rescan" class="btn btn-sm btn-ghost" disabled>Rescan</button>
+      <button id="probe-export" class="btn btn-sm btn-ghost" title="Export findings as JSON">Export</button>
+      <button id="probe-clear" class="btn btn-sm btn-ghost">Clear</button>
     </div>
-    <div id="ep-crawl-bar" class="crawl-bar hidden">
-      <div class="crawl-progress-wrap"><div id="ep-crawl-fill" class="crawl-fill" style="width:0%"></div></div>
-      <span id="ep-crawl-status" class="crawl-status-text">Starting…</span>
-      <button id="ep-crawl-stop" class="btn btn-xs btn-danger">Stop</button>
+
+    <!-- Stats bar (visible after scan) -->
+    <div id="probe-stats" class="probe-stats hidden">
+      <div class="probe-stat" title="User-controllable inputs (URL params, DOM, etc.)">
+        <span class="probe-stat-val" id="probe-sources">0</span>
+        <span class="probe-stat-lbl">Sources</span>
+      </div>
+      <div class="probe-stat" title="Dangerous functions (innerHTML, eval, etc.)">
+        <span class="probe-stat-val" id="probe-sinks">0</span>
+        <span class="probe-stat-lbl">Sinks</span>
+      </div>
+      <div class="probe-stat" title="Source-to-sink data flows">
+        <span class="probe-stat-val" id="probe-flows">0</span>
+        <span class="probe-stat-lbl">Flows</span>
+      </div>
+      <div class="probe-stat probe-stat-hot" title="Flows likely exploitable for XSS">
+        <span class="probe-stat-val" id="probe-likely">0</span>
+        <span class="probe-stat-lbl">Likely XSS</span>
+      </div>
+      <div class="probe-stat" title="Dangerous calls detected at runtime">
+        <span class="probe-stat-val" id="probe-runtime">0</span>
+        <span class="probe-stat-lbl">Runtime</span>
+      </div>
+      <div id="probe-fw-pills" class="probe-fw-pills"></div>
     </div>
-    <div id="ep-list"   class="req-list"></div>
-    <div id="ep-empty"  class="empty hidden">No endpoints — interact with the page or refresh</div>
+
+    <!-- Sub-tabs: Findings | Active Testing -->
+    <div class="probe-sub-bar">
+      <button class="sub-tab active" data-probesub="findings">Findings</button>
+      <button class="sub-tab" data-probesub="testing">Active Testing</button>
+    </div>
+
+    <!-- ════════ FINDINGS SUB-PANEL ════════ -->
+    <div id="probe-findings" class="probe-sub-panel active">
+
+      <!-- Findings inner tabs -->
+      <div class="probe-findings-bar">
+        <button class="sub-tab active" data-findtab="sources">Sources <span class="bdg" id="bdg-p-src">0</span></button>
+        <button class="sub-tab" data-findtab="sinks">Sinks <span class="bdg" id="bdg-p-snk">0</span></button>
+        <button class="sub-tab" data-findtab="flows">Flows <span class="bdg" id="bdg-p-flw">0</span></button>
+        <button class="sub-tab" data-findtab="runtime">Runtime <span class="bdg" id="bdg-p-rt">0</span></button>
+      </div>
+
+      <!-- Sources table -->
+      <div id="probe-find-sources" class="probe-find-panel active">
+        <div class="hist-table-wrap">
+          <table class="hist-table">
+            <thead><tr>
+              <th style="width:30px">#</th>
+              <th style="width:24px" title="Controllable by attacker">Ctrl</th>
+              <th style="width:44px">Sev</th>
+              <th style="width:130px">Category</th>
+              <th>Match</th>
+              <th style="width:180px">File</th>
+              <th style="width:40px">Line</th>
+            </tr></thead>
+            <tbody id="probe-src-tbody"></tbody>
+          </table>
+        </div>
+        <div id="probe-src-empty" class="empty">No sources found yet</div>
+      </div>
+
+      <!-- Sinks table -->
+      <div id="probe-find-sinks" class="probe-find-panel hidden">
+        <div class="hist-table-wrap">
+          <table class="hist-table">
+            <thead><tr>
+              <th style="width:30px">#</th>
+              <th style="width:44px">Sev</th>
+              <th style="width:130px">Category</th>
+              <th>Match</th>
+              <th style="width:180px">File</th>
+              <th style="width:40px">Line</th>
+            </tr></thead>
+            <tbody id="probe-snk-tbody"></tbody>
+          </table>
+        </div>
+        <div id="probe-snk-empty" class="empty">No sinks found yet</div>
+      </div>
+
+      <!-- Flows table -->
+      <div id="probe-find-flows" class="probe-find-panel hidden">
+        <div class="hist-table-wrap">
+          <table class="hist-table">
+            <thead><tr>
+              <th style="width:30px">Risk</th>
+              <th style="width:160px">Source</th>
+              <th style="width:24px" title="Controllable">Ctrl</th>
+              <th style="width:160px">Sink</th>
+              <th style="width:100px">Sink Category</th>
+              <th style="width:180px">File</th>
+              <th style="width:44px">Dist</th>
+              <th style="width:40px">Score</th>
+            </tr></thead>
+            <tbody id="probe-flw-tbody"></tbody>
+          </table>
+        </div>
+        <div id="probe-flw-empty" class="empty">No source-to-sink flows found yet</div>
+      </div>
+
+      <!-- Runtime calls table -->
+      <div id="probe-find-runtime" class="probe-find-panel hidden">
+        <div class="hist-table-wrap">
+          <table class="hist-table">
+            <thead><tr>
+              <th style="width:30px">#</th>
+              <th style="width:44px">Sev</th>
+              <th style="width:130px">Hook</th>
+              <th>Value</th>
+            </tr></thead>
+            <tbody id="probe-rt-tbody"></tbody>
+          </table>
+        </div>
+        <div id="probe-rt-empty" class="empty">No runtime calls captured yet</div>
+      </div>
+
+      <!-- Detail pane (overlays table when a row is clicked) -->
+      <div id="probe-detail" class="probe-detail hidden">
+        <div class="probe-detail-topbar">
+          <button id="probe-detail-close" class="btn btn-sm btn-ghost">&larr; Back</button>
+          <span id="probe-detail-title" class="probe-detail-title"></span>
+        </div>
+        <div id="probe-detail-body" class="probe-detail-body"></div>
+      </div>
+
+    </div>
+
+    <!-- ════════ ACTIVE TESTING SUB-PANEL ════════ -->
+    <div id="probe-testing" class="probe-sub-panel hidden">
+
+      <div class="probe-warn-bar">
+        These tools actively inject payloads into the page. Only use on targets you are authorized to test.
+      </div>
+
+      <!-- Toggles -->
+      <div class="probe-toggles">
+        <label class="probe-toggle" title="Auto-fill forms with XSS payloads for stored XSS testing"><input type="checkbox" id="probe-autofill"> Auto Fill Forms</label>
+        <label class="probe-toggle" title="Client-Side Template Injection testing (AngularJS/Vue)"><input type="checkbox" id="probe-csti"> CSTI</label>
+        <label class="probe-toggle" title="Server-Side Template Injection detection"><input type="checkbox" id="probe-ssti"> SSTI</label>
+        <label class="probe-toggle" title="Scan for prototype pollution gadgets"><input type="checkbox" id="probe-protopoll"> Proto Pollution</label>
+      </div>
+
+      <!-- Testing command groups -->
+      <div class="probe-test-cmds">
+        <div class="probe-cmd-section">
+          <div class="probe-cmd-section-title">Fuzzing &mdash; inject canary strings, detect reflections, try payloads</div>
+          <div class="probe-cmd-row">
+            <button class="btn btn-sm btn-danger probe-btn" data-cmd="fuzz">Auto Fuzz</button>
+            <button class="btn btn-sm btn-danger probe-btn" data-cmd="fuzz.nav">Fuzz URL Params</button>
+            <button class="btn btn-sm btn-danger probe-btn" data-cmd="fuzz.nav.next">Nav Next</button>
+            <button class="btn btn-sm btn-danger probe-btn" data-cmd="fuzz.check">Check Reflections</button>
+          </div>
+        </div>
+        <div class="probe-cmd-section">
+          <div class="probe-cmd-section-title">Bypass Testing &mdash; WAF, CSP, protocol, markup</div>
+          <div class="probe-cmd-row">
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="fuzz.waf">WAF Bypass</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="fuzz.csp">CSP Analysis</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="fuzz.protocol">JS Protocol</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="fuzz.dangling">Dangling Markup</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="fuzz.post">POST Forms</button>
+          </div>
+        </div>
+        <div class="probe-cmd-section">
+          <div class="probe-cmd-section-title">Advanced &mdash; DOM clobbering, mutation XSS, prototype pollution, SSTI</div>
+          <div class="probe-cmd-row">
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="fuzz.clobbering">DOM Clobbering</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="fuzz.mxss">Mutation XSS</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="fuzz.prototype">Proto Pollution</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="fuzz.ssti">SSTI</button>
+          </div>
+        </div>
+        <div class="probe-cmd-section">
+          <div class="probe-cmd-section-title">Canary Probe &mdash; inject test characters to find reflection points</div>
+          <div class="probe-cmd-row">
+            <button class="btn btn-sm btn-danger probe-btn" data-cmd="probe">Inject Canary</button>
+            <button class="btn btn-sm btn-danger probe-btn" data-cmd="probe.go">Navigate with Canary</button>
+            <button class="btn btn-sm btn-danger probe-btn" data-cmd="probe.check">Check Canary</button>
+            <button class="btn btn-sm btn-danger probe-btn" data-cmd="probe.postmessage">PostMessage</button>
+          </div>
+        </div>
+        <div class="probe-cmd-section">
+          <div class="probe-cmd-section-title">Framework-Specific &mdash; test framework template injection</div>
+          <div class="probe-cmd-row">
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="frameworks.angular">AngularJS</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="frameworks.jqueryHash">jQuery Hash</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="frameworks.jquery">jQuery Sinks</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="frameworks.vue">Vue.js</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="frameworks.react">React</button>
+          </div>
+        </div>
+        <div class="probe-cmd-section">
+          <div class="probe-cmd-section-title">Visual &mdash; highlight vulnerable elements on the page</div>
+          <div class="probe-cmd-row">
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="inputs">Highlight Inputs</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="highlight">Highlight Sinks</button>
+            <button class="btn btn-sm btn-ghost probe-btn" data-cmd="unhighlight">Remove Highlights</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Console output (inline in testing tab) -->
+      <div class="probe-console-wrap">
+        <div class="probe-console-bar">
+          <span class="pane-label">CONSOLE OUTPUT</span>
+          <button id="probe-console-clear" class="btn btn-xs btn-ghost">Clear</button>
+          <label class="probe-toggle"><input type="checkbox" id="probe-autoscroll" checked> Auto-scroll</label>
+        </div>
+        <div id="probe-console" class="probe-console"></div>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="probe-empty" class="empty">
+      Click <b>Scan Page</b> to analyze for DOM XSS vulnerabilities.<br>
+      This is a passive static analysis &mdash; no payloads are injected.
+    </div>
+
   </div>
 
   <!-- ═══════════════════════════ HEADERS ════════════════════════════════════ -->
