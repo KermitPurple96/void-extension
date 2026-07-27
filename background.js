@@ -5,6 +5,121 @@
 chrome.alarms.create("keepAlive", { periodInMinutes: 0.4 });
 chrome.alarms.onAlarm.addListener(() => {}); // noop — just wakes the SW
 
+// ── Settings (shared across tabs) ────────────────────────────────────────────
+let voidSettings = {
+  matchReplace: [],
+  autoHeaders: "",
+  proxyEnabled: false, proxyHost: "127.0.0.1", proxyPort: "8080", proxyType: "http",
+  scopeInclude: "", scopeExclude: "",
+  followRedirects: true, timeout: "30000",
+};
+
+// Load settings from storage on SW start
+chrome.storage.local.get("voidSettings", r => {
+  if (r.voidSettings) voidSettings = { ...voidSettings, ...r.voidSettings };
+});
+
+function urlInScope(url) {
+  const inc = (voidSettings.scopeInclude || "").trim();
+  const exc = (voidSettings.scopeExclude || "").trim();
+  if (exc) {
+    const patterns = exc.split("\n").map(p => p.trim()).filter(Boolean);
+    if (patterns.some(p => matchWild(url, p))) return false;
+  }
+  if (inc) {
+    const patterns = inc.split("\n").map(p => p.trim()).filter(Boolean);
+    return patterns.some(p => matchWild(url, p));
+  }
+  return true; // no include = all
+}
+
+function matchWild(str, pattern) {
+  const re = new RegExp("^" + pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$", "i");
+  return re.test(str);
+}
+
+function applyMatchReplace(url, headers, body, direction) {
+  // direction: "req" or "resp"
+  const rules = (voidSettings.matchReplace || []).filter(r => {
+    if (r.enabled === false) return false;
+    if (direction === "req" && !r.type.startsWith("req") && r.type !== "url") return false;
+    if (direction === "resp" && !r.type.startsWith("resp")) return false;
+    if (r.scope && !matchWild(url, r.scope)) return false;
+    return true;
+  });
+
+  let modUrl = url;
+  let modHeaders = { ...headers };
+  let modBody = body;
+
+  for (const rule of rules) {
+    try {
+      if (rule.type === "url") {
+        if (!rule.match) continue;
+        modUrl = modUrl.replace(new RegExp(rule.match, "g"), rule.replace || "");
+      } else if (rule.type === "req-header" || rule.type === "resp-header") {
+        if (!rule.match) {
+          // Empty match = add header. Replace format: "Name: Value"
+          const ci = (rule.replace || "").indexOf(":");
+          if (ci > 0) {
+            modHeaders[rule.replace.slice(0, ci).trim()] = rule.replace.slice(ci + 1).trim();
+          }
+        } else {
+          // Replace in header values
+          const re = new RegExp(rule.match, "g");
+          const newHdrs = {};
+          for (const [k, v] of Object.entries(modHeaders)) {
+            const newK = k.replace(re, rule.replace || "");
+            const newV = v.replace(re, rule.replace || "");
+            newHdrs[newK] = newV;
+          }
+          modHeaders = newHdrs;
+        }
+      } else if (rule.type === "req-body" || rule.type === "resp-body") {
+        if (rule.match && modBody) {
+          modBody = modBody.replace(new RegExp(rule.match, "g"), rule.replace || "");
+        }
+      }
+    } catch { /* invalid regex — skip */ }
+  }
+
+  return { url: modUrl, headers: modHeaders, body: modBody };
+}
+
+function parseAutoHeaders() {
+  const hdrs = {};
+  (voidSettings.autoHeaders || "").split("\n").forEach(line => {
+    const i = line.indexOf(":");
+    if (i > 0) hdrs[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  });
+  return hdrs;
+}
+
+function fetchResponseBody(tabId, requestId, tabState, histIdx, retries = 3) {
+  chrome.debugger.sendCommand(
+    { tabId }, "Network.getResponseBody",
+    { requestId },
+    (result) => {
+      if (chrome.runtime.lastError || !result) {
+        // Retry after a short delay — body might not be available yet
+        if (retries > 0) {
+          setTimeout(() => fetchResponseBody(tabId, requestId, tabState, histIdx, retries - 1), 200);
+        }
+        return;
+      }
+      if (result.base64Encoded) {
+        try {
+          tabState.history[histIdx].respBody = atob(result.body);
+        } catch {
+          tabState.history[histIdx].respBody = "(binary data, " + (result.body?.length || 0) + " bytes)";
+        }
+      } else {
+        tabState.history[histIdx].respBody = result.body || "";
+      }
+    }
+  );
+}
+
 // ── Per-tab state (in-memory; cleared on SW restart) ─────────────────────────
 const tabs = new Map();
 
@@ -17,6 +132,8 @@ function getTab(id) {
       endpoints:    [],
       technologies: [],
       headers:      {},   // security response headers
+      history:      [],   // HTTP history entries
+      historyMap:   {},   // Network.requestId → history index (for matching responses)
     });
   }
   return tabs.get(id);
@@ -25,24 +142,102 @@ function getTab(id) {
 // ── Debugger events ───────────────────────────────────────────────────────────
 
 chrome.debugger.onEvent.addListener((src, method, params) => {
-  const t = tabs.get(src.tabId);
+  const t = getTab(src.tabId);
   if (!t) return;
 
+  // ── HTTP History: capture requests ──────────────────────────────────────
+  if (method === "Network.requestWillBeSent") {
+    const req = params.request || {};
+    const entry = {
+      id:           params.requestId,
+      method:       req.method || "GET",
+      url:          req.url || "",
+      host:         "",
+      path:         "",
+      headers:      req.headers || {},
+      body:         req.postData || "",
+      status:       null,
+      statusText:   "",
+      respHeaders:  {},
+      length:       0,
+      mimeType:     "",
+      time:         Date.now(),
+      elapsed:      0,
+      resourceType: params.type || "other",
+    };
+    try {
+      const u = new URL(entry.url);
+      entry.host = u.host;
+      entry.path = u.pathname + u.search;
+    } catch {}
+    t.history.push(entry);
+    t.historyMap[params.requestId] = t.history.length - 1;
+  }
+
+  // ── HTTP History: capture responses ────────────────────────────────────
+  if (method === "Network.responseReceived") {
+    const idx = t.historyMap[params.requestId];
+    if (idx !== undefined && t.history[idx]) {
+      const resp = params.response || {};
+      t.history[idx].status      = resp.status;
+      t.history[idx].statusText  = resp.statusText || "";
+      t.history[idx].mimeType    = resp.mimeType || "";
+      t.history[idx].length      = resp.encodedDataLength || 0;
+      t.history[idx].elapsed     = Date.now() - t.history[idx].time;
+      t.history[idx].respHeaders = resp.headers || {};
+    }
+  }
+
+  // ── HTTP History: capture response body when loading finishes ────────
+  if (method === "Network.loadingFinished") {
+    const reqId = params.requestId;
+    const idx = t.historyMap[reqId];
+    if (idx !== undefined && t.history[idx] && !t.history[idx].respBody) {
+      fetchResponseBody(src.tabId, reqId, t, idx);
+    }
+  }
+
+  // ── Also try on dataReceived for streaming responses ────────────────
+  if (method === "Network.dataReceived") {
+    const idx = t.historyMap[params.requestId];
+    if (idx !== undefined && t.history[idx]) {
+      t.history[idx].length = (t.history[idx].length || 0) + (params.dataLength || 0);
+    }
+  }
+
   if (method === "Fetch.requestPaused") {
+    const reqUrl = params.request.url;
+    const reqHeaders = params.request.headers || {};
+    const reqBody = params.request.postData || "";
+
+    // Apply Match & Replace + Auto Headers even when not intercepting
+    const autoHdrs = parseAutoHeaders();
+    const merged = { ...reqHeaders, ...autoHdrs };
+    const mr = applyMatchReplace(reqUrl, merged, reqBody, "req");
+
     if (!t.intercepting) {
-      // auto-forward when intercept is off
+      // auto-forward with modifications applied
+      const opts = { requestId: params.requestId };
+      if (mr.url !== reqUrl) opts.url = mr.url;
+      const hdrEntries = Object.entries(mr.headers);
+      const origEntries = Object.entries(reqHeaders);
+      if (hdrEntries.length !== origEntries.length || JSON.stringify(mr.headers) !== JSON.stringify(reqHeaders)) {
+        opts.headers = hdrEntries.map(([name, value]) => ({ name, value: String(value) }));
+      }
+      if (mr.body !== reqBody && mr.body) {
+        try { opts.postData = btoa(unescape(encodeURIComponent(mr.body))); } catch {}
+      }
       chrome.debugger.sendCommand(
-        { tabId: src.tabId }, "Fetch.continueRequest",
-        { requestId: params.requestId }, () => {}
+        { tabId: src.tabId }, "Fetch.continueRequest", opts, () => {}
       );
       return;
     }
     t.pending[params.requestId] = {
       requestId:    params.requestId,
-      url:          params.request.url,
+      url:          mr.url,
       method:       params.request.method,
-      headers:      params.request.headers || {},
-      body:         params.request.postData || "",
+      headers:      mr.headers,
+      body:         mr.body,
       resourceType: params.resourceType || "other",
     };
   }
@@ -166,8 +361,8 @@ const ALLOWED = new Set([
   "PING",
   "ATTACH","DETACH","INTERCEPT_ON","INTERCEPT_OFF",
   "FORWARD","DROP","SEND_REQUEST",
-  "GET_DATA","GET_INTERCEPTED","REPORT","CLEAR",
-  "LOOKUP","CRAWL_START","CRAWL_STOP",
+  "GET_DATA","GET_INTERCEPTED","GET_HISTORY","CLEAR_HISTORY","REPORT","CLEAR",
+  "LOOKUP","CRAWL_START","CRAWL_STOP","UPDATE_SETTINGS","GET_COOKIES",
 ]);
 
 // ── Crawler ────────────────────────────────────────────────────────────────
@@ -350,6 +545,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
     }
 
+    case "GET_HISTORY": {
+      if (!tabId) { sendResponse({ history: [] }); break; }
+      const t = getTab(tabId);
+      sendResponse({ history: t.history });
+      break;
+    }
+
+    case "CLEAR_HISTORY": {
+      if (!tabId) break;
+      const t = getTab(tabId);
+      t.history = []; t.historyMap = {};
+      sendResponse({ ok: true });
+      break;
+    }
+
+    case "GET_COOKIES": {
+      const url = msg.url;
+      if (!url) { sendResponse({ cookies: "" }); break; }
+      chrome.cookies.getAll({ url }, cookies => {
+        const cookieStr = (cookies || []).map(c => `${c.name}=${c.value}`).join("; ");
+        sendResponse({ cookies: cookieStr });
+      });
+      return true; // async
+    }
+
+    case "UPDATE_SETTINGS": {
+      if (msg.settings) voidSettings = { ...voidSettings, ...msg.settings };
+      sendResponse({ ok: true });
+      break;
+    }
+
     case "CLEAR": {
       if (!tabId) break;
       const t = getTab(tabId);
@@ -467,13 +693,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // ── Repeater: send HTTP request ──────────────────────────────────────────
     case "SEND_REQUEST": {
-      const { url, method, rawHeaders, body } = msg;
+      const { url, method, rawHeaders, body, targetOverride } = msg;
 
       // Validate URL
       let safeUrl;
+      let originalHost = "";
       try {
         const u = new URL(url);
         if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("bad protocol");
+        originalHost = u.host;
+
+        // Target override: rewrite URL to connect to different host/IP
+        if (targetOverride?.host) {
+          const tls = targetOverride.tls !== false;
+          const port = targetOverride.port || (tls ? "443" : "80");
+          u.protocol = tls ? "https:" : "http:";
+          u.hostname = targetOverride.host;
+          u.port = port;
+        }
         safeUrl = u.href;
       } catch {
         sendResponse({ ok: false, error: "Invalid URL — must start with http:// or https://" });
@@ -488,21 +725,41 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (i > 0) {
             const k = line.slice(0, i).trim();
             const v = line.slice(i + 1).trim();
-            // Block forbidden headers that would expose the extension
-            if (k && !/^(host|content-length)$/i.test(k)) headers[k] = v;
+            // Allow Host header when target override is active
+            if (k && !/^(content-length)$/i.test(k)) {
+              if (/^host$/i.test(k) && !targetOverride?.host) return; // skip Host unless target override
+              headers[k] = v;
+            }
           }
         });
       }
 
-      const fetchOpts = { method: method || "GET", headers };
-      if (body && !["GET","HEAD"].includes((method || "GET").toUpperCase())) {
-        fetchOpts.body = body;
+      // When target override is set, inject Host header with original hostname
+      if (targetOverride?.host && originalHost && !headers["Host"] && !headers["host"]) {
+        headers["Host"] = originalHost;
       }
+
+      // Apply Auto Headers + Match & Replace
+      const autoHdrs = parseAutoHeaders();
+      const merged = { ...headers, ...autoHdrs };
+      const mr = applyMatchReplace(safeUrl, merged, body || "", "req");
+      safeUrl = mr.url;
+
+      const fetchOpts = { method: method || "GET", headers: mr.headers };
+      if (mr.body && !["GET","HEAD"].includes((method || "GET").toUpperCase())) {
+        fetchOpts.body = mr.body;
+      }
+
+      const timeout = parseInt(voidSettings.timeout) || 30000;
+      const redirect = voidSettings.followRedirects ? "follow" : "manual";
 
       (async () => {
         try {
           const start = Date.now();
-          const resp  = await fetch(safeUrl, { ...fetchOpts, redirect: "follow" });
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeout);
+          const resp  = await fetch(safeUrl, { ...fetchOpts, redirect, signal: controller.signal });
+          clearTimeout(timer);
           const elapsed = Date.now() - start;
           const respHdrs = {};
           resp.headers.forEach((v, k) => { respHdrs[k] = v; });

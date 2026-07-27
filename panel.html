@@ -11,15 +11,85 @@
 
   <!-- ── Tab bar ── -->
   <div class="tabbar">
+    <button class="tab"        data-tab="target"   >Target</button>
     <button class="tab active" data-tab="intercept">Intercept <span class="bdg hidden" id="bdg-intercept">0</span></button>
+    <button class="tab"        data-tab="history"  >History <span class="bdg" id="bdg-history">0</span></button>
     <button class="tab"        data-tab="repeater" >Repeater</button>
+    <button class="tab"        data-tab="intruder" >Intruder</button>
     <button class="tab"        data-tab="endpoints">Endpoints <span class="bdg" id="bdg-endpoints">0</span></button>
-    <button class="tab"        data-tab="tech"     >Tech <span class="bdg" id="bdg-tech">0</span></button>
     <button class="tab"        data-tab="headers"  >Headers</button>
+    <button class="tab"        data-tab="decoder"  >Decoder</button>
+    <button class="tab"        data-tab="settings" >Settings</button>
     <div class="tabbar-gap"></div>
     <span id="site-host" class="site-host">—</span>
     <button class="ico-btn" id="btn-refresh" title="Refresh recon data">↻</button>
     <button class="ico-btn" id="btn-export"  title="Export JSON">⬇</button>
+  </div>
+
+  <!-- ═══════════════════════════ TARGET ══════════════════════════════════════ -->
+  <div id="tab-target" class="tab-panel hidden">
+
+    <!-- Sub-tabs: Site Map | Scope -->
+    <div class="tgt-sub-bar">
+      <button class="sub-tab active" data-tgtsub="sitemap">Site Map</button>
+      <button class="sub-tab" data-tgtsub="scope">Scope</button>
+      <div class="tabbar-gap"></div>
+      <input id="tgt-filter" type="text" class="tgt-filter-inp" placeholder="Filter URLs…" spellcheck="false" autocomplete="off">
+      <label class="rep-autocookie"><input type="checkbox" id="tgt-inscope-only"> In-scope only</label>
+    </div>
+
+    <!-- Site Map sub-panel -->
+    <div id="tgt-sitemap" class="tgt-sub-panel active">
+      <div class="tgt-layout">
+        <!-- Left: tree -->
+        <div class="tgt-tree-pane" id="tgt-tree-pane">
+          <div id="tgt-tree" class="tgt-tree"></div>
+        </div>
+        <!-- Resize handle -->
+        <div class="tgt-resizer" id="tgt-resizer"></div>
+        <!-- Right: URL table for selected node -->
+        <div class="tgt-table-pane">
+          <table class="hist-table">
+            <thead>
+              <tr>
+                <th style="width:56px">Method</th>
+                <th>URL</th>
+                <th style="width:48px">Status</th>
+                <th style="width:64px">Length</th>
+                <th style="width:48px">Type</th>
+                <th style="width:90px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tgt-table-body"></tbody>
+          </table>
+          <div id="tgt-table-empty" class="empty">Select a node from the tree</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scope sub-panel -->
+    <div id="tgt-scope" class="tgt-sub-panel hidden">
+      <div class="settings-scroll">
+        <div class="settings-section">
+          <div class="settings-section-title">Target Scope</div>
+          <div class="settings-section-desc">
+            Define which hosts/URLs are in scope. Wildcards: <code>*</code> matches anything.
+            In-scope items are highlighted in the Site Map. History &amp; Match/Replace can be filtered to scope.
+          </div>
+          <div class="settings-row"><label class="settings-label-sm">Include in scope</label></div>
+          <textarea id="tgt-scope-include" class="raw-ta settings-ta" rows="5" spellcheck="false"
+                    placeholder="*://api.example.com/*&#10;*://app.example.com/*&#10;*.example.com"></textarea>
+          <div class="settings-row" style="margin-top:8px"><label class="settings-label-sm">Exclude from scope</label></div>
+          <textarea id="tgt-scope-exclude" class="raw-ta settings-ta" rows="3" spellcheck="false"
+                    placeholder="*.google.com*&#10;*fonts.googleapis.com*&#10;*cdn.cloudflare.com*"></textarea>
+          <div class="settings-actions" style="margin-top:10px">
+            <button id="tgt-scope-save" class="btn btn-accent">Save Scope</button>
+            <span id="tgt-scope-status" class="settings-status"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- ═══════════════════════════ INTERCEPT ══════════════════════════════════ -->
@@ -72,21 +142,133 @@
 
   </div>
 
+  <!-- ═══════════════════════════ HISTORY ════════════════════════════════════ -->
+  <div id="tab-history" class="tab-panel hidden">
+    <div class="filter-bar">
+      <input id="hist-filter" type="text" placeholder="Search everything…" spellcheck="false" autocomplete="off">
+      <select id="hist-flt-method" class="filter-sel">
+        <option value="">All methods</option>
+        <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option>
+        <option>DELETE</option><option>OPTIONS</option><option>HEAD</option>
+      </select>
+      <select id="hist-flt-status" class="filter-sel">
+        <option value="">All status</option>
+        <option value="1xx">1xx Info</option>
+        <option value="2xx">2xx OK</option>
+        <option value="3xx">3xx Redirect</option>
+        <option value="4xx">4xx Client Error</option>
+        <option value="5xx">5xx Server Error</option>
+      </select>
+      <select id="hist-flt-mime" class="filter-sel">
+        <option value="">All types</option>
+        <option value="html">HTML</option>
+        <option value="json">JSON</option>
+        <option value="javascript">JS</option>
+        <option value="css">CSS</option>
+        <option value="xml">XML</option>
+        <option value="image">Image</option>
+        <option value="font">Font</option>
+      </select>
+      <label class="rep-autocookie"><input type="checkbox" id="hist-inscope-only"> In-scope only</label>
+      <label class="rep-autocookie"><input type="checkbox" id="hist-reflect-only"> Reflections</label>
+      <select id="hist-flt-ext" class="filter-sel">
+        <option value="">All extensions</option>
+        <option value="no-static">No static (img/css/font/js)</option>
+      </select>
+      <button id="hist-clear" class="btn btn-sm btn-ghost">Clear</button>
+    </div>
+    <div class="hist-table-wrap">
+      <table class="hist-table" id="hist-table">
+        <thead>
+          <tr>
+            <th class="hist-th-sortable" data-sort="id" style="width:36px"># ▾</th>
+            <th class="hist-th-sortable" data-sort="method" style="width:60px">Method</th>
+            <th class="hist-th-sortable" data-sort="host" style="width:180px">Host</th>
+            <th class="hist-th-sortable" data-sort="path">Path</th>
+            <th class="hist-th-sortable" data-sort="status" style="width:52px">Status</th>
+            <th class="hist-th-sortable" data-sort="mimeType" style="width:80px">Type</th>
+            <th class="hist-th-sortable" data-sort="length" style="width:64px">Length</th>
+            <th class="hist-th-sortable" data-sort="elapsed" style="width:52px">Ms</th>
+            <th class="hist-th-sortable" data-sort="time" style="width:130px">Time</th>
+          </tr>
+        </thead>
+        <tbody id="hist-tbody"></tbody>
+      </table>
+    </div>
+    <div id="hist-empty" class="empty">
+      No requests captured.<br>
+      Attach debugger to start recording HTTP history.
+    </div>
+    <!-- Detail pane (shown when a row is clicked) -->
+    <div id="hist-detail" class="hist-detail hidden">
+      <div class="hist-detail-topbar">
+        <button id="hist-detail-close" class="btn btn-sm btn-ghost">← Back</button>
+        <span id="hist-detail-title" class="hist-detail-title"></span>
+        <button id="hist-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
+        <button id="hist-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+      </div>
+      <div class="hist-detail-body">
+        <!-- Request side -->
+        <div class="hist-detail-pane">
+          <div class="hist-detail-sub-tabs">
+            <button class="sub-tab active" data-histpane="req-headers">Headers</button>
+            <button class="sub-tab" data-histpane="req-body">Body</button>
+          </div>
+          <div id="hist-req-headers-pane" class="hist-sub-pane active"><pre id="hist-req-headers-pre" class="raw-pre"></pre></div>
+          <div id="hist-req-body-pane" class="hist-sub-pane hidden"><pre id="hist-req-body-pre" class="raw-pre"></pre></div>
+        </div>
+        <!-- Response side -->
+        <div class="hist-detail-pane">
+          <div class="hist-detail-sub-tabs">
+            <button class="sub-tab active" data-histpane="resp-headers">Headers</button>
+            <button class="sub-tab" data-histpane="resp-body">Body</button>
+            <span id="hist-reflect-badge" class="reflect-badge hidden">Reflections</span>
+          </div>
+          <div id="hist-resp-headers-pane" class="hist-sub-pane active"><pre id="hist-resp-headers-pre" class="raw-pre"></pre></div>
+          <div id="hist-resp-body-pane" class="hist-sub-pane hidden"><pre id="hist-resp-body-pre" class="raw-pre"></pre></div>
+        </div>
+      </div>
+      <!-- Search bar at bottom -->
+      <div class="detail-search-bar">
+        <input id="hist-detail-search" type="text" class="detail-search-inp" placeholder="Search in request/response…" spellcheck="false">
+        <span id="hist-detail-search-count" class="detail-search-count"></span>
+        <button id="hist-detail-search-prev" class="btn btn-xs btn-ghost">▲</button>
+        <button id="hist-detail-search-next" class="btn btn-xs btn-ghost">▼</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════════════════ REPEATER ═══════════════════════════════════ -->
   <div id="tab-repeater" class="tab-panel hidden">
+
+    <!-- Repeater tab bar -->
+    <div class="rep-tabs-bar" id="rep-tabs-bar">
+      <button class="rep-tab-btn active" data-reptab="0">1</button>
+      <button class="rep-tab-add" id="rep-tab-add" title="New tab">+</button>
+    </div>
 
     <div class="rep-topbar">
       <select id="rep-method" class="method-sel"></select>
       <input  id="rep-url"    class="url-inp flex1" type="text"
               placeholder="https://target.com/api/…" spellcheck="false" autocomplete="off">
+      <button id="rep-target-toggle" class="btn btn-xs btn-ghost rep-target-btn" title="Edit target (connect to different host/IP)">✎ Target</button>
       <button id="rep-send"   class="btn btn-send">Send</button>
-      <button id="rep-clear"  class="btn btn-sm btn-ghost" title="Clear response">✕</button>
+      <label class="rep-autocookie" title="Auto-sync cookies from browser tab"><input type="checkbox" id="rep-autocookie"> Cookie sync</label>
+    </div>
+    <!-- Target override bar (hidden by default) -->
+    <div id="rep-target-bar" class="rep-target-bar hidden">
+      <span class="rep-target-label">Connect to:</span>
+      <input id="rep-target-host" class="settings-inp" type="text" placeholder="IP or hostname (e.g. 141.101.90.106)" spellcheck="false" style="flex:1;max-width:220px">
+      <span class="rep-target-label">:</span>
+      <input id="rep-target-port" class="settings-inp settings-inp-sm" type="text" placeholder="443" spellcheck="false">
+      <label class="rep-autocookie"><input type="checkbox" id="rep-target-tls" checked> TLS</label>
+      <span class="rep-target-info">Host header auto-set from URL. Target overrides TCP destination.</span>
     </div>
 
-    <div class="rep-body">
+    <div class="rep-body rep-body-horizontal">
 
-      <!-- Request pane -->
-      <div class="rep-req" id="rep-req-pane">
+      <!-- Request pane (LEFT) -->
+      <div class="rep-req rep-req-side" id="rep-req-pane">
         <div class="pane-label">REQUEST HEADERS</div>
         <textarea id="rep-headers" class="raw-ta" spellcheck="false"
                   placeholder="Content-Type: application/json&#10;Authorization: Bearer …"></textarea>
@@ -95,11 +277,11 @@
                   placeholder='{"key": "value"}'></textarea>
       </div>
 
-      <!-- Drag handle -->
-      <div class="rep-resizer" id="rep-resizer"></div>
+      <!-- Drag handle (vertical) -->
+      <div class="rep-resizer rep-resizer-h" id="rep-resizer"></div>
 
-      <!-- Response pane -->
-      <div class="rep-resp" id="rep-resp-pane">
+      <!-- Response pane (RIGHT) -->
+      <div class="rep-resp rep-resp-side" id="rep-resp-pane">
         <div class="pane-label" id="resp-label">RESPONSE</div>
         <div class="resp-sub-tabs hidden" id="resp-sub-tabs">
           <button class="sub-tab active" data-resp="body">Body</button>
@@ -113,6 +295,83 @@
         <div id="resp-loading" class="loading hidden">Sending…</div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ INTRUDER ═══════════════════════════════════ -->
+  <div id="tab-intruder" class="tab-panel hidden">
+
+    <div class="intr-layout">
+
+      <!-- LEFT: Request template -->
+      <div class="intr-left">
+        <div class="intr-topbar">
+          <select id="intr-method" class="method-sel"></select>
+          <input  id="intr-url" class="url-inp flex1" type="text"
+                  placeholder="https://target.com/api/…" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="pane-label">REQUEST — mark positions with <code>§value§</code></div>
+        <textarea id="intr-request" class="raw-ta intr-ta" spellcheck="false"
+                  placeholder="GET /path HTTP/1.1&#10;Host: target.com&#10;Cookie: session=§payload§&#10;&#10;user=§username§"></textarea>
+        <div class="intr-toolbar">
+          <button id="intr-add-pos" class="btn btn-xs btn-ghost" title="Wrap selection with §">§ Add §</button>
+          <button id="intr-clear-pos" class="btn btn-xs btn-ghost" title="Remove all § markers">Clear §</button>
+          <span class="intr-pos-count" id="intr-pos-count">0 positions</span>
+        </div>
+      </div>
+
+      <!-- RIGHT: Config + Results -->
+      <div class="intr-right">
+
+        <!-- Attack config -->
+        <div class="intr-config">
+          <div class="settings-row">
+            <label class="settings-label-sm">Attack</label>
+            <select id="intr-attack" class="filter-sel">
+              <option value="sniper">Sniper</option>
+              <option value="battering-ram">Battering Ram</option>
+              <option value="pitchfork">Pitchfork</option>
+            </select>
+            <label class="settings-label-sm">Threads</label>
+            <input id="intr-threads" type="number" class="settings-inp settings-inp-sm" value="1" min="1" max="20">
+            <label class="settings-label-sm">Delay ms</label>
+            <input id="intr-delay" type="number" class="settings-inp settings-inp-sm" value="0" min="0">
+          </div>
+
+          <div class="pane-label" style="margin-top:6px">PAYLOADS</div>
+          <div id="intr-payload-tabs" class="intr-payload-tabs">
+            <button class="sub-tab active" data-plset="0">Set 1</button>
+          </div>
+          <textarea id="intr-payloads" class="raw-ta intr-payload-ta" spellcheck="false"
+                    placeholder="admin&#10;test&#10;guest&#10;{{0-100}}&#10;{{file:wordlist.txt}}"></textarea>
+
+          <div class="intr-toolbar">
+            <label class="rep-autocookie"><input type="checkbox" id="intr-autocookie"> Cookie sync</label>
+            <div class="tabbar-gap"></div>
+            <button id="intr-start" class="btn btn-accent">Start Attack</button>
+            <button id="intr-stop"  class="btn btn-sm btn-danger" disabled>Stop</button>
+            <span id="intr-status" class="intr-status"></span>
+          </div>
+        </div>
+
+        <!-- Results table -->
+        <div class="intr-results-wrap">
+          <table class="hist-table intr-results-table">
+            <thead>
+              <tr>
+                <th style="width:30px">#</th>
+                <th style="width:180px">Payload</th>
+                <th style="width:48px">Status</th>
+                <th style="width:56px">Length</th>
+                <th style="width:48px">Ms</th>
+                <th>Response (preview)</th>
+              </tr>
+            </thead>
+            <tbody id="intr-results"></tbody>
+          </table>
+        </div>
+
+      </div>
     </div>
   </div>
 
@@ -142,90 +401,144 @@
     <div id="ep-empty"  class="empty hidden">No endpoints — interact with the page or refresh</div>
   </div>
 
-  <!-- ═══════════════════════════ TECH ═══════════════════════════════════════ -->
-  <div id="tab-tech" class="tab-panel hidden">
-
-    <div class="tech-toolbar">
-      <span id="tech-domain-label" class="tech-domain">—</span>
-      <button id="btn-lookup" class="btn btn-accent">⚡ Scan WHOIS + DNS</button>
-      <span   id="lookup-status" class="lookup-status"></span>
-    </div>
-
-    <div class="tech-layout">
-
-      <!-- Left: Target info -->
-      <div class="tech-sidebar" id="tech-sidebar">
-
-        <div class="info-card" id="card-ip">
-          <div class="info-card-title">IP / Geo</div>
-          <div id="ip-rows" class="info-rows"></div>
-          <div id="ip-empty" class="info-empty">Run scan to populate</div>
-        </div>
-
-        <div class="info-card" id="card-dns">
-          <div class="info-card-title">DNS Records</div>
-          <div id="dns-rows" class="info-rows"></div>
-          <div id="dns-empty" class="info-empty">Run scan to populate</div>
-        </div>
-
-        <div class="info-card" id="card-whois">
-          <div class="info-card-title">
-            WHOIS
-            <button id="whois-toggle" class="btn btn-xs btn-ghost">▼</button>
-          </div>
-          <div id="whois-parsed" class="info-rows"></div>
-          <pre  id="whois-raw"    class="whois-raw hidden"></pre>
-          <div id="whois-empty"  class="info-empty">Run scan to populate</div>
-        </div>
-
-      </div>
-
-      <!-- Right: Tech stack -->
-      <div class="tech-main" id="tech-main">
-        <div id="tech-stack"  class="tech-stack"></div>
-        <div id="tech-empty"  class="empty hidden">Interact with page or click Refresh</div>
-      </div>
-
-    </div>
-  </div>
-
   <!-- ═══════════════════════════ HEADERS ════════════════════════════════════ -->
   <div id="tab-headers" class="tab-panel hidden">
-    <div id="hdr-list"   class="req-list"></div>
-    <div id="hdr-empty"  class="empty hidden">
+    <div class="hdr-sub-bar">
+      <button class="sub-tab active" data-hdrsub="security">Security Analysis</button>
+      <button class="sub-tab" data-hdrsub="all">All Headers</button>
+    </div>
+    <div id="hdr-security" class="hdr-sub-panel active">
+      <div id="hdr-sec-grid" class="hdr-sec-grid"></div>
+    </div>
+    <div id="hdr-all" class="hdr-sub-panel hidden">
+      <div id="hdr-all-list" class="req-list"></div>
+    </div>
+    <div id="hdr-empty" class="empty hidden">
       No headers captured.<br>
       Attach debugger — headers are captured from network responses.
     </div>
   </div>
 
-  <!-- ═══════════════════════════ FOOTER ════════════════════════════════════ -->
-  <div class="social-footer">
-    <span class="social-by">Ahmad Alanazi</span>
-    <div class="social-links">
+  <!-- ═══════════════════════════ DECODER ══════════════════════════════════ -->
+  <div id="tab-decoder" class="tab-panel hidden">
+    <div class="dec-layout">
+      <div class="dec-pane">
+        <div class="pane-label">INPUT</div>
+        <textarea id="dec-input" class="raw-ta dec-ta" spellcheck="false" placeholder="Paste text to encode/decode…"></textarea>
+      </div>
+      <div class="dec-controls">
+        <div class="dec-section-label">Encode →</div>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="b64-enc">Base64</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="url-enc">URL</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="url-enc2">URL (2x)</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="html-enc">HTML Entities</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="hex-enc">Hex</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="unicode-enc">Unicode</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="js-enc">JS Escape</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="ascii-hex">ASCII Hex</button>
 
-      <!-- X / Twitter -->
-      <button class="social-btn" id="link-x" title="X  @0x4161">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.747l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-        </svg>
-        <span>0x4161</span>
-      </button>
+        <div class="dec-section-label" style="margin-top:10px">← Decode</div>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="b64-dec">Base64</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="url-dec">URL</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="html-dec">HTML Entities</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="hex-dec">Hex</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="unicode-dec">Unicode</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="js-dec">JS Unescape</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="jwt-dec">JWT Decode</button>
 
-      <!-- Instagram -->
-      <button class="social-btn" id="link-insta" title="Instagram  @fx_py3">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/>
-        </svg>
-        <span>fx_py3</span>
-      </button>
+        <div class="dec-section-label" style="margin-top:10px">Hash</div>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="md5">MD5</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="sha1">SHA-1</button>
+        <button class="btn btn-xs btn-ghost dec-btn" data-op="sha256">SHA-256</button>
 
-      <!-- LinkedIn -->
-      <button class="social-btn" id="link-li" title="LinkedIn  Ahmad Alanazi">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
-        </svg>
-        <span>Ahmad Alanazi</span>
-      </button>
+        <div style="margin-top:auto">
+          <button id="dec-swap" class="btn btn-sm btn-ghost" style="width:100%">↕ Swap Input/Output</button>
+          <button id="dec-clear" class="btn btn-sm btn-ghost" style="width:100%;margin-top:4px">Clear</button>
+        </div>
+      </div>
+      <div class="dec-pane">
+        <div class="pane-label">OUTPUT</div>
+        <textarea id="dec-output" class="raw-ta dec-ta" spellcheck="false" readonly placeholder="Result appears here…"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ SETTINGS ═════════════════════════════════ -->
+  <div id="tab-settings" class="tab-panel hidden">
+    <div class="settings-scroll">
+
+      <!-- ── Match & Replace ────────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Match &amp; Replace</div>
+        <div class="settings-section-desc">Automatically modify requests and responses. Rules apply to intercepted traffic (debugger) and Repeater.</div>
+        <div id="mr-rules" class="mr-rules"></div>
+        <button id="mr-add" class="btn btn-sm btn-accent">+ Add Rule</button>
+      </div>
+
+      <!-- ── Auto Headers ───────────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Auto Headers</div>
+        <div class="settings-section-desc">Headers injected into every outgoing request (intercepted + Repeater). One per line: <code>Name: Value</code></div>
+        <textarea id="cfg-auto-headers" class="raw-ta settings-ta" rows="4" spellcheck="false"
+                  placeholder="Cookie: session=abc123&#10;X-Custom: value"></textarea>
+      </div>
+
+      <!-- ── Upstream Proxy ─────────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Upstream Proxy</div>
+        <div class="settings-section-desc">Route Repeater requests through a proxy. Does not affect browser traffic (use system/extension proxy for that).</div>
+        <div class="settings-row">
+          <label class="settings-label"><input type="checkbox" id="cfg-proxy-enabled"> Enable proxy</label>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Host</label>
+          <input id="cfg-proxy-host" type="text" class="settings-inp" placeholder="127.0.0.1" spellcheck="false">
+          <label class="settings-label-sm">Port</label>
+          <input id="cfg-proxy-port" type="text" class="settings-inp settings-inp-sm" placeholder="8080" spellcheck="false">
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Type</label>
+          <select id="cfg-proxy-type" class="filter-sel">
+            <option value="http">HTTP</option>
+            <option value="socks5">SOCKS5</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- ── Scope ──────────────────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Scope</div>
+        <div class="settings-section-desc">Limit History capture &amp; Match/Replace to matching URLs. One pattern per line. Supports <code>*</code> wildcard. Leave empty = capture all.</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Include</label>
+        </div>
+        <textarea id="cfg-scope-include" class="raw-ta settings-ta" rows="3" spellcheck="false"
+                  placeholder="*://api.example.com/*&#10;*://app.example.com/*"></textarea>
+        <div class="settings-row" style="margin-top:6px">
+          <label class="settings-label-sm">Exclude</label>
+        </div>
+        <textarea id="cfg-scope-exclude" class="raw-ta settings-ta" rows="2" spellcheck="false"
+                  placeholder="*.google.com*&#10;*fonts.googleapis.com*"></textarea>
+      </div>
+
+      <!-- ── Request Defaults ───────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Request Defaults</div>
+        <div class="settings-section-desc">Default settings for Repeater requests.</div>
+        <div class="settings-row">
+          <label class="settings-label"><input type="checkbox" id="cfg-follow-redirects" checked> Follow redirects</label>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Timeout (ms)</label>
+          <input id="cfg-timeout" type="text" class="settings-inp settings-inp-sm" value="30000" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="settings-actions">
+        <button id="cfg-save" class="btn btn-accent">Save Settings</button>
+        <button id="cfg-reset" class="btn btn-sm btn-ghost">Reset Defaults</button>
+        <span id="cfg-status" class="settings-status"></span>
+      </div>
 
     </div>
   </div>

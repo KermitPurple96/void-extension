@@ -16,9 +16,33 @@ let state = {
 let intercepted = [];  // paused requests
 let editingReq  = null;
 let pollTimer   = null;
+let histTimer   = null;
 let filterEp    = "";
 let filterEpType = "";
+let filterHist     = "";
+let filterHistMeth = "";
+let filterHistStat = "";
+let filterHistMime = "";
+let filterHistScope = false;
+let filterHistExt = "";
+let filterHistReflect = false;
 let activeSubResp = "body";
+let historyData = [];
+let histDetailEntry = null;
+let histSortKey = "id";
+let histSortAsc = false; // false = newest first by default
+
+// ── Repeater tabs state ──────────────────────────────────────────────────────
+let repTabs = [{ id: 0, label: "1", method: "GET", url: "", headers: "", body: "", response: null, autoCookie: false, targetHost: "", targetPort: "", targetTls: true }];
+let repActiveTab = 0;
+let repNextId = 1;
+
+// ── Intruder state ───────────────────────────────────────────────────────────
+let intrRunning = false;
+let intrAbort = null;
+let intrResults = [];
+let intrPayloadSets = [""]; // one textarea per position
+let intrActiveSet = 0;
 
 // ── Messaging to background (with auto-retry on SW restart) ──────────────────
 function sendMsg(msg) {
@@ -62,11 +86,8 @@ function showTab(name) {
     p.classList.toggle("hidden",  p.id !== `tab-${name}`);
   });
   if (name === "intercept") startPoll(); else stopPoll();
-  if (name === "tech") {
-    const host = document.getElementById("site-host").textContent;
-    const lbl  = document.getElementById("tech-domain-label");
-    if (lbl) lbl.textContent = host || "—";
-  }
+  if (name === "history") startHistPoll(); else stopHistPoll();
+  if (name === "target") { pollHistory().then(() => renderSiteMap()); }
 }
 
 // ── Polling for paused requests ───────────────────────────────────────────────
@@ -82,6 +103,20 @@ function startPoll() {
 }
 function stopPoll() { clearInterval(pollTimer); pollTimer = null; }
 
+function startHistPoll() {
+  if (histTimer) return;
+  pollHistory();
+  histTimer = setInterval(pollHistory, 800);
+}
+function stopHistPoll() { clearInterval(histTimer); histTimer = null; }
+async function pollHistory() {
+  const res = await bg({ type: "GET_HISTORY" });
+  if (!res) return;
+  historyData = res.history || [];
+  renderHistory();
+  setBadge("bdg-history", historyData.length);
+}
+
 // ── Load all data ─────────────────────────────────────────────────────────────
 async function loadAll() {
   // Wake SW first, then inject content script
@@ -89,9 +124,10 @@ async function loadAll() {
   try { await chrome.scripting.executeScript({ target: { tabId: TAB_ID }, files: ["content.js"] }); } catch {}
   await new Promise(r => setTimeout(r, 400));
 
-  const [d, ic] = await Promise.all([
+  const [d, ic, hst] = await Promise.all([
     bg({ type: "GET_DATA" }),
     bg({ type: "GET_INTERCEPTED" }),
+    bg({ type: "GET_HISTORY" }),
   ]);
 
   if (d) {
@@ -101,11 +137,12 @@ async function loadAll() {
     });
   }
   if (ic) intercepted = ic.requests || [];
+  if (hst) historyData = hst.history || [];
 
   renderInterceptStatus();
   renderInterceptList();
+  renderHistory();
   renderEndpoints();
-  renderTech();
   renderHeaders();
   updateBadges();
 }
@@ -113,8 +150,8 @@ async function loadAll() {
 // ── Badges ────────────────────────────────────────────────────────────────────
 function updateBadges() {
   updateInterceptBadge();
+  setBadge("bdg-history",   historyData.length);
   setBadge("bdg-endpoints", state.endpoints.length);
-  setBadge("bdg-tech",      state.technologies.length);
 }
 function setBadge(id, n) {
   const b = document.getElementById(id);
@@ -199,15 +236,17 @@ function renderInterceptList() {
     const acts = el("div", "req-actions");
     const btnEdit = txt("button", "btn btn-xs btn-ghost",   "Edit");
     const btnRep  = txt("button", "btn btn-xs btn-ghost",   "→ Rep");
+    const btnIntr = txt("button", "btn btn-xs btn-ghost",   "→ Intr");
     const btnFwd  = txt("button", "btn btn-xs btn-success", "Forward →");
     const btnDrop = txt("button", "btn btn-xs btn-danger",  "Drop");
 
     btnEdit.addEventListener("click", e => { e.stopPropagation(); openEditor(req); });
     btnRep.addEventListener("click",  e => { e.stopPropagation(); sendToRepeater(req); });
+    btnIntr.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder(req); });
     btnFwd.addEventListener("click",  e => { e.stopPropagation(); doForward(req.requestId, null); });
     btnDrop.addEventListener("click", e => { e.stopPropagation(); doDrop(req.requestId); });
 
-    ap(acts, btnEdit, btnRep, btnFwd, btnDrop);
+    ap(acts, btnEdit, btnRep, btnIntr, btnFwd, btnDrop);
     row.appendChild(acts);
     row.addEventListener("click", () => openEditor(req));
     list.appendChild(row);
@@ -279,33 +318,365 @@ async function dropFromEditor() {
   await doDrop(id);
 }
 
+// ═══════════════════════════ HISTORY ════════════════════════════════════════
+
+function renderHistory() {
+  const tbody = document.getElementById("hist-tbody");
+  const empty = document.getElementById("hist-empty");
+  const table = document.getElementById("hist-table");
+  const detail = document.getElementById("hist-detail");
+
+  if (histDetailEntry) return; // detail pane is open, don't re-render table
+
+  let items = historyData;
+
+  // Dropdown filters
+  if (filterHistMeth) {
+    items = items.filter(e => e.method === filterHistMeth);
+  }
+  if (filterHistStat) {
+    const prefix = filterHistStat.charAt(0); // "1","2","3","4","5"
+    items = items.filter(e => e.status && String(e.status).charAt(0) === prefix);
+  }
+  if (filterHistMime) {
+    const q = filterHistMime.toLowerCase();
+    items = items.filter(e => (e.mimeType || "").toLowerCase().includes(q));
+  }
+  if (filterHistScope) {
+    items = items.filter(e => tgtIsInScope(e.url));
+  }
+  if (filterHistExt === "no-static") {
+    items = items.filter(e => !/\.(js|mjs|css|png|jpe?g|gif|webp|ico|svg|woff2?|ttf|eot|map)(\?|$)/i.test(e.path));
+  }
+  if (filterHistReflect) {
+    items = items.filter(e => hasReflections(e));
+  }
+
+  // Text search — matches against everything
+  if (filterHist) {
+    const q = filterHist.toLowerCase();
+    items = items.filter(e => {
+      const haystack = [
+        e.url, e.method, e.host, e.path,
+        String(e.status || ""), e.statusText,
+        e.mimeType || "", e.resourceType || "",
+        // Search in request headers
+        ...Object.entries(e.headers || {}).map(([k,v]) => `${k}: ${v}`),
+        // Search in response headers
+        ...Object.entries(e.respHeaders || {}).map(([k,v]) => `${k}: ${v}`),
+        // Search in body
+        e.body || "", e.respBody || "",
+      ].join("\n").toLowerCase();
+      return haystack.includes(q);
+    });
+  }
+
+  tbody.replaceChildren();
+
+  if (!items.length) {
+    empty.classList.remove("hidden");
+    table.parentElement.classList.add("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+  table.parentElement.classList.remove("hidden");
+
+  // Assign IDs based on original order, then sort
+  const indexed = items.map((e, i) => ({ ...e, _idx: historyData.indexOf(e) + 1 }));
+
+  indexed.sort((a, b) => {
+    let va, vb;
+    switch (histSortKey) {
+      case "id":       va = a._idx; vb = b._idx; break;
+      case "method":   va = a.method; vb = b.method; break;
+      case "host":     va = a.host; vb = b.host; break;
+      case "path":     va = a.path; vb = b.path; break;
+      case "status":   va = a.status || 0; vb = b.status || 0; break;
+      case "mimeType": va = a.mimeType || ""; vb = b.mimeType || ""; break;
+      case "length":   va = a.length || 0; vb = b.length || 0; break;
+      case "elapsed":  va = a.elapsed || 0; vb = b.elapsed || 0; break;
+      case "time":     va = a.time || 0; vb = b.time || 0; break;
+      default:         va = a._idx; vb = b._idx;
+    }
+    if (typeof va === "string") { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+    if (va < vb) return histSortAsc ? -1 : 1;
+    if (va > vb) return histSortAsc ? 1 : -1;
+    return 0;
+  });
+
+  // Update sort indicators in headers
+  document.querySelectorAll(".hist-th-sortable").forEach(th => {
+    const key = th.dataset.sort;
+    const arrow = key === histSortKey ? (histSortAsc ? " ▴" : " ▾") : "";
+    th.textContent = th.textContent.replace(/ [▴▾]$/, "") + arrow;
+  });
+
+  for (const entry of indexed) {
+    const tr = document.createElement("tr");
+
+    const statusCls = !entry.status ? "hist-td-status-wait"
+      : entry.status < 300 ? "hist-td-status-ok"
+      : entry.status < 400 ? "hist-td-status-rdir"
+      : "hist-td-status-err";
+
+    const len = entry.length > 1024 ? `${(entry.length / 1024).toFixed(1)}k` : entry.length || "";
+    const ts = entry.time ? fmtTime(entry.time) : "";
+
+    tr.innerHTML = `
+      <td class="hist-td-num">${entry._idx}</td>
+      <td><span class="method-pill m-${entry.method.toLowerCase()}">${entry.method}</span></td>
+      <td title="${esc(entry.host)}">${esc(entry.host)}</td>
+      <td title="${esc(entry.path)}">${esc(entry.path)}</td>
+      <td class="${statusCls}">${entry.status ?? "…"}</td>
+      <td class="hist-td-mime">${esc(shortMime(entry.mimeType))}</td>
+      <td class="hist-td-len">${len}</td>
+      <td class="hist-td-elapsed">${entry.elapsed ? entry.elapsed : ""}</td>
+      <td class="hist-td-timestamp">${ts}</td>
+    `;
+    if (entry.respBody && hasReflections(entry)) {
+      const dot = document.createElement("span");
+      dot.className = "hist-reflect-dot";
+      dot.title = "Reflections detected";
+      tr.querySelector("td:nth-child(5)").appendChild(dot);
+    }
+    tr.addEventListener("click", () => openHistDetail(entry));
+    tbody.appendChild(tr);
+  }
+}
+
+function esc(s) { return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function shortMime(m) {
+  if (!m) return "";
+  return m.replace(/^application\//, "").replace(/^text\//, "").split(";")[0];
+}
+function fmtTime(ts) {
+  const d = new Date(ts);
+  const pad = n => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${pad(d.getDate())}/${pad(d.getMonth()+1)}`;
+}
+
+function openHistDetail(entry) {
+  histDetailEntry = entry;
+  const detail = document.getElementById("hist-detail");
+  const title  = document.getElementById("hist-detail-title");
+
+  title.textContent = `${entry.status || "…"} ${entry.method} ${entry.url}`;
+
+  // Request headers
+  let reqHdrs = `${entry.method} ${entry.path} HTTP/1.1\nHost: ${entry.host}\n`;
+  reqHdrs += Object.entries(entry.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+  document.getElementById("hist-req-headers-pre").textContent = reqHdrs;
+
+  // Request body
+  document.getElementById("hist-req-body-pre").textContent = entry.body || "(empty)";
+
+  // Response headers
+  let resHdrs = entry.status ? `HTTP/1.1 ${entry.status} ${entry.statusText}\n` : "(no response yet)\n";
+  resHdrs += Object.entries(entry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+  document.getElementById("hist-resp-headers-pre").textContent = resHdrs;
+
+  // Response body
+  const respBody = entry.respBody || "(body not captured yet)";
+  const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
+  document.getElementById("hist-resp-body-pre").textContent = tryPretty(respBody, ct);
+
+  // Reset sub-tabs to headers active
+  detail.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
+  detail.querySelectorAll(".hist-detail-sub-tabs .sub-tab").forEach(t => t.classList.remove("active"));
+  document.getElementById("hist-req-headers-pane").classList.remove("hidden");
+  document.getElementById("hist-resp-headers-pane").classList.remove("hidden");
+  detail.querySelectorAll('.sub-tab[data-histpane$="-headers"]').forEach(t => t.classList.add("active"));
+
+  detail.classList.remove("hidden");
+  document.getElementById("hist-table").parentElement.classList.add("hidden");
+  document.getElementById("hist-empty").classList.add("hidden");
+
+  // Highlight reflections + clear search
+  highlightReflections(entry);
+  document.getElementById("hist-detail-search").value = "";
+  document.getElementById("hist-detail-search-count").textContent = "";
+}
+
+function closeHistDetail() {
+  histDetailEntry = null;
+  document.getElementById("hist-detail").classList.add("hidden");
+  renderHistory();
+}
+
+function histDetailToRepeater() {
+  if (!histDetailEntry) return;
+  sendToRepeater({
+    method:  histDetailEntry.method,
+    url:     histDetailEntry.url,
+    headers: histDetailEntry.headers || {},
+    body:    histDetailEntry.body || "",
+  });
+  closeHistDetail();
+}
+
 // ── Send to Repeater ──────────────────────────────────────────────────────────
 function sendToRepeater(req) {
-  const method = req.method || "GET";
-  const url    = req.url    || "";
+  const method  = req.method || "GET";
+  const url     = req.url    || "";
   const rawHdrs = req.rawHeaders || headersToRaw(req.headers || {});
-  const body   = req.body   || "";
+  const body    = req.body   || "";
 
-  // set method
-  const mSel = document.getElementById("rep-method");
-  for (const o of mSel.options) { if (o.value === method) { o.selected = true; break; } }
+  // Save current tab state before switching
+  saveRepTabState();
 
-  document.getElementById("rep-url").value     = url;
-  document.getElementById("rep-headers").value = rawHdrs;
-  document.getElementById("rep-body-ta").value = body;
+  // Create a new repeater tab
+  const newTab = {
+    id: repNextId++,
+    label: repTabs.length + 1 + "",
+    method, url, headers: rawHdrs, body, response: null, autoCookie: false,
+    targetHost: "", targetPort: "", targetTls: true,
+  };
+  repTabs.push(newTab);
+  repActiveTab = newTab.id;
+  renderRepTabs();
+  loadRepTab(newTab);
 
   showTab("repeater");
 }
 
 // ═══════════════════════════ REPEATER ════════════════════════════════════════
 
+// ── Repeater tab management ──────────────────────────────────────────────────
+function saveRepTabState() {
+  const tab = repTabs.find(t => t.id === repActiveTab);
+  if (!tab) return;
+  tab.method     = document.getElementById("rep-method").value;
+  tab.url        = document.getElementById("rep-url").value;
+  tab.headers    = document.getElementById("rep-headers").value;
+  tab.body       = document.getElementById("rep-body-ta").value;
+  tab.autoCookie = document.getElementById("rep-autocookie").checked;
+  tab.targetHost = document.getElementById("rep-target-host").value;
+  tab.targetPort = document.getElementById("rep-target-port").value;
+  tab.targetTls  = document.getElementById("rep-target-tls").checked;
+}
+
+function loadRepTab(tab) {
+  const mSel = document.getElementById("rep-method");
+  for (const o of mSel.options) { if (o.value === tab.method) { o.selected = true; break; } }
+  document.getElementById("rep-url").value        = tab.url;
+  document.getElementById("rep-headers").value    = tab.headers;
+  document.getElementById("rep-body-ta").value    = tab.body;
+  document.getElementById("rep-autocookie").checked = !!tab.autoCookie;
+  document.getElementById("rep-target-host").value  = tab.targetHost || "";
+  document.getElementById("rep-target-port").value  = tab.targetPort || "";
+  document.getElementById("rep-target-tls").checked = tab.targetTls !== false;
+  // Show/hide target bar
+  const hasTarget = !!(tab.targetHost);
+  document.getElementById("rep-target-bar").classList.toggle("hidden", !hasTarget);
+  document.getElementById("rep-target-toggle").classList.toggle("active", hasTarget);
+
+  // Restore response if saved
+  clearRespPanes();
+  const subTabs = document.getElementById("resp-sub-tabs");
+  const empty   = document.getElementById("resp-empty");
+  const label   = document.getElementById("resp-label");
+
+  if (tab.response) {
+    const r = tab.response;
+    label.textContent = `RESPONSE — ${r.status} ${r.statusText}${r.size ? ` ${(r.size/1024).toFixed(1)} KB` : ""}${r.elapsed ? ` ${r.elapsed}ms` : ""}`;
+    document.getElementById("resp-body-pre").textContent = tryPretty(r.body || "(empty body)", r.headers?.["content-type"] || "");
+    const hdrsText = Object.entries(r.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+    document.getElementById("resp-hdrs-pre").textContent = hdrsText || "(no headers)";
+    document.getElementById("resp-raw-pre").textContent  = `HTTP/1.1 ${r.status} ${r.statusText}\n${hdrsText}\n\n${r.body || ""}`;
+    subTabs.classList.remove("hidden");
+    empty.classList.add("hidden");
+    switchRespPane(activeSubResp);
+  } else {
+    label.textContent = "RESPONSE";
+    subTabs.classList.add("hidden");
+    empty.classList.remove("hidden");
+  }
+}
+
+function renderRepTabs() {
+  const bar = document.getElementById("rep-tabs-bar");
+  const addBtn = document.getElementById("rep-tab-add");
+  // Remove all tab buttons (keep the + button)
+  bar.querySelectorAll(".rep-tab-btn").forEach(b => b.remove());
+
+  repTabs.forEach(tab => {
+    const btn = document.createElement("button");
+    btn.className = "rep-tab-btn" + (tab.id === repActiveTab ? " active" : "");
+    btn.dataset.reptab = tab.id;
+
+    // Label — show short path if available
+    let label = tab.label;
+    if (tab.url) {
+      try { const u = new URL(tab.url); label = u.pathname.split("/").pop() || tab.label; } catch {}
+    }
+    btn.textContent = label;
+
+    // Close button (only if more than 1 tab)
+    if (repTabs.length > 1) {
+      const x = document.createElement("span");
+      x.className = "rep-tab-close";
+      x.textContent = "×";
+      x.addEventListener("click", e => {
+        e.stopPropagation();
+        closeRepTab(tab.id);
+      });
+      btn.appendChild(x);
+    }
+
+    btn.addEventListener("click", () => switchRepTab(tab.id));
+    bar.insertBefore(btn, addBtn);
+  });
+}
+
+function switchRepTab(id) {
+  if (id === repActiveTab) return;
+  saveRepTabState();
+  repActiveTab = id;
+  renderRepTabs();
+  const tab = repTabs.find(t => t.id === id);
+  if (tab) loadRepTab(tab);
+}
+
+function closeRepTab(id) {
+  if (repTabs.length <= 1) return;
+  const idx = repTabs.findIndex(t => t.id === id);
+  repTabs.splice(idx, 1);
+  if (repActiveTab === id) {
+    repActiveTab = repTabs[Math.min(idx, repTabs.length - 1)].id;
+    loadRepTab(repTabs.find(t => t.id === repActiveTab));
+  }
+  renderRepTabs();
+}
+
+function addRepTab() {
+  saveRepTabState();
+  const newTab = { id: repNextId++, label: repTabs.length + 1 + "", method: "GET", url: "", headers: "", body: "", response: null };
+  repTabs.push(newTab);
+  repActiveTab = newTab.id;
+  renderRepTabs();
+  loadRepTab(newTab);
+}
+
 async function doSend() {
   const method     = document.getElementById("rep-method").value;
   const url        = document.getElementById("rep-url").value.trim();
-  const rawHeaders = document.getElementById("rep-headers").value;
+  let   rawHeaders = document.getElementById("rep-headers").value;
   const body       = document.getElementById("rep-body-ta").value;
 
   if (!url) { document.getElementById("rep-url").focus(); return; }
+
+  // Auto-cookie: fetch cookies from browser and inject/replace Cookie header
+  if (document.getElementById("rep-autocookie").checked) {
+    const ck = await bg({ type: "GET_COOKIES", url });
+    if (ck?.cookies) {
+      const lines = rawHeaders.split("\n");
+      const idx = lines.findIndex(l => /^cookie\s*:/i.test(l));
+      if (idx >= 0) { lines[idx] = `Cookie: ${ck.cookies}`; }
+      else { lines.push(`Cookie: ${ck.cookies}`); }
+      rawHeaders = lines.join("\n");
+      document.getElementById("rep-headers").value = rawHeaders;
+    }
+  }
 
   const sendBtn   = document.getElementById("rep-send");
   const respLabel = document.getElementById("resp-label");
@@ -321,7 +692,15 @@ async function doSend() {
   respLabel.textContent = "RESPONSE — waiting…";
   clearRespPanes();
 
-  const res = await bg({ type: "SEND_REQUEST", url, method, rawHeaders, body });
+  // Target override: connect to different host/IP while keeping Host header from URL
+  const targetHost = document.getElementById("rep-target-host").value.trim();
+  const targetPort = document.getElementById("rep-target-port").value.trim();
+  const targetTls  = document.getElementById("rep-target-tls").checked;
+
+  const res = await bg({
+    type: "SEND_REQUEST", url, method, rawHeaders, body,
+    targetOverride: targetHost ? { host: targetHost, port: targetPort, tls: targetTls } : null,
+  });
 
   sendBtn.disabled    = false;
   sendBtn.textContent = "Send";
@@ -353,6 +732,13 @@ async function doSend() {
 
   subTabs.classList.remove("hidden");
   switchRespPane(activeSubResp);
+
+  // Save response to current repeater tab
+  const curTab = repTabs.find(t => t.id === repActiveTab);
+  if (curTab) {
+    curTab.response = res;
+    saveRepTabState();
+  }
 }
 
 function tryPretty(body, contentType) {
@@ -377,26 +763,26 @@ function switchRespPane(name) {
   });
 }
 
-// Resizable split pane
+// Resizable split pane (horizontal)
 function initResizer() {
   const handle   = document.getElementById("rep-resizer");
   const reqPane  = document.getElementById("rep-req-pane");
   const repBody  = document.querySelector(".rep-body");
-  let dragging = false, startY = 0, startH = 0;
+  let dragging = false, startX = 0, startW = 0;
 
   handle.addEventListener("mousedown", e => {
     dragging = true;
-    startY   = e.clientY;
-    startH   = reqPane.getBoundingClientRect().height;
+    startX   = e.clientX;
+    startW   = reqPane.getBoundingClientRect().width;
     document.body.style.userSelect = "none";
-    document.body.style.cursor     = "row-resize";
+    document.body.style.cursor     = "col-resize";
   });
   document.addEventListener("mousemove", e => {
     if (!dragging) return;
-    const total = repBody.getBoundingClientRect().height;
-    const newH  = Math.max(80, Math.min(total - 80, startH + e.clientY - startY));
-    reqPane.style.flex   = "none";
-    reqPane.style.height = `${newH}px`;
+    const total = repBody.getBoundingClientRect().width;
+    const newW  = Math.max(200, Math.min(total - 200, startW + e.clientX - startX));
+    reqPane.style.flex  = "none";
+    reqPane.style.width = `${newW}px`;
   });
   document.addEventListener("mouseup", () => {
     dragging = false;
@@ -439,1005 +825,932 @@ function renderEndpoints() {
         setTimeout(() => { cpyBtn.textContent = "Copy"; }, 1200);
       });
     });
+    const intrBtn = txt("button", "btn btn-xs btn-ghost", "→ Intr");
     repBtn.addEventListener("click", () => sendToRepeater(ep));
+    intrBtn.addEventListener("click", () => intrSendToIntruder(ep));
 
-    ap(acts, cpyBtn, repBtn);
+    ap(acts, cpyBtn, repBtn, intrBtn);
     row.appendChild(acts);
     list.appendChild(row);
   });
 }
 
-// ═══════════════════════════ TECH ════════════════════════════════════════════
+// ═══════════════════════════ REFLECTIONS & SEARCH ════════════════════════════
 
-// Category display order
-const CAT_ORDER = [
-  "Miscellaneous", "Web Server", "Hosting", "Programming Language",
-  "Frontend Framework", "Meta-Framework", "Framework", "CMS", "Website Builder",
-  "Headless CMS", "E-commerce", "CDN / Security", "CDN", "Cloud", "Cache",
-  "Security", "Auth / IAM", "Backend-as-a-Service", "Analytics", "Monitoring",
-  "Customer Support", "Payment", "CSS Framework", "CSS-in-JS", "UI Library",
-  "Build Tool", "JavaScript Library", "Realtime", "Maps", "Data Viz", "3D/WebGL",
-  "Rich Text Editor", "API Protocol", "Database", "Video Player", "Icon Library",
-  "Font Service", "SEO", "Form Builder", "Email", "WordPress Plugin",
-  "LMS", "Membership", "Forum", "Community", "Performance", "Other",
-];
-
-// Category accent colour (card top-border + header text)
-const CAT_COLORS = {
-  "Miscellaneous":         "#8b949e",
-  "Web Server":            "#58a6ff",
-  "Hosting":               "#3fb950",
-  "Programming Language":  "#bc8cff",
-  "Frontend Framework":    "#79c0ff",
-  "Meta-Framework":        "#79c0ff",
-  "Framework":             "#e3b341",
-  "CMS":                   "#d2a8ff",
-  "Website Builder":       "#d2a8ff",
-  "Headless CMS":          "#d2a8ff",
-  "E-commerce":            "#3fb950",
-  "CDN / Security":        "#f85149",
-  "CDN":                   "#f0883e",
-  "Cloud":                 "#58a6ff",
-  "Cache":                 "#e3b341",
-  "Security":              "#f85149",
-  "Auth / IAM":            "#bc8cff",
-  "Backend-as-a-Service":  "#58a6ff",
-  "Analytics":             "#e3b341",
-  "Monitoring":            "#f0883e",
-  "Customer Support":      "#58a6ff",
-  "Payment":               "#3fb950",
-  "CSS Framework":         "#56d364",
-  "CSS-in-JS":             "#79c0ff",
-  "UI Library":            "#ffa657",
-  "Build Tool":            "#8b949e",
-  "JavaScript Library":    "#e3b341",
-  "Realtime":              "#58a6ff",
-  "Maps":                  "#3fb950",
-  "Data Viz":              "#ffa657",
-  "3D/WebGL":              "#79c0ff",
-  "Rich Text Editor":      "#8b949e",
-  "API Protocol":          "#58a6ff",
-  "Database":              "#f0883e",
-  "Video Player":          "#f85149",
-  "Icon Library":          "#bc8cff",
-  "Font Service":          "#8b949e",
-  "SEO":                   "#3fb950",
-  "Form Builder":          "#e3b341",
-  "Email":                 "#58a6ff",
-  "WordPress Plugin":      "#00b4d8",
-  "LMS":                   "#e3b341",
-  "Membership":            "#bc8cff",
-  "Forum":                 "#8b949e",
-  "Community":             "#8b949e",
-  "Performance":           "#3fb950",
-  "Other":                 "#8b949e",
-};
-
-// ── Category accent colours (6 groups only) ──────────────────────────────────
-// Override the CAT_COLORS already defined above with a simplified 6-colour palette
-Object.assign(CAT_COLORS, {
-  // Infrastructure — blue
-  "Web Server":            "#58a6ff",
-  "Hosting":               "#58a6ff",
-  "Cloud":                 "#58a6ff",
-  "CDN":                   "#58a6ff",
-  "Cache":                 "#58a6ff",
-  "Backend-as-a-Service":  "#58a6ff",
-  "Database":              "#58a6ff",
-  "API Protocol":          "#58a6ff",
-  "Realtime":              "#58a6ff",
-  "Email":                 "#58a6ff",
-  // Security — red
-  "CDN / Security":        "#f85149",
-  "Security":              "#f85149",
-  "Auth / IAM":            "#f85149",
-  // Frontend / Dev — muted blue
-  "Programming Language":  "#79c0ff",
-  "Frontend Framework":    "#79c0ff",
-  "Meta-Framework":        "#79c0ff",
-  "Framework":             "#79c0ff",
-  "CSS Framework":         "#79c0ff",
-  "CSS-in-JS":             "#79c0ff",
-  "UI Library":            "#79c0ff",
-  "JavaScript Library":    "#79c0ff",
-  "Build Tool":            "#79c0ff",
-  "3D/WebGL":              "#79c0ff",
-  "Rich Text Editor":      "#79c0ff",
-  // Content / Commerce — green
-  "CMS":                   "#3fb950",
-  "Headless CMS":          "#3fb950",
-  "Website Builder":       "#3fb950",
-  "E-commerce":            "#3fb950",
-  "WordPress Plugin":      "#3fb950",
-  "SEO":                   "#3fb950",
-  "Form Builder":          "#3fb950",
-  "Maps":                  "#3fb950",
-  "LMS":                   "#3fb950",
-  // Analytics / Business — amber
-  "Analytics":             "#e3b341",
-  "Monitoring":            "#e3b341",
-  "Customer Support":      "#e3b341",
-  "Payment":               "#e3b341",
-  "Data Viz":              "#e3b341",
-  "Video Player":          "#e3b341",
-  "Icon Library":          "#e3b341",
-  "Font Service":          "#e3b341",
-  "Membership":            "#e3b341",
-  "Forum":                 "#e3b341",
-  "Community":             "#e3b341",
-  "Performance":           "#e3b341",
-  // Neutral — gray
-  "Miscellaneous":         "#8b949e",
-  "Other":                 "#8b949e",
-});
-
-// ── Heroicons SVG paths per category (24×24 outline) ─────────────────────────
-// Returns an <svg> HTML string for a given category name
-function catIcon(cat) {
-  const ic = CAT_ICON_PATHS[cat] || CAT_ICON_PATHS["_default"];
-  return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ic}</svg>`;
-}
-
-const CAT_ICON_PATHS = {
-  // server racks
-  "Web Server":
-    '<rect x="2" y="4.5" width="20" height="5" rx="1.5"/><rect x="2" y="14.5" width="20" height="5" rx="1.5"/><circle cx="18.5" cy="7" r="1" fill="currentColor"/><circle cx="18.5" cy="17" r="1" fill="currentColor"/>',
-
-  // globe / network
-  "Hosting":
-    '<circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3c-2.4 3-3.6 5.7-3.6 9s1.2 6 3.6 9 3.6-5.7 3.6-9-1.2-6-3.6-9z"/>',
-
-  "Cloud":
-    '<path d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"/>',
-
-  "CDN":
-    '<circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3c-2.4 3-3.6 5.7-3.6 9s1.2 6 3.6 9 3.6-5.7 3.6-9-1.2-6-3.6-9z"/>',
-
-  "Cache":
-    '<path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/>',
-
-  // database cylinder
-  "Database":
-    '<ellipse cx="12" cy="5.5" rx="9" ry="3"/><path d="M3 5.5v5c0 1.657 4.03 3 9 3s9-1.343 9-3v-5M3 10.5v5c0 1.657 4.03 3 9 3s9-1.343 9-3v-5"/>',
-
-  "Backend-as-a-Service":
-    '<path d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z"/>',
-
-  "Realtime":
-    '<path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/>',
-
-  "API Protocol":
-    '<path d="M14.25 9.75L16.5 12l-2.25 2.25m-4.5 0L7.5 12l2.25-2.25M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z"/>',
-
-  "Email":
-    '<path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/>',
-
-  // shields
-  "CDN / Security":
-    '<path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>',
-
-  "Security":
-    '<path d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm0 8.625a1.125 1.125 0 110 2.25 1.125 1.125 0 010-2.25zM12 6.75a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V7.5a.75.75 0 01.75-.75z"/>',
-
-  "Auth / IAM":
-    '<path d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/>',
-
-  // code brackets
-  "Programming Language":
-    '<path d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"/>',
-
-  "JavaScript Library":
-    '<path d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/>',
-
-  "Build Tool":
-    '<path d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 004.486-6.336l-3.276 3.277a3.004 3.004 0 01-2.25-2.25l3.276-3.276a4.5 4.5 0 00-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437l1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008z"/>',
-
-  // atom / component
-  "Frontend Framework":
-    '<circle cx="12" cy="12" r="2.25"/><ellipse cx="12" cy="12" rx="9.75" ry="3.75"/><ellipse cx="12" cy="12" rx="9.75" ry="3.75" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9.75" ry="3.75" transform="rotate(120 12 12)"/>',
-
-  // lightning bolt
-  "Meta-Framework":
-    '<path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/>',
-
-  "Cache_shared": // alias, assigned below
-    '<path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/>',
-
-  // layers
-  "Framework":
-    '<path d="M6.429 9.75L2.25 12l4.179 2.25m0-4.5l5.571 3 5.571-3m-11.142 0L2.25 7.5 12 2.25l9.75 5.25-4.179 2.25m0 0L21.75 12l-4.179 2.25m0 0l4.179 2.25L12 21.75 2.25 16.5l4.179-2.25m11.142 0l-5.571 3-5.571-3"/>',
-
-  // paint / css
-  "CSS Framework":
-    '<path d="M4.098 19.902a3.75 3.75 0 005.304 0l6.401-6.402M6.75 21A3.75 3.75 0 013 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 003.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88c.438-.439 1.15-.439 1.59 0l3.712 3.713c.44.44.44 1.152 0 1.59l-2.879 2.88M6.75 17.25h.008v.008H6.75v-.008z"/>',
-
-  "CSS-in-JS":
-    '<path d="M14.25 9.75L16.5 12l-2.25 2.25m-4.5 0L7.5 12l2.25-2.25M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z"/>',
-
-  // puzzle
-  "UI Library":
-    '<path d="M14.25 6.087c0-.355.186-.676.401-.959.221-.29.349-.634.349-1.003 0-1.036-1.007-1.875-2.25-1.875s-2.25.84-2.25 1.875c0 .369.128.713.349 1.003.215.283.401.604.401.959v0a.64.64 0 01-.657.643 48.39 48.39 0 01-4.163-.3c.186 1.613.293 3.25.315 4.907a.656.656 0 01-.658.663v0c-.355 0-.676-.186-.959-.401a1.647 1.647 0 00-1.003-.349c-1.036 0-1.875 1.007-1.875 2.25s.84 2.25 1.875 2.25c.369 0 .713-.128 1.003-.349.283-.215.604-.401.959-.401v0c.31 0 .555.26.532.57a48.039 48.039 0 01-.642 5.056c1.518.19 3.058.309 4.616.354a.64.64 0 00.657-.643v0c0-.355-.186-.676-.401-.959a1.647 1.647 0 01-.349-1.003c0-1.035 1.008-1.875 2.25-1.875 1.243 0 2.25.84 2.25 1.875 0 .369-.128.713-.349 1.003-.215.283-.4.604-.4.959v0c0 .333.277.599.61.58a48.1 48.1 0 005.427-.63 48.05 48.05 0 00.582-4.717.532.532 0 00-.533-.57v0c-.355 0-.676.186-.959.401-.29.221-.634.349-1.003.349-1.035 0-1.875-1.007-1.875-2.25s.84-2.25 1.875-2.25c.37 0 .713.128 1.003.349.283.215.604.401.96.401v0a.656.656 0 00.658-.663 48.422 48.422 0 00-.37-5.36c-1.886.342-3.81.574-5.766.689a.578.578 0 01-.61-.58v0z"/>',
-
-  "3D/WebGL":
-    '<path d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/>',
-
-  "Rich Text Editor":
-    '<path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/>',
-
-  // document
-  "CMS":
-    '<path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>',
-
-  "Headless CMS":
-    '<path d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/>',
-
-  "Website Builder":
-    '<path d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z"/>',
-
-  // cart
-  "E-commerce":
-    '<path d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z"/>',
-
-  "WordPress Plugin":
-    '<path d="M14.25 9.75L16.5 12l-2.25 2.25m-4.5 0L7.5 12l2.25-2.25M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z"/>',
-
-  "SEO":
-    '<path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0015.803 15.803z"/>',
-
-  "Form Builder":
-    '<path d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"/>',
-
-  "Maps":
-    '<path d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"/>',
-
-  "LMS":
-    '<path d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5"/>',
-
-  // chart bars
-  "Analytics":
-    '<path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>',
-
-  // pulse wave
-  "Monitoring":
-    '<path d="M3.75 12h3l2.25-6 3 12 2.25-7.5 1.5 4.5H20.25"/>',
-
-  // chat bubble
-  "Customer Support":
-    '<path d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/>',
-
-  // credit card
-  "Payment":
-    '<path d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z"/>',
-
-  // bar chart (data viz)
-  "Data Viz":
-    '<path d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z"/>',
-
-  // play
-  "Video Player":
-    '<path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z"/>',
-
-  // star
-  "Icon Library":
-    '<path d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"/>',
-
-  // text / font
-  "Font Service":
-    '<path d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/>',
-
-  // person
-  "Membership":
-    '<path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>',
-
-  // speech bubbles
-  "Forum":
-    '<path d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155"/>',
-
-  // users
-  "Community":
-    '<path d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/>',
-
-  // gauge / sun rays
-  "Performance":
-    '<path d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/>',
-
-  // gear
-  "Miscellaneous":
-    '<path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>',
-
-  // 3 dots
-  "_default":
-    '<circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/>',
-
-  "Other": '<circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/>',
-};
-
-// Brand colours per technology (used for the icon badge background)
-const TECH_BRAND_COLORS = {
-  // Web Servers
-  "Nginx":                  "#009639",
-  "Apache":                 "#D22128",
-  "LiteSpeed":              "#0095D5",
-  "Caddy":                  "#1F88C7",
-  "IIS":                    "#0078D4",
-  // Languages
-  "PHP":                    "#777BB4",
-  "Python":                 "#3776AB",
-  "Ruby":                   "#CC342D",
-  "Node.js":                "#339933",
-  "TypeScript":             "#3178C6",
-  "JavaScript":             "#c8a400",
-  "Go":                     "#00ADD8",
-  "Java":                   "#007396",
-  "Rust":                   "#ce412b",
-  "Perl":                   "#39457e",
-  // Frontend Frameworks
-  "React":                  "#00b4d4",
-  "Angular":                "#DD0031",
-  "Vue.js":                 "#4FC08D",
-  "Svelte":                 "#FF3E00",
-  "Ember.js":               "#E04E39",
-  "Alpine.js":              "#8BC0D0",
-  "Backbone.js":            "#0071B5",
-  "Preact":                 "#673AB8",
-  // Meta-Frameworks
-  "Next.js":                "#eeeeee",
-  "Nuxt.js":                "#00DC82",
-  "Gatsby":                 "#663399",
-  "Remix":                  "#d4d4d4",
-  "Astro":                  "#FF5D01",
-  "SvelteKit":              "#FF3E00",
-  // CMS
-  "WordPress":              "#21759B",
-  "Drupal":                 "#0678BE",
-  "Joomla":                 "#F44321",
-  "Ghost":                  "#738a94",
-  "Contentful":             "#2478CC",
-  "Sanity":                 "#F36458",
-  "DatoCMS":                "#FF7751",
-  "Strapi":                 "#4945FF",
-  "Prismic":                "#5163BA",
-  "Storyblok":              "#09B3AF",
-  "Webflow":                "#146EF5",
-  // E-commerce
-  "Shopify":                "#96BF48",
-  "WooCommerce":            "#96588A",
-  "Magento":                "#EE672F",
-  "BigCommerce":            "#121118",
-  "PrestaShop":             "#DF0067",
-  // JS Libraries
-  "jQuery":                 "#0769AD",
-  "jQuery UI":              "#0769AD",
-  "jQuery Migrate":         "#0769AD",
-  "jQuery Form":            "#0769AD",
-  "jQuery Validation":      "#0769AD",
-  "jQuery Cookie":          "#0769AD",
-  "core-js":                "#e8551d",
-  "Zone.js":                "#DD0031",
-  "Lodash":                 "#3492FF",
-  "Underscore.js":          "#0371ad",
-  "Moment.js":              "#222",
-  // CSS
-  "Tailwind CSS":           "#06B6D4",
-  "Bootstrap":              "#7952B3",
-  "Bulma":                  "#00D1B2",
-  "Foundation":             "#1779ba",
-  "Materialize":            "#ee6e73",
-  "Sass":                   "#CC6699",
-  "Less":                   "#1d365d",
-  // CSS-in-JS
-  "Emotion":                "#CB0059",
-  "styled-components":      "#DB7093",
-  // UI Libraries
-  "Material UI":            "#007FFF",
-  "Ant Design":             "#1677FF",
-  "Chakra UI":              "#319795",
-  "shadcn/ui":              "#aaaaaa",
-  "Radix UI":               "#eeeeee",
-  "Headless UI":            "#66e3ff",
-  "Mantine":                "#339AF0",
-  // CDN / Security
-  "Cloudflare":             "#F38020",
-  "AWS CloudFront":         "#FF9900",
-  "Fastly":                 "#FF282D",
-  "Akamai":                 "#009BDE",
-  "jsDelivr":               "#E84D3D",
-  "cdnjs":                  "#f16822",
-  "unpkg":                  "#e95420",
-  // Cloud / Hosting
-  "AWS":                    "#FF9900",
-  "Google Cloud":           "#4285F4",
-  "Microsoft Azure":        "#0078D4",
-  "DigitalOcean":           "#0080FF",
-  "Vercel":                 "#eeeeee",
-  "Netlify":                "#00C7B7",
-  "Heroku":                 "#430098",
-  "Hostinger":              "#673DE6",
-  "Render":                 "#46E3B7",
-  "Hetzner":                "#D50C2D",
-  "Linode / Akamai":        "#00b159",
-  "Vultr":                  "#007BFC",
-  "OVH":                    "#123F6D",
-  "Rackspace":              "#c7002e",
-  "SiteGround":             "#F57921",
-  "WP Engine":              "#40BAC8",
-  "Kinsta":                 "#1D4ED8",
-  "Railway":                "#0B0D0E",
-  "GoDaddy":                "#1bdbdb",
-  "Bluehost":               "#003087",
-  // Cloud DNS / Email
-  "AWS Route 53":           "#FF9900",
-  "Google Cloud DNS":       "#4285F4",
-  "Azure DNS":              "#0078D4",
-  "Google Workspace":       "#4285F4",
-  "Microsoft 365":          "#D83B01",
-  "Amazon SES":             "#FF9900",
-  "Mailgun":                "#F06B66",
-  "SendGrid":               "#1A82E2",
-  // Cache
-  "Redis":                  "#DC382D",
-  "Varnish":                "#4ba7c2",
-  // Database
-  "MySQL":                  "#4479A1",
-  "PostgreSQL":             "#336791",
-  "MongoDB":                "#47A248",
-  "Supabase":               "#3ECF8E",
-  "Firebase":               "#FFCA28",
-  // Auth
-  "Auth0":                  "#EB5424",
-  "Okta":                   "#007DC1",
-  "Clerk":                  "#6C47FF",
-  // Analytics
-  "Google Analytics":       "#E37400",
-  "Google Tag Manager":     "#4285F4",
-  "Hotjar":                 "#FD3A5C",
-  "Segment":                "#52BD94",
-  "Mixpanel":               "#7856FF",
-  "Amplitude":              "#197EEB",
-  "Matomo":                 "#3152A0",
-  "PostHog":                "#F54E00",
-  "Plausible":              "#5850EC",
-  "Fathom":                 "#9187FF",
-  "Heap":                   "#E1436A",
-  "Pendo":                  "#FF4876",
-  // Monitoring
-  "Sentry":                 "#362D59",
-  "Datadog":                "#632CA6",
-  "LogRocket":              "#7B52F6",
-  "Bugsnag":                "#4949E4",
-  "FullStory":              "#A855F7",
-  "New Relic":              "#1CE783",
-  // Customer Support
-  "Intercom":               "#286EFA",
-  "Zendesk":                "#03363D",
-  "Drift":                  "#17494D",
-  "HubSpot":                "#FF7A59",
-  "Crisp":                  "#1972F5",
-  "Freshdesk":              "#25c16f",
-  // Payment
-  "Stripe":                 "#635BFF",
-  "PayPal":                 "#003087",
-  "Braintree":              "#1C3E73",
-  "Square":                 "#3E4348",
-  "Paddle":                 "#1a1a2e",
-  "Adyen":                  "#0ABF53",
-  // Media
-  "Brightcove":             "#CF1F2A",
-  "Vimeo":                  "#1AB7EA",
-  "Wistia":                 "#54BBFF",
-  "YouTube":                "#FF0000",
-  "Lottie":                 "#00dba8",
-  // Build Tools
-  "Webpack":                "#8DD6F9",
-  "Vite":                   "#646CFF",
-  "Rollup":                 "#EC4A3F",
-  "Parcel":                 "#b35000",
-  "Turbopack":              "#eeeeee",
-  // API
-  "GraphQL":                "#E10098",
-  "gRPC":                   "#244c5a",
-  "REST":                   "#3fb950",
-  // Icons / Fonts
-  "Font Awesome":           "#528DD3",
-  "Google Fonts":           "#4285F4",
-  // Misc
-  "PWA":                    "#5A0FC8",
-  "Open Graph":             "#4267B2",
-  "Twitter Cards":          "#1DA1F2",
-  "HTTP/3":                 "#39d353",
-  "Priority Hints":         "#8b949e",
-  "RSS":                    "#FFA500",
-};
-
-// Returns true if a hex colour is light (needs dark text)
-function isLight(hex) {
-  if (!hex) return false;
-  const r = parseInt(hex.slice(1, 3), 16) || 0;
-  const g = parseInt(hex.slice(3, 5), 16) || 0;
-  const b = parseInt(hex.slice(5, 7), 16) || 0;
-  return (0.299 * r + 0.587 * g + 0.114 * b) > 155;
-}
-
-// Build a 24×24 icon badge element for a given tech name
-function iconFor(name, catColor) {
-  const bg  = TECH_BRAND_COLORS[name] || catColor || "#8b949e";
-  const fg  = isLight(bg) ? "#111" : "#fff";
-
-  // Compute 2-char initials
-  const words = name.replace(/[^a-zA-Z0-9.\s]/g, " ").trim().split(/\s+/);
-  const init  = words.length >= 2
-    ? (words[0][0] + words[1][0]).toUpperCase()
-    : name.slice(0, 2).toUpperCase();
-
-  const badge = el("div", "tech-icon-badge");
-  badge.style.background = bg;
-  badge.style.color      = fg;
-  badge.textContent      = init;
-  return badge;
-}
-
-function renderTech() {
-  const stack = document.getElementById("tech-stack");
-  const empty = document.getElementById("tech-empty");
-  const items = state.technologies || [];
-
-  setBadge("bdg-tech", items.length);
-
-  // Update domain label
-  const host = (() => {
-    try { return new URL(document.getElementById("site-host").textContent.includes("://")
-      ? document.getElementById("site-host").textContent
-      : `https://${document.getElementById("site-host").textContent}`).hostname;
-    } catch { return document.getElementById("site-host").textContent; }
-  })();
-  const domLabel = document.getElementById("tech-domain-label");
-  if (domLabel) domLabel.textContent = host || "—";
-
-  stack.replaceChildren();
-
-  if (!items.length) {
-    if (empty) empty.classList.remove("hidden");
-    return;
+function extractReqValues(entry) {
+  const vals = new Set();
+  // URL params
+  try {
+    const u = new URL(entry.url);
+    u.searchParams.forEach(v => { if (v.length >= 3) vals.add(v); });
+  } catch {}
+  // Body params (form-encoded)
+  if (entry.body) {
+    try {
+      new URLSearchParams(entry.body).forEach(v => { if (v.length >= 3) vals.add(v); });
+    } catch {}
+    // JSON body values
+    try {
+      const j = JSON.parse(entry.body);
+      const extract = obj => {
+        for (const v of Object.values(obj)) {
+          if (typeof v === "string" && v.length >= 3) vals.add(v);
+          else if (typeof v === "object" && v) extract(v);
+        }
+      };
+      extract(j);
+    } catch {}
   }
-  if (empty) empty.classList.add("hidden");
+  // Cookie values
+  const cookieHdr = entry.headers?.["Cookie"] || entry.headers?.["cookie"] || "";
+  cookieHdr.split(";").forEach(c => {
+    const v = c.split("=").slice(1).join("=").trim();
+    if (v.length >= 3 && v.length < 200) vals.add(v);
+  });
+  return [...vals];
+}
 
-  // Group by category
-  const groups = new Map();
-  for (const t of items) {
-    const cat = t.cat || t.category || "Other";
-    if (!groups.has(cat)) groups.set(cat, []);
-    groups.get(cat).push(t);
-  }
+function detectReflections(entry) {
+  const vals = extractReqValues(entry);
+  if (!vals.length) return [];
+  const respText = (entry.respBody || "") +
+    Object.entries(entry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+  if (!respText) return [];
+  return vals.filter(v => respText.includes(v));
+}
 
-  // Sort by CAT_ORDER, unknown categories go to bottom
-  const sorted = [...groups.entries()].sort(([a], [b]) => {
-    const ai = CAT_ORDER.indexOf(a);
-    const bi = CAT_ORDER.indexOf(b);
-    if (ai === -1 && bi === -1) return a.localeCompare(b);
-    if (ai === -1) return 1;
-    if (bi === -1) return -1;
-    return ai - bi;
+function hasReflections(entry) {
+  return detectReflections(entry).length > 0;
+}
+
+// ── Search within <pre> elements with highlight and auto-scroll ─────────────
+let detailSearchMatches = [];
+let detailSearchIdx = -1;
+
+function detailSearch(query) {
+  // Clear previous highlights
+  document.querySelectorAll("#hist-detail .raw-pre").forEach(pre => {
+    if (pre._origText !== undefined) pre.textContent = pre._origText;
+  });
+  detailSearchMatches = [];
+  detailSearchIdx = -1;
+  const countEl = document.getElementById("hist-detail-search-count");
+
+  if (!query || query.length < 2) { countEl.textContent = ""; return; }
+
+  const q = query.toLowerCase();
+  document.querySelectorAll("#hist-detail .hist-sub-pane:not(.hidden) .raw-pre").forEach(pre => {
+    const text = pre.textContent;
+    pre._origText = text;
+    if (!text.toLowerCase().includes(q)) return;
+
+    // Build highlighted HTML
+    const frag = document.createDocumentFragment();
+    let lastIdx = 0;
+    const lower = text.toLowerCase();
+    let pos;
+    while ((pos = lower.indexOf(q, lastIdx)) !== -1) {
+      if (pos > lastIdx) frag.appendChild(document.createTextNode(text.slice(lastIdx, pos)));
+      const mark = document.createElement("mark");
+      mark.className = "search-hl";
+      mark.textContent = text.slice(pos, pos + query.length);
+      frag.appendChild(mark);
+      detailSearchMatches.push(mark);
+      lastIdx = pos + query.length;
+    }
+    if (lastIdx < text.length) frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+    pre.textContent = "";
+    pre.appendChild(frag);
   });
 
-  for (const [cat, techs] of sorted) {
-    const color = CAT_COLORS[cat] || "#8b949e";
-    // ── Category card ────────────────────────────────────────────
-    const card = el("div", "tech-card");
-    card.style.borderTopColor = color;
+  countEl.textContent = detailSearchMatches.length ? `${detailSearchMatches.length} found` : "0 found";
+  if (detailSearchMatches.length) detailSearchNav(0);
+}
 
-    // Card header
-    const head = el("div", "tech-card-head");
-    head.style.borderLeftColor = color;
+function detailSearchNav(idx) {
+  if (!detailSearchMatches.length) return;
+  if (detailSearchMatches[detailSearchIdx]) detailSearchMatches[detailSearchIdx].className = "search-hl";
+  detailSearchIdx = ((idx % detailSearchMatches.length) + detailSearchMatches.length) % detailSearchMatches.length;
+  const m = detailSearchMatches[detailSearchIdx];
+  m.className = "search-hl search-hl-current";
+  m.scrollIntoView({ behavior: "smooth", block: "center" });
+  document.getElementById("hist-detail-search-count").textContent =
+    `${detailSearchIdx + 1}/${detailSearchMatches.length}`;
+}
 
-    // SVG icon — content is static hardcoded paths, not user input (safe)
-    const iconEl = el("span", "cat-icon");
-    iconEl.style.color = color;
-    iconEl.innerHTML = catIcon(cat); // eslint-disable-line -- static SVG paths only
-    const nameEl   = txt("span", "cat-head-name", cat);
-    nameEl.style.color = color;
-    const countEl  = txt("span", "cat-head-count", String(techs.length));
-    countEl.style.color        = color;
-    countEl.style.borderColor  = `${color}55`;
-    ap(head, iconEl, nameEl, countEl);
-    card.appendChild(head);
+function highlightReflections(entry) {
+  const reflections = detectReflections(entry);
+  const badge = document.getElementById("hist-reflect-badge");
+  if (!reflections.length) { badge.classList.add("hidden"); return; }
 
-    // Tech item rows
-    const list = el("div", "tech-list");
-    for (const t of techs) {
-      const row = el("div", "tech-list-item");
-      if (t.evidence) row.title = t.evidence;
+  badge.classList.remove("hidden");
+  badge.textContent = `${reflections.length} reflection${reflections.length > 1 ? "s" : ""}`;
 
-      row.appendChild(iconFor(t.name, color));
-
-      const nameSpan = txt("span", "tli-name", t.name);
-      row.appendChild(nameSpan);
-
-      if (t.version) row.appendChild(txt("span", "tli-ver", t.version));
-
-      list.appendChild(row);
+  // Highlight reflected values in response panes
+  document.querySelectorAll("#hist-detail .hist-detail-pane:last-child .raw-pre").forEach(pre => {
+    const text = pre.textContent;
+    pre._origText = text;
+    let result = text;
+    for (const val of reflections) {
+      result = result.split(val).join(`\x00RSTART\x00${val}\x00REND\x00`);
     }
-    card.appendChild(list);
-    stack.appendChild(card);
-  }
-}
+    if (result === text) return;
 
-// ── WHOIS / DNS / IP lookup ───────────────────────────────────────────────────
-
-let lookupDomain = "";
-
-async function doLookup() {
-  const host   = document.getElementById("site-host").textContent.trim();
-  const status = document.getElementById("lookup-status");
-  const btnL   = document.getElementById("btn-lookup");
-
-  if (!host || host === "—") {
-    status.textContent = "No domain — open a page first";
-    setTimeout(() => { status.textContent = ""; }, 3000);
-    return;
-  }
-
-  btnL.disabled      = true;
-  status.textContent = `Scanning ${host}…`;
-
-  await wakeSW();
-  const res = await bg({ type: "LOOKUP", domain: host });
-
-  btnL.disabled = false;
-
-  if (!res) {
-    status.textContent = "Background not responding — try reloading extension";
-    setTimeout(() => { status.textContent = ""; }, 5000);
-    return;
-  }
-  if (!res.ok) {
-    status.textContent = `Error: ${res.error || "unknown"}`;
-    setTimeout(() => { status.textContent = ""; }, 5000);
-    return;
-  }
-
-  lookupDomain = res.domain || host;
-
-  // Show partial results — render whatever came back
-  const sections = [];
-  if (res.ip)   { renderIpInfo(res.ip);   injectHostingTech(res.ip); sections.push("IP"); }
-  else          { clearSection("ip"); }
-  if (res.dns)  { renderDns(res.dns);     injectDnsTech(res.dns); sections.push("DNS"); }
-  else          { clearSection("dns"); }
-  if (res.rdap) { renderWhois(res.rdap);  sections.push("WHOIS"); }
-  else          { clearSection("whois"); }
-
-  status.textContent = sections.length
-    ? `Done ✓ — ${sections.join(", ")}`
-    : "Done — no data returned (rate limited?)";
-  setTimeout(() => { status.textContent = ""; }, 5000);
-}
-
-// Inject hosting provider detected from IP/ISP into the tech stack
-function injectHostingTech(ip) {
-  if (!ip || typeof ip !== "object") return;
-  const probe = `${typeof ip.isp === "string" ? ip.isp : ""} ${typeof ip.org === "string" ? ip.org : ""}`.toLowerCase();
-  const map = [
-    [/hostinger/,     "Hostinger"],
-    [/digitalocean/,  "DigitalOcean"],
-    [/amazon|aws/,    "AWS"],
-    [/google.*cloud|gcp/, "Google Cloud"],
-    [/microsoft|azure/, "Microsoft Azure"],
-    [/cloudflare/,    "Cloudflare"],
-    [/fastly/,        "Fastly"],
-    [/hetzner/,       "Hetzner"],
-    [/linode|akamai/, "Linode / Akamai"],
-    [/vultr/,         "Vultr"],
-    [/ovh/,           "OVH"],
-    [/rackspace/,     "Rackspace"],
-    [/siteground/,    "SiteGround"],
-    [/bluehost/,      "Bluehost"],
-    [/godaddy/,       "GoDaddy"],
-    [/wpengine/,      "WP Engine"],
-    [/kinsta/,        "Kinsta"],
-    [/vercel/,        "Vercel"],
-    [/netlify/,       "Netlify"],
-    [/heroku/,        "Heroku"],
-    [/railway/,       "Railway"],
-    [/render\.com|render inc/, "Render"],
-  ];
-  let added = false;
-  for (const [re, name] of map) {
-    if (re.test(probe) && !state.technologies.some(t => t.name === name)) {
-      state.technologies.push({ name, cat: "Hosting", version: null, evidence: "IP / ISP lookup" });
-      added = true;
+    const frag = document.createDocumentFragment();
+    const parts = result.split("\x00");
+    let inReflect = false;
+    for (const part of parts) {
+      if (part === "RSTART") { inReflect = true; continue; }
+      if (part === "REND") { inReflect = false; continue; }
+      if (inReflect) {
+        const mark = document.createElement("mark");
+        mark.className = "reflect-hl";
+        mark.textContent = part;
+        mark.title = "Reflected from request";
+        frag.appendChild(mark);
+      } else {
+        frag.appendChild(document.createTextNode(part));
+      }
     }
-  }
-  if (added) renderTech();
+    pre.textContent = "";
+    pre.appendChild(frag);
+  });
 }
 
-// Inject CDN/security tech detected from DNS records (e.g. Cloudflare NS)
-function injectDnsTech(dns) {
-  if (!dns || typeof dns !== "object") return;
-  const nsNames = (dns.ns || []).map(r => (typeof r.data === "string" ? r.data : "").toLowerCase());
-  const mxNames = (dns.mx || []).map(r => (typeof r.data === "string" ? r.data : "").toLowerCase());
-  const allNames = [...nsNames, ...mxNames];
-
-  const map = [
-    [/cloudflare/,          "Cloudflare",    "CDN / Security"],
-    [/awsdns/,              "AWS Route 53",  "Cloud"],
-    [/google/,              "Google Cloud DNS", "Cloud"],
-    [/azure-dns/,           "Azure DNS",     "Cloud"],
-    [/ns\.fastly/,          "Fastly",        "CDN"],
-    [/google.*mail|gmail/,  "Google Workspace", "Email"],
-    [/outlook|protection\.outlook/, "Microsoft 365", "Email"],
-    [/amazonses/,           "Amazon SES",    "Email"],
-    [/mailgun/,             "Mailgun",        "Email"],
-    [/sendgrid/,            "SendGrid",       "Email"],
-  ];
-  let added = false;
-  for (const [re, name, cat] of map) {
-    if (allNames.some(n => re.test(n)) && !state.technologies.some(t => t.name === name)) {
-      state.technologies.push({ name, cat, version: null, evidence: "DNS record" });
-      added = true;
-    }
-  }
-  if (added) renderTech();
-}
-
-function clearSection(name) {
-  const rows  = document.getElementById(`${name}-rows`);
-  const empty = document.getElementById(`${name}-empty`);
-  if (rows)  rows.replaceChildren();
-  if (empty) empty.classList.remove("hidden");
-}
-
-// ── Shared helpers for info cards ────────────────────────────────────────────
-
-function fmtTtl(sec) {
-  if (!sec && sec !== 0) return "";
-  const s = parseInt(sec);
-  if (s >= 86400) return `${Math.round(s / 86400)}d`;
-  if (s >= 3600)  return `${Math.round(s / 3600)}h`;
-  if (s >= 60)    return `${Math.round(s / 60)}m`;
-  return `${s}s`;
-}
-
-function addRow(container, key, value, cls) {
-  if (!value && value !== 0) return;
-  const row = el("div", cls ? `info-row ${cls}` : "info-row");
-  ap(row, txt("span", "info-key", key), txt("span", "info-val", String(value)));
-  container.appendChild(row);
-}
-
-function addGroupTitle(container, title) {
-  container.appendChild(txt("div", "info-group-title", title));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-function renderIpInfo(ip) {
-  const rows  = document.getElementById("ip-rows");
-  const empty = document.getElementById("ip-empty");
-  rows.replaceChildren();
-  if (!ip) { empty.classList.remove("hidden"); return; }
-  empty.classList.add("hidden");
-
-  // ── Network ──────────────────────────────────────────────────
-  addGroupTitle(rows, "Network");
-  addRow(rows, "IP Address", ip.ip);
-  addRow(rows, "IP Type",    ip.type);
-  addRow(rows, "PTR",        ip.ptr);
-  addRow(rows, "ASN",        ip.asn);
-  addRow(rows, "ISP",        ip.isp);
-  addRow(rows, "Org",        ip.org);
-  addRow(rows, "Domain",     ip.domain);
-
-  // ── Location ─────────────────────────────────────────────────
-  addGroupTitle(rows, "Location");
-  if (ip.flag || ip.country) {
-    const row = el("div", "info-row");
-    ap(row,
-      txt("span", "info-key", "Country"),
-      txt("span", "info-val", [ip.flag, ip.country, ip.country_code ? `(${ip.country_code})` : ""].filter(Boolean).join(" "))
-    );
-    rows.appendChild(row);
-  }
-  addRow(rows, "Continent",  ip.continent);
-  addRow(rows, "Region",     ip.region_code ? `${ip.region} (${ip.region_code})` : ip.region);
-  addRow(rows, "City",       ip.city);
-  addRow(rows, "Postal",     ip.postal);
-  addRow(rows, "Coordinates",
-    ip.latitude && ip.longitude ? `${ip.latitude}, ${ip.longitude}` : null);
-  addRow(rows, "Capital",    ip.capital);
-  addRow(rows, "Calling",    ip.calling_code);
-
-  // ── Time ─────────────────────────────────────────────────────
-  if (ip.timezone) {
-    addGroupTitle(rows, "Time");
-    addRow(rows, "Timezone",   ip.tz_utc ? `${ip.timezone}  ${ip.tz_utc}` : ip.timezone);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-function renderDns(dns) {
-  const rows  = document.getElementById("dns-rows");
-  const empty = document.getElementById("dns-empty");
-  rows.replaceChildren();
-  if (!dns) { empty.classList.remove("hidden"); return; }
-
-  let hasAny = false;
-
-  // ── Helper: one DNS record row ──────────────────────────────
-  function dnsRow(typeKey, label, data, opts = {}) {
-    hasAny = true;
-    const row = el("div", "info-row dns-record-row");
-
-    // Type badge
-    const badge = txt("span", `dns-type dns-${typeKey}`, label);
-    row.appendChild(badge);
-
-    // Extra badge (MX priority / TXT subtype)
-    if (opts.subBadge) {
-      const sb = txt("span", `dns-sub-badge ${opts.subClass || ""}`, opts.subBadge);
-      row.appendChild(sb);
-    }
-
-    // Value
-    const val = txt("span", "dns-val", data);
-    row.appendChild(val);
-
-    // TTL
-    if (opts.ttl != null) {
-      row.appendChild(txt("span", "dns-ttl", fmtTtl(opts.ttl)));
-    }
-
-    rows.appendChild(row);
-  }
-
-  // A / AAAA
-  for (const r of (dns.a || []))    dnsRow("a",    "A",    r.data, { ttl: r.ttl });
-  for (const r of (dns.aaaa || [])) dnsRow("aaaa", "AAAA", r.data, { ttl: r.ttl });
-
-  // PTR (reverse DNS)
-  if (dns.ptr?.length) {
-    for (const r of dns.ptr) dnsRow("ptr", "PTR", r.data, { ttl: r.ttl });
-  }
-
-  // CNAME
-  for (const r of (dns.cname || [])) dnsRow("cname", "CNAME", r.data, { ttl: r.ttl });
-
-  // NS
-  if ((dns.ns || []).length) {
-    for (const r of dns.ns)
-      dnsRow("ns", "NS", r.data.replace(/\.$/, ""), { ttl: r.ttl });
-  }
-
-  // MX (sorted by priority, already done in background.js)
-  for (const r of (dns.mx || []))
-    dnsRow("mx", "MX", r.data, { ttl: r.ttl, subBadge: String(r.priority), subClass: "dns-mx-prio" });
-
-  // TXT — SPF / DMARC / DKIM / generic
-  for (const r of (dns.txt || []))
-    dnsRow("txt", r.txtype, r.data, { ttl: r.ttl });
-
-  // CAA
-  for (const r of (dns.caa || []))
-    dnsRow("caa", "CAA", r.value, { ttl: r.ttl, subBadge: r.tag, subClass: "dns-caa-tag" });
-
-  // SOA — expanded block
-  if (dns.soa) {
-    const s = dns.soa;
-    hasAny = true;
-    const block = el("div", "dns-soa-block");
-    block.appendChild(txt("div", "dns-soa-title", `SOA  (TTL ${fmtTtl(s.ttl)})`));
-    const grid = el("div", "dns-soa-grid");
-    function soaField(k, v) {
-      if (!v) return;
-      const cell = el("div", "dns-soa-cell");
-      ap(cell, txt("span", "dns-soa-key", k), txt("span", "dns-soa-val", v));
-      grid.appendChild(cell);
-    }
-    soaField("Primary NS", s.primary);
-    soaField("Admin",      s.admin);
-    soaField("Serial",     s.serial);
-    soaField("Refresh",    s.refresh ? fmtTtl(+s.refresh) : null);
-    soaField("Retry",      s.retry   ? fmtTtl(+s.retry)   : null);
-    soaField("Expire",     s.expire  ? fmtTtl(+s.expire)  : null);
-    soaField("Min TTL",    s.minimum ? fmtTtl(+s.minimum) : null);
-    block.appendChild(grid);
-    rows.appendChild(block);
-  }
-
-  empty.classList.toggle("hidden", hasAny);
-  if (!hasAny) empty.classList.remove("hidden");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-function renderWhois(rdap) {
-  const parsed = document.getElementById("whois-parsed");
-  const rawEl  = document.getElementById("whois-raw");
-  const empty  = document.getElementById("whois-empty");
-
-  parsed.replaceChildren();
-  if (!rdap) { empty.classList.remove("hidden"); return; }
-  empty.classList.add("hidden");
-
-  // ── Registration ─────────────────────────────────────────────
-  addGroupTitle(parsed, "Registration");
-  addRow(parsed, "Domain",      rdap.domain);
-  addRow(parsed, "Registry ID", rdap.registryDomainId);
-  addRow(parsed, "DNSSEC",      rdap.dnssec);
-  addRow(parsed, "Status",      rdap.status);
-  addRow(parsed, "Created",     rdap.created);
-  addRow(parsed, "Updated",     rdap.updated);
-  addRow(parsed, "Expires",     rdap.expires);
-  addRow(parsed, "Last Check",  rdap.lastChecked);
-  if (rdap.nameservers) {
-    // one row per NS
-    rdap.nameservers.split(", ").forEach((ns, i) =>
-      addRow(parsed, i === 0 ? "Nameservers" : "", ns)
-    );
-  }
-
-  // ── Registrar ────────────────────────────────────────────────
-  addGroupTitle(parsed, "Registrar");
-  addRow(parsed, "Name",        rdap.registrar);
-  addRow(parsed, "IANA ID",     rdap.registrarIanaId);
-  addRow(parsed, "WHOIS",       rdap.registrarWhois);
-  addRow(parsed, "URL",         rdap.registrarUrl);
-  addRow(parsed, "Abuse Email", rdap.registrarAbuse);
-  addRow(parsed, "Abuse Phone", rdap.registrarAbusePhone);
-
-  // ── Registrant ───────────────────────────────────────────────
-  if (rdap.registrant || rdap.registrantOrg || rdap.registrantEmail) {
-    addGroupTitle(parsed, "Registrant");
-    addRow(parsed, "Name",  rdap.registrant);
-    addRow(parsed, "Org",   rdap.registrantOrg);
-    addRow(parsed, "Email", rdap.registrantEmail);
-  }
-
-  // ── Admin / Tech Contacts ────────────────────────────────────
-  if (rdap.adminName || rdap.adminEmail || rdap.techName || rdap.techEmail) {
-    addGroupTitle(parsed, "Contacts");
-    addRow(parsed, "Admin Name",  rdap.adminName);
-    addRow(parsed, "Admin Email", rdap.adminEmail);
-    addRow(parsed, "Tech Name",   rdap.techName);
-    addRow(parsed, "Tech Email",  rdap.techEmail);
-  }
-
-  rawEl.textContent = JSON.stringify(rdap, null, 2);
-}
 
 // ═══════════════════════════ HEADERS ═════════════════════════════════════════
 
+// ── Security header checks (from BB Security Analyzer) ──────────────────────
+const SEC_CHECKS = [
+  { name: "content-security-policy", label: "Content-Security-Policy", desc: "Controls resources the browser is allowed to load",
+    check(v) {
+      if (!v) return { st: "fail", note: "Missing" };
+      const iss = [];
+      if (v.includes("unsafe-inline")) iss.push("unsafe-inline");
+      if (v.includes("unsafe-eval")) iss.push("unsafe-eval");
+      if (/(?:^|[\s;])default-src[^;]*\*/.test(v)) iss.push("wildcard in default-src");
+      else if (v.includes("*")) iss.push("wildcard source");
+      if (!v.includes("frame-ancestors")) iss.push("no frame-ancestors");
+      if (!v.includes("object-src")) iss.push("no object-src");
+      if (!iss.length) return { st: "pass", note: "Well configured" };
+      if (iss.includes("unsafe-inline") || iss.includes("unsafe-eval") || iss.includes("wildcard in default-src"))
+        return { st: "warn", note: iss.join(", ") };
+      return { st: "pass", note: "OK. Minor: " + iss.join(", ") };
+    }},
+  { name: "strict-transport-security", label: "Strict-Transport-Security", desc: "Enforces HTTPS connections",
+    check(v) {
+      if (!v) return { st: "fail", note: "Missing" };
+      const m = v.match(/max-age=(\d+)/); const age = m ? parseInt(m[1]) : 0;
+      if (age < 31536000) return { st: "warn", note: `max-age too low (${age}s)` };
+      const extras = [v.includes("includeSubDomains") && "includeSubDomains", v.includes("preload") && "preload"].filter(Boolean);
+      return { st: "pass", note: extras.length ? extras.join(" + ") : "OK" };
+    }},
+  { name: "x-frame-options", label: "X-Frame-Options", desc: "Prevents clickjacking via iframes",
+    check(v, all) {
+      const csp = all["content-security-policy"] || "";
+      if (!v && /frame-ancestors/.test(csp)) return { st: "pass", note: "CSP frame-ancestors covers it" };
+      if (!v) return { st: "fail", note: "Missing" };
+      if (v.toUpperCase() === "DENY") return { st: "pass", note: "DENY" };
+      if (v.toUpperCase() === "SAMEORIGIN") return { st: "pass", note: "SAMEORIGIN" };
+      return { st: "warn", note: v };
+    }},
+  { name: "referrer-policy", label: "Referrer-Policy", desc: "Controls Referer header information",
+    check(v) {
+      if (!v) return { st: "warn", note: "Missing (browser default)" };
+      if (["no-referrer","same-origin","strict-origin","strict-origin-when-cross-origin"].includes(v.toLowerCase()))
+        return { st: "pass", note: v };
+      if (v.toLowerCase() === "unsafe-url") return { st: "fail", note: "unsafe-url (leaks full URL)" };
+      return { st: "warn", note: v };
+    }},
+  { name: "x-content-type-options", label: "X-Content-Type-Options", desc: "Prevents MIME-type sniffing",
+    check(v) {
+      if (!v) return { st: "fail", note: "Missing" };
+      return v.toLowerCase() === "nosniff" ? { st: "pass", note: "nosniff" } : { st: "warn", note: v };
+    }},
+  { name: "permissions-policy", label: "Permissions-Policy", desc: "Controls browser features (camera, mic, etc.)",
+    check(v) {
+      if (!v) return { st: "warn", note: "Missing" };
+      return { st: "pass", note: v.length > 60 ? v.slice(0, 57) + "…" : v };
+    }},
+];
+
 function renderHeaders() {
-  const list  = document.getElementById("hdr-list");
-  const empty = document.getElementById("hdr-empty");
   const hdrs  = state.headers || {};
   const keys  = Object.keys(hdrs);
+  const empty = document.getElementById("hdr-empty");
 
-  list.replaceChildren();
+  // Security grid
+  const grid = document.getElementById("hdr-sec-grid");
+  grid.replaceChildren();
 
-  const missing = REQUIRED_HDRS.filter(h => !hdrs[h]);
-  if (missing.length) {
-    const sec = el("div", "hdr-section");
-    sec.appendChild(txt("div", "hdr-section-title", "Missing Security Headers"));
-    missing.forEach(h => {
-      sec.appendChild(txt("div", "hdr-missing", `⚠ ${h}`));
-    });
-    list.appendChild(sec);
+  const results = SEC_CHECKS.map(h => ({ ...h, value: hdrs[h.name] || null, ...h.check(hdrs[h.name] || null, hdrs) }));
+  const fails = results.filter(r => r.st === "fail").length;
+  const warns = results.filter(r => r.st === "warn").length;
+
+  const summary = el("div", "hdr-sec-summary");
+  summary.textContent = `${fails} missing · ${warns} warnings · ${results.length - fails - warns} OK`;
+  grid.appendChild(summary);
+
+  const tilesWrap = el("div", "hdr-sec-tiles");
+  results.forEach(r => {
+    const tile = el("div", `hdr-sec-tile hdr-sec-${r.st}`);
+    tile.innerHTML = `
+      <div class="hdr-sec-top"><span class="hdr-sec-badge hdr-sec-badge-${r.st}">${r.st.toUpperCase()}</span><span class="hdr-sec-note">${esc(r.note)}</span></div>
+      <div class="hdr-sec-name">${r.label}</div>
+      <div class="hdr-sec-desc">${r.desc}</div>
+      ${r.value ? `<div class="hdr-sec-val">${esc(r.value.length > 120 ? r.value.slice(0,117)+"…" : r.value)}</div>` : ""}
+    `;
+    tilesWrap.appendChild(tile);
+  });
+  grid.appendChild(tilesWrap);
+
+  // All headers list
+  const allList = document.getElementById("hdr-all-list");
+  allList.replaceChildren();
+
+  const sorted = keys.sort();
+  sorted.forEach(k => {
+    const row = el("div", "hdr-row");
+    ap(row, txt("span", "hdr-key", k), txt("span", "hdr-val", hdrs[k]));
+    allList.appendChild(row);
+  });
+
+  empty.classList.toggle("hidden", keys.length > 0 || results.length > 0);
+}
+
+// ═══════════════════════════ TARGET / SITE MAP ════════════════════════════════
+
+let tgtSelectedPath = null;
+let tgtFilter = "";
+let tgtInScopeOnly = false;
+
+function tgtBuildTree(entries) {
+  // Build a hierarchical tree: protocol+host → path segments → leaf
+  const tree = {}; // host → { children: { segment → ... }, entries: [] }
+
+  entries.forEach(entry => {
+    try {
+      const u = new URL(entry.url);
+      const host = u.protocol + "//" + u.host;
+      if (!tree[host]) tree[host] = { children: {}, entries: [] };
+
+      const segments = u.pathname.split("/").filter(Boolean);
+      let node = tree[host];
+
+      segments.forEach(seg => {
+        if (!node.children[seg]) node.children[seg] = { children: {}, entries: [] };
+        node = node.children[seg];
+      });
+
+      node.entries.push(entry);
+    } catch {}
+  });
+
+  return tree;
+}
+
+function tgtIsInScope(url) {
+  const inc = (document.getElementById("tgt-scope-include")?.value || "").trim();
+  const exc = (document.getElementById("tgt-scope-exclude")?.value || "").trim();
+  if (exc) {
+    const pats = exc.split("\n").map(p => p.trim()).filter(Boolean);
+    if (pats.some(p => tgtMatchWild(url, p))) return false;
+  }
+  if (inc) {
+    const pats = inc.split("\n").map(p => p.trim()).filter(Boolean);
+    return pats.some(p => tgtMatchWild(url, p));
+  }
+  return true; // no include patterns = everything in scope
+}
+
+function tgtMatchWild(str, pattern) {
+  const re = new RegExp("^" + pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$", "i");
+  return re.test(str);
+}
+
+function tgtCountEntries(node) {
+  let count = node.entries.length;
+  for (const child of Object.values(node.children)) count += tgtCountEntries(child);
+  return count;
+}
+
+function tgtCollectEntries(node) {
+  let all = [...node.entries];
+  for (const child of Object.values(node.children)) all = all.concat(tgtCollectEntries(child));
+  return all;
+}
+
+function tgtFileIcon(name) {
+  const n = name.toLowerCase();
+  if (/\.html?$/.test(n))                      return { label: "HTML", cls: "tgt-badge-html" };
+  if (/\.js$|\.mjs$/.test(n))                  return { label: "JS",   cls: "tgt-badge-js" };
+  if (/\.css$/.test(n))                        return { label: "CSS",  cls: "tgt-badge-css" };
+  if (/\.json$/.test(n))                       return { label: "JSON", cls: "tgt-badge-json" };
+  if (/\.xml$/.test(n))                        return { label: "XML",  cls: "tgt-badge-xml" };
+  if (/\.svg$/.test(n))                        return { label: "SVG",  cls: "tgt-badge-img" };
+  if (/\.png$|\.jpe?g$|\.gif$|\.webp$|\.ico$/.test(n)) return { label: "IMG", cls: "tgt-badge-img" };
+  if (/\.woff2?$|\.ttf$|\.eot$/.test(n))       return { label: "FONT", cls: "tgt-badge-font" };
+  if (/\.pdf$/.test(n))                        return { label: "PDF",  cls: "tgt-badge-pdf" };
+  if (/\.php$|\.asp$|\.jsp$/.test(n))          return { label: "SRV",  cls: "tgt-badge-srv" };
+  if (/\/api\/|\/v\d+\/|graphql/.test(n))      return { label: "API",  cls: "tgt-badge-api" };
+  return null;
+}
+
+function renderSiteMap() {
+  let entries = [...historyData];
+
+  if (tgtFilter) {
+    const q = tgtFilter.toLowerCase();
+    entries = entries.filter(e => e.url.toLowerCase().includes(q));
   }
 
-  if (keys.length) {
-    const sec = el("div", "hdr-section");
-    sec.appendChild(txt("div", "hdr-section-title", "Captured Headers"));
-    keys.forEach(k => {
-      const row = el("div", "hdr-row");
-      ap(row, txt("span", "hdr-key", k), txt("span", "hdr-val", hdrs[k]));
-      sec.appendChild(row);
-    });
-    list.appendChild(sec);
+  if (tgtInScopeOnly) {
+    entries = entries.filter(e => tgtIsInScope(e.url));
   }
 
-  const hasContent = missing.length > 0 || keys.length > 0;
-  empty.classList.toggle("hidden", hasContent);
+  // Deduplicate by URL+method for tree (keep all for table)
+  const tree = tgtBuildTree(entries);
+  const container = document.getElementById("tgt-tree");
+  container.replaceChildren();
+
+  // Sort hosts
+  const hosts = Object.keys(tree).sort();
+  hosts.forEach(host => {
+    const hostNode = tgtRenderNode(host, tree[host], 0, host, true);
+    container.appendChild(hostNode);
+  });
+}
+
+function tgtRenderNode(label, node, depth, fullPath, isHost) {
+  const div = document.createElement("div");
+  div.className = "tgt-node";
+
+  const hasChildren = Object.keys(node.children).length > 0;
+  const count = tgtCountEntries(node);
+  const inScope = isHost ? tgtIsInScope(fullPath + "/anything") : tgtIsInScope(fullPath);
+
+  const row = document.createElement("div");
+  row.className = "tgt-node-row " + (inScope ? "in-scope" : "out-scope");
+  if (fullPath === tgtSelectedPath) row.classList.add("selected");
+  row.style.setProperty("--depth", depth);
+
+  const toggle = document.createElement("span");
+  toggle.className = "tgt-toggle";
+  toggle.textContent = hasChildren ? "▸" : " ";
+
+  const icon = document.createElement("span");
+  icon.className = "tgt-icon";
+  if (isHost) { icon.textContent = "◆"; }
+  else if (hasChildren) { icon.textContent = "▪"; }
+  else {
+    const ftype = tgtFileIcon(label);
+    if (ftype) {
+      icon.textContent = "";
+      const badge = document.createElement("span");
+      badge.className = "tgt-file-badge " + ftype.cls;
+      badge.textContent = ftype.label;
+      icon.appendChild(badge);
+      icon.style.width = "auto";
+    } else {
+      icon.textContent = "─";
+    }
+  }
+
+  const lbl = document.createElement("span");
+  lbl.className = "tgt-label";
+  lbl.textContent = isHost ? label : "/" + label;
+
+  const cnt = document.createElement("span");
+  cnt.className = "tgt-count";
+  cnt.textContent = count > 0 ? `(${count})` : "";
+
+  row.appendChild(toggle);
+  row.appendChild(icon);
+  row.appendChild(lbl);
+  row.appendChild(cnt);
+  div.appendChild(row);
+
+  // Children container
+  const childrenDiv = document.createElement("div");
+  childrenDiv.className = "tgt-children" + (depth < 1 ? " open" : "");
+  if (depth < 1) toggle.textContent = hasChildren ? "▾" : " ";
+
+  const childKeys = Object.keys(node.children).sort();
+  childKeys.forEach(seg => {
+    const childPath = fullPath + "/" + seg;
+    childrenDiv.appendChild(tgtRenderNode(seg, node.children[seg], depth + 1, childPath, false));
+  });
+  div.appendChild(childrenDiv);
+
+  // Click: toggle children + select node
+  row.addEventListener("click", () => {
+    if (hasChildren) {
+      const isOpen = childrenDiv.classList.toggle("open");
+      toggle.textContent = isOpen ? "▾" : "▸";
+    }
+    tgtSelectedPath = fullPath;
+    // Highlight selected
+    document.querySelectorAll(".tgt-node-row.selected").forEach(r => r.classList.remove("selected"));
+    row.classList.add("selected");
+    // Show entries in table
+    const allEntries = tgtCollectEntries(node);
+    tgtRenderTable(allEntries);
+  });
+
+  return div;
+}
+
+function tgtRenderTable(entries) {
+  const tbody = document.getElementById("tgt-table-body");
+  const empty = document.getElementById("tgt-table-empty");
+  tbody.replaceChildren();
+
+  if (!entries.length) { empty.classList.remove("hidden"); return; }
+  empty.classList.add("hidden");
+
+  // Newest first
+  const sorted = [...entries].sort((a, b) => (b.time || 0) - (a.time || 0));
+
+  sorted.forEach(entry => {
+    const tr = document.createElement("tr");
+    const statusCls = !entry.status ? "hist-td-status-wait"
+      : entry.status < 300 ? "hist-td-status-ok"
+      : entry.status < 400 ? "hist-td-status-rdir" : "hist-td-status-err";
+    const len = entry.length > 1024 ? `${(entry.length/1024).toFixed(1)}k` : entry.length || "";
+
+    tr.innerHTML = `
+      <td><span class="method-pill m-${entry.method.toLowerCase()}">${entry.method}</span></td>
+      <td title="${esc(entry.url)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(entry.url)}</td>
+      <td class="${statusCls}">${entry.status ?? "…"}</td>
+      <td class="hist-td-len">${len}</td>
+      <td class="hist-td-mime">${esc(shortMime(entry.mimeType))}</td>
+    `;
+
+    // Actions cell
+    const actTd = document.createElement("td");
+    actTd.style.whiteSpace = "nowrap";
+    const repBtn = txt("button", "btn btn-xs btn-ghost", "→ Rep");
+    const intrBtn = txt("button", "btn btn-xs btn-ghost", "→ Intr");
+    repBtn.addEventListener("click", e => { e.stopPropagation(); sendToRepeater({ method: entry.method, url: entry.url, headers: entry.headers || {}, body: entry.body || "" }); });
+    intrBtn.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder({ method: entry.method, url: entry.url, headers: entry.headers || {}, body: entry.body || "" }); });
+    ap(actTd, repBtn, intrBtn);
+    tr.appendChild(actTd);
+    tr.style.cursor = "pointer";
+    tbody.appendChild(tr);
+  });
+}
+
+// ═══════════════════════════ INTRUDER ═════════════════════════════════════════
+
+function intrCountPositions() {
+  const raw = document.getElementById("intr-request").value;
+  const matches = raw.match(/§[^§]*§/g);
+  const n = matches ? matches.length : 0;
+  document.getElementById("intr-pos-count").textContent = `${n} position${n !== 1 ? "s" : ""}`;
+
+  // Update payload set tabs
+  const needed = Math.max(1, n);
+  while (intrPayloadSets.length < needed) intrPayloadSets.push("");
+  renderPayloadSetTabs(needed);
+}
+
+function renderPayloadSetTabs(count) {
+  const container = document.getElementById("intr-payload-tabs");
+  container.replaceChildren();
+  for (let i = 0; i < count; i++) {
+    const btn = document.createElement("button");
+    btn.className = "sub-tab" + (i === intrActiveSet ? " active" : "");
+    btn.dataset.plset = i;
+    btn.textContent = `Set ${i + 1}`;
+    btn.addEventListener("click", () => {
+      intrPayloadSets[intrActiveSet] = document.getElementById("intr-payloads").value;
+      intrActiveSet = i;
+      document.getElementById("intr-payloads").value = intrPayloadSets[i] || "";
+      renderPayloadSetTabs(count);
+    });
+    container.appendChild(btn);
+  }
+}
+
+function intrExpandPayloads(raw) {
+  const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
+  const result = [];
+  for (const line of lines) {
+    const rangeMatch = line.match(/^\{\{(\d+)-(\d+)\}\}$/);
+    if (rangeMatch) {
+      const start = parseInt(rangeMatch[1]);
+      const end   = parseInt(rangeMatch[2]);
+      for (let i = start; i <= end; i++) result.push(String(i));
+    } else {
+      result.push(line);
+    }
+  }
+  return result;
+}
+
+function intrBuildRequests(template, attackType, payloadSets) {
+  const posRegex = /§([^§]*)§/g;
+  const positions = [];
+  let m;
+  while ((m = posRegex.exec(template)) !== null) {
+    positions.push({ start: m.index, end: m.index + m[0].length, original: m[1] });
+  }
+
+  if (!positions.length) return [];
+
+  const expanded = payloadSets.map(ps => intrExpandPayloads(ps));
+  const requests = [];
+
+  if (attackType === "sniper") {
+    // One position at a time, all payloads
+    for (let pi = 0; pi < positions.length; pi++) {
+      const payloads = expanded[Math.min(pi, expanded.length - 1)];
+      for (const payload of payloads) {
+        let req = template;
+        positions.forEach((pos, idx) => {
+          req = req.replace(`§${pos.original}§`, idx === pi ? payload : pos.original);
+        });
+        requests.push({ payload, posIndex: pi, raw: req });
+      }
+    }
+  } else if (attackType === "battering-ram") {
+    // Same payload in all positions
+    const payloads = expanded[0] || [];
+    for (const payload of payloads) {
+      let req = template;
+      positions.forEach(pos => {
+        req = req.replace(`§${pos.original}§`, payload);
+      });
+      requests.push({ payload, posIndex: -1, raw: req });
+    }
+  } else if (attackType === "pitchfork") {
+    // Parallel: one payload per set, iterate in lockstep
+    const maxLen = Math.max(...expanded.map(e => e.length));
+    for (let i = 0; i < maxLen; i++) {
+      let req = template;
+      const payloadParts = [];
+      positions.forEach((pos, idx) => {
+        const set = expanded[Math.min(idx, expanded.length - 1)];
+        const p = set[Math.min(i, set.length - 1)] || "";
+        req = req.replace(`§${pos.original}§`, p);
+        payloadParts.push(p);
+      });
+      requests.push({ payload: payloadParts.join(" | "), posIndex: -1, raw: req });
+    }
+  }
+
+  return requests;
+}
+
+function intrParseRaw(rawRequest, methodOverride, urlOverride) {
+  // Parse a raw HTTP-like request text into method, url, headers, body
+  const lines = rawRequest.split("\n");
+  let method = methodOverride || "GET";
+  let url = urlOverride || "";
+  const headers = {};
+  let body = "";
+  let inBody = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (inBody) {
+      body += (body ? "\n" : "") + line;
+    } else if (line.trim() === "") {
+      inBody = true;
+    } else {
+      const ci = line.indexOf(":");
+      if (ci > 0) {
+        headers[line.slice(0, ci).trim()] = line.slice(ci + 1).trim();
+      }
+    }
+  }
+
+  return { method, url, headers: Object.entries(headers).map(([k,v]) => `${k}: ${v}`).join("\n"), body };
+}
+
+async function intrStart() {
+  // Save current payload set
+  intrPayloadSets[intrActiveSet] = document.getElementById("intr-payloads").value;
+
+  const template   = document.getElementById("intr-request").value;
+  const method     = document.getElementById("intr-method").value;
+  const url        = document.getElementById("intr-url").value.trim();
+  const attackType = document.getElementById("intr-attack").value;
+  const threads    = Math.max(1, Math.min(20, parseInt(document.getElementById("intr-threads").value) || 1));
+  const delay      = Math.max(0, parseInt(document.getElementById("intr-delay").value) || 0);
+  const autoCookie = document.getElementById("intr-autocookie").checked;
+
+  if (!url) { document.getElementById("intr-url").focus(); return; }
+
+  const requests = intrBuildRequests(template, attackType, intrPayloadSets);
+  if (!requests.length) { document.getElementById("intr-status").textContent = "No positions/payloads"; return; }
+
+  intrResults = [];
+  intrRunning = true;
+  intrAbort = new AbortController();
+  const tbody = document.getElementById("intr-results");
+  tbody.replaceChildren();
+
+  document.getElementById("intr-start").disabled = true;
+  document.getElementById("intr-stop").disabled  = false;
+
+  // Get cookies once if auto-cookie enabled
+  let cookieStr = "";
+  if (autoCookie) {
+    const ck = await bg({ type: "GET_COOKIES", url });
+    if (ck?.cookies) cookieStr = ck.cookies;
+  }
+
+  let completed = 0;
+  const total = requests.length;
+  const status = document.getElementById("intr-status");
+
+  // Process in chunks of `threads`
+  const queue = [...requests];
+  while (queue.length > 0 && !intrAbort.signal.aborted) {
+    const batch = queue.splice(0, threads);
+    const promises = batch.map(async (req, batchIdx) => {
+      const parsed = intrParseRaw(req.raw, method, url);
+
+      // Inject cookies
+      let rawHdrs = parsed.headers;
+      if (cookieStr) {
+        const hdrLines = rawHdrs.split("\n");
+        const ci = hdrLines.findIndex(l => /^cookie\s*:/i.test(l));
+        if (ci >= 0) hdrLines[ci] = `Cookie: ${cookieStr}`;
+        else hdrLines.push(`Cookie: ${cookieStr}`);
+        rawHdrs = hdrLines.join("\n");
+      }
+
+      const res = await bg({
+        type: "SEND_REQUEST",
+        url: parsed.url || url,
+        method: parsed.method || method,
+        rawHeaders: rawHdrs,
+        body: parsed.body,
+      });
+
+      completed++;
+      status.textContent = `${completed}/${total}`;
+
+      const entry = {
+        id: completed,
+        payload: req.payload,
+        status: res?.status ?? "err",
+        statusText: res?.statusText || "",
+        length: res?.size || 0,
+        elapsed: res?.elapsed || 0,
+        body: res?.body || res?.error || "",
+      };
+      intrResults.push(entry);
+
+      // Add row to table
+      const tr = document.createElement("tr");
+      const statusCls = !res?.ok ? "hist-td-status-err"
+        : res.status < 300 ? "hist-td-status-ok"
+        : res.status < 400 ? "hist-td-status-rdir" : "hist-td-status-err";
+      const lenStr = entry.length > 1024 ? `${(entry.length/1024).toFixed(1)}k` : entry.length;
+      const preview = (entry.body || "").slice(0, 120).replace(/\n/g, " ");
+      tr.innerHTML = `
+        <td class="hist-td-num">${entry.id}</td>
+        <td title="${esc(entry.payload)}">${esc(entry.payload)}</td>
+        <td class="${statusCls}">${entry.status}</td>
+        <td class="hist-td-len">${lenStr}</td>
+        <td class="hist-td-elapsed">${entry.elapsed}</td>
+        <td class="hist-td-mime" title="${esc(preview)}">${esc(preview)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    await Promise.all(promises);
+
+    if (delay > 0 && queue.length > 0 && !intrAbort.signal.aborted) {
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+
+  intrRunning = false;
+  document.getElementById("intr-start").disabled = false;
+  document.getElementById("intr-stop").disabled  = true;
+  status.textContent = `Done — ${completed}/${total}`;
+}
+
+function intrStop() {
+  if (intrAbort) intrAbort.abort();
+  intrRunning = false;
+  document.getElementById("intr-start").disabled = false;
+  document.getElementById("intr-stop").disabled  = true;
+  document.getElementById("intr-status").textContent = "Stopped";
+}
+
+function intrSendToIntruder(req) {
+  const method = req.method || "GET";
+  const url    = req.url || "";
+  const rawHdrs = req.rawHeaders || headersToRaw(req.headers || {});
+  const body   = req.body || "";
+
+  const mSel = document.getElementById("intr-method");
+  for (const o of mSel.options) { if (o.value === method) { o.selected = true; break; } }
+  document.getElementById("intr-url").value = url;
+
+  // Build raw request template
+  let raw = "";
+  if (rawHdrs) raw += rawHdrs;
+  if (body) raw += "\n\n" + body;
+  document.getElementById("intr-request").value = raw;
+  intrCountPositions();
+  showTab("intruder");
+}
+
+// ═══════════════════════════ DECODER ══════════════════════════════════════════
+
+function decOp(op, input) {
+  try {
+    switch (op) {
+      // Encode
+      case "b64-enc":     return btoa(unescape(encodeURIComponent(input)));
+      case "url-enc":     return encodeURIComponent(input);
+      case "url-enc2":    return encodeURIComponent(encodeURIComponent(input));
+      case "html-enc":    return input.replace(/[&<>"'/]/g, c => `&#${c.charCodeAt(0)};`);
+      case "hex-enc":     return [...input].map(c => c.charCodeAt(0).toString(16).padStart(2,"0")).join(" ");
+      case "unicode-enc": return [...input].map(c => "\\u" + c.charCodeAt(0).toString(16).padStart(4,"0")).join("");
+      case "js-enc":      return input.replace(/[\\'"\n\r\t\x00-\x1f]/g, c => "\\x" + c.charCodeAt(0).toString(16).padStart(2,"0"));
+      case "ascii-hex":   return [...input].map(c => "%" + c.charCodeAt(0).toString(16).padStart(2,"0")).join("");
+
+      // Decode
+      case "b64-dec":     return decodeURIComponent(escape(atob(input.trim())));
+      case "url-dec":     return decodeURIComponent(input);
+      case "html-dec":    { const t = document.createElement("textarea"); t.innerHTML = input; return t.value; }
+      case "hex-dec":     return input.replace(/\s+/g," ").split(" ").filter(Boolean).map(h => String.fromCharCode(parseInt(h,16))).join("");
+      case "unicode-dec": return input.replace(/\\u([0-9a-fA-F]{4})/g, (_,h) => String.fromCharCode(parseInt(h,16)));
+      case "js-dec":      return input.replace(/\\x([0-9a-fA-F]{2})/g, (_,h) => String.fromCharCode(parseInt(h,16)))
+                                      .replace(/\\u([0-9a-fA-F]{4})/g, (_,h) => String.fromCharCode(parseInt(h,16)))
+                                      .replace(/\\n/g,"\n").replace(/\\r/g,"\r").replace(/\\t/g,"\t").replace(/\\\\/g,"\\");
+      case "jwt-dec": {
+        const parts = input.trim().split(".");
+        if (parts.length < 2) return "Invalid JWT";
+        const dec = p => decodeURIComponent(escape(atob(p.replace(/-/g,"+").replace(/_/g,"/"))));
+        return "=== HEADER ===\n" + JSON.stringify(JSON.parse(dec(parts[0])),null,2) +
+               "\n\n=== PAYLOAD ===\n" + JSON.stringify(JSON.parse(dec(parts[1])),null,2) +
+               (parts[2] ? "\n\n=== SIGNATURE ===\n" + parts[2] : "");
+      }
+
+      // Hash (Web Crypto API)
+      case "md5":    return "Use SHA — MD5 not available in browser crypto";
+      case "sha1":   return cryptoHash("SHA-1", input);
+      case "sha256": return cryptoHash("SHA-256", input);
+
+      default: return input;
+    }
+  } catch (e) { return `Error: ${e.message}`; }
+}
+
+async function cryptoHash(algo, input) {
+  const buf = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest(algo, buf);
+  return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+// ═══════════════════════════ SETTINGS ═════════════════════════════════════════
+
+const DEFAULT_SETTINGS = {
+  matchReplace: [],
+  autoHeaders: "",
+  proxyEnabled: false,
+  proxyHost: "127.0.0.1",
+  proxyPort: "8080",
+  proxyType: "http",
+  scopeInclude: "",
+  scopeExclude: "",
+  followRedirects: true,
+  timeout: "30000",
+};
+
+let settings = { ...DEFAULT_SETTINGS };
+
+function loadSettings() {
+  return new Promise(resolve => {
+    chrome.storage.local.get("voidSettings", r => {
+      if (r.voidSettings) settings = { ...DEFAULT_SETTINGS, ...r.voidSettings };
+      resolve();
+    });
+  });
+}
+
+function saveSettings() {
+  // Read current UI state into settings
+  settings.autoHeaders    = document.getElementById("cfg-auto-headers").value;
+  settings.proxyEnabled   = document.getElementById("cfg-proxy-enabled").checked;
+  settings.proxyHost      = document.getElementById("cfg-proxy-host").value;
+  settings.proxyPort      = document.getElementById("cfg-proxy-port").value;
+  settings.proxyType      = document.getElementById("cfg-proxy-type").value;
+  settings.scopeInclude   = document.getElementById("cfg-scope-include").value;
+  settings.scopeExclude   = document.getElementById("cfg-scope-exclude").value;
+  settings.followRedirects = document.getElementById("cfg-follow-redirects").checked;
+  settings.timeout        = document.getElementById("cfg-timeout").value;
+  settings.matchReplace   = readMRRules();
+
+  chrome.storage.local.set({ voidSettings: settings });
+
+  // Push to background
+  bg({ type: "UPDATE_SETTINGS", settings });
+
+  const st = document.getElementById("cfg-status");
+  st.textContent = "Saved";
+  setTimeout(() => { st.textContent = ""; }, 1500);
+}
+
+function loadSettingsUI() {
+  document.getElementById("cfg-auto-headers").value    = settings.autoHeaders;
+  document.getElementById("cfg-proxy-enabled").checked  = settings.proxyEnabled;
+  document.getElementById("cfg-proxy-host").value       = settings.proxyHost;
+  document.getElementById("cfg-proxy-port").value       = settings.proxyPort;
+  document.getElementById("cfg-proxy-type").value       = settings.proxyType;
+  document.getElementById("cfg-scope-include").value    = settings.scopeInclude;
+  document.getElementById("cfg-scope-exclude").value    = settings.scopeExclude;
+  document.getElementById("cfg-follow-redirects").checked = settings.followRedirects;
+  document.getElementById("cfg-timeout").value          = settings.timeout;
+  renderMRRules();
+}
+
+// ── Match & Replace UI ───────────────────────────────────────────────────────
+function renderMRRules() {
+  const container = document.getElementById("mr-rules");
+  container.replaceChildren();
+
+  (settings.matchReplace || []).forEach((rule, i) => {
+    const div = document.createElement("div");
+    div.className = "mr-rule" + (rule.enabled === false ? " mr-disabled" : "");
+    div.innerHTML = `
+      <div class="mr-fields">
+        <div class="mr-row">
+          <label>Type</label>
+          <select class="mr-sel" data-idx="${i}" data-field="type">
+            <option value="req-header" ${rule.type==="req-header"?"selected":""}>Request Header</option>
+            <option value="req-body" ${rule.type==="req-body"?"selected":""}>Request Body</option>
+            <option value="resp-header" ${rule.type==="resp-header"?"selected":""}>Response Header</option>
+            <option value="resp-body" ${rule.type==="resp-body"?"selected":""}>Response Body</option>
+            <option value="url" ${rule.type==="url"?"selected":""}>URL</option>
+          </select>
+        </div>
+        <div class="mr-row">
+          <label>Match</label>
+          <input class="mr-inp" data-idx="${i}" data-field="match" value="${esc(rule.match||"")}" placeholder="Regex or string (empty = add)" spellcheck="false">
+        </div>
+        <div class="mr-row">
+          <label>Replace</label>
+          <input class="mr-inp" data-idx="${i}" data-field="replace" value="${esc(rule.replace||"")}" placeholder="Replacement value" spellcheck="false">
+        </div>
+        <div class="mr-row">
+          <label>Scope</label>
+          <input class="mr-inp" data-idx="${i}" data-field="scope" value="${esc(rule.scope||"")}" placeholder="URL pattern (empty = all)" spellcheck="false">
+        </div>
+      </div>
+      <div class="mr-actions">
+        <button class="mr-toggle ${rule.enabled!==false?"on":""}" data-idx="${i}" title="Toggle">${rule.enabled!==false?"ON":"OFF"}</button>
+        <button class="mr-del" data-idx="${i}" title="Delete">✕</button>
+      </div>
+    `;
+    container.appendChild(div);
+  });
+
+  // Event delegation
+  container.onclick = e => {
+    const toggle = e.target.closest(".mr-toggle");
+    if (toggle) {
+      const idx = +toggle.dataset.idx;
+      settings.matchReplace[idx].enabled = !settings.matchReplace[idx].enabled;
+      renderMRRules();
+      return;
+    }
+    const del = e.target.closest(".mr-del");
+    if (del) {
+      settings.matchReplace.splice(+del.dataset.idx, 1);
+      renderMRRules();
+    }
+  };
+  container.oninput = e => {
+    const inp = e.target;
+    if (inp.dataset.idx !== undefined && inp.dataset.field) {
+      settings.matchReplace[+inp.dataset.idx][inp.dataset.field] = inp.value;
+    }
+  };
+  container.onchange = e => {
+    const sel = e.target;
+    if (sel.dataset.idx !== undefined && sel.dataset.field) {
+      settings.matchReplace[+sel.dataset.idx][sel.dataset.field] = sel.value;
+    }
+  };
+}
+
+function readMRRules() {
+  return (settings.matchReplace || []).map(r => ({ ...r }));
+}
+
+function addMRRule() {
+  settings.matchReplace = settings.matchReplace || [];
+  settings.matchReplace.push({ enabled: true, type: "req-header", match: "", replace: "", scope: "" });
+  renderMRRules();
 }
 
 // ═══════════════════════════ INIT ════════════════════════════════════════════
@@ -1459,18 +1772,110 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.key === "Enter" && !e.shiftKey) doSend();
   });
 
-  // Repeater clear
-  document.getElementById("rep-clear").addEventListener("click", () => {
-    clearRespPanes();
-    document.getElementById("resp-label").textContent   = "RESPONSE";
-    document.getElementById("resp-sub-tabs").classList.add("hidden");
-    document.getElementById("resp-empty").classList.remove("hidden");
+  // Repeater target override toggle
+  document.getElementById("rep-target-toggle").addEventListener("click", () => {
+    const bar = document.getElementById("rep-target-bar");
+    const btn = document.getElementById("rep-target-toggle");
+    const hidden = bar.classList.toggle("hidden");
+    btn.classList.toggle("active", !hidden);
+    if (hidden) {
+      document.getElementById("rep-target-host").value = "";
+      document.getElementById("rep-target-port").value = "";
+    }
   });
+
+  // Repeater tabs
+  document.getElementById("rep-tab-add").addEventListener("click", addRepTab);
+  renderRepTabs();
 
   // Response sub-tabs
   document.querySelectorAll(".sub-tab[data-resp]").forEach(t =>
     t.addEventListener("click", () => switchRespPane(t.dataset.resp))
   );
+
+  // History sortable columns
+  document.querySelectorAll(".hist-th-sortable").forEach(th =>
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      if (histSortKey === key) { histSortAsc = !histSortAsc; }
+      else { histSortKey = key; histSortAsc = (key === "id" ? false : true); }
+      renderHistory();
+    })
+  );
+
+  // Headers sub-tabs
+  document.querySelectorAll(".hdr-sub-bar .sub-tab[data-hdrsub]").forEach(t =>
+    t.addEventListener("click", () => {
+      document.querySelectorAll(".hdr-sub-bar .sub-tab").forEach(b => b.classList.remove("active"));
+      t.classList.add("active");
+      document.querySelectorAll(".hdr-sub-panel").forEach(p => {
+        p.classList.toggle("active", p.id === `hdr-${t.dataset.hdrsub}`);
+        p.classList.toggle("hidden", p.id !== `hdr-${t.dataset.hdrsub}`);
+      });
+    })
+  );
+
+  // History filter + dropdowns + clear + detail
+  document.getElementById("hist-filter").addEventListener("input", e => {
+    filterHist = e.target.value; renderHistory();
+  });
+  document.getElementById("hist-flt-method").addEventListener("change", e => {
+    filterHistMeth = e.target.value; renderHistory();
+  });
+  document.getElementById("hist-flt-status").addEventListener("change", e => {
+    filterHistStat = e.target.value; renderHistory();
+  });
+  document.getElementById("hist-flt-mime").addEventListener("change", e => {
+    filterHistMime = e.target.value; renderHistory();
+  });
+  document.getElementById("hist-inscope-only").addEventListener("change", e => {
+    filterHistScope = e.target.checked; renderHistory();
+  });
+  document.getElementById("hist-flt-ext").addEventListener("change", e => {
+    filterHistExt = e.target.value; renderHistory();
+  });
+  document.getElementById("hist-clear").addEventListener("click", async () => {
+    await bg({ type: "CLEAR_HISTORY" });
+    historyData = [];
+    renderHistory();
+    setBadge("bdg-history", 0);
+  });
+  document.getElementById("hist-reflect-only").addEventListener("change", e => {
+    filterHistReflect = e.target.checked; renderHistory();
+  });
+  document.getElementById("hist-detail-close").addEventListener("click", closeHistDetail);
+  document.getElementById("hist-detail-to-rep").addEventListener("click", histDetailToRepeater);
+
+  // Detail search
+  document.getElementById("hist-detail-search").addEventListener("input", e => detailSearch(e.target.value));
+  document.getElementById("hist-detail-search-next").addEventListener("click", () => detailSearchNav(detailSearchIdx + 1));
+  document.getElementById("hist-detail-search-prev").addEventListener("click", () => detailSearchNav(detailSearchIdx - 1));
+  document.getElementById("hist-detail-search").addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); detailSearchNav(e.shiftKey ? detailSearchIdx - 1 : detailSearchIdx + 1); }
+  });
+  document.getElementById("hist-detail-to-intr").addEventListener("click", () => {
+    if (!histDetailEntry) return;
+    intrSendToIntruder({
+      method: histDetailEntry.method,
+      url: histDetailEntry.url,
+      headers: histDetailEntry.headers || {},
+      body: histDetailEntry.body || "",
+    });
+    closeHistDetail();
+  });
+
+  // History detail sub-tab switching (request and response sides)
+  document.getElementById("hist-detail").addEventListener("click", e => {
+    const btn = e.target.closest(".sub-tab[data-histpane]");
+    if (!btn) return;
+    const paneId = btn.dataset.histpane;
+    // Find which side (parent .hist-detail-pane)
+    const side = btn.closest(".hist-detail-pane");
+    side.querySelectorAll(".sub-tab").forEach(t => t.classList.remove("active"));
+    btn.classList.add("active");
+    side.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
+    side.querySelector(`#hist-${paneId}-pane`).classList.remove("hidden");
+  });
 
   // Attach / detach
   document.getElementById("btn-attach").addEventListener("click", async () => {
@@ -1603,17 +2008,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Tech tab: WHOIS scan + raw toggle
-  document.getElementById("btn-lookup").addEventListener("click", doLookup);
-  document.getElementById("whois-toggle").addEventListener("click", () => {
-    const raw   = document.getElementById("whois-raw");
-    const btn   = document.getElementById("whois-toggle");
-    const shown = !raw.classList.contains("hidden");
-    raw.classList.toggle("hidden", shown);
-    btn.textContent = shown ? "▼" : "▲";
-  });
-
-  // Header / Refresh / Export
+  // Refresh / Export
   document.getElementById("btn-refresh").addEventListener("click", loadAll);
   document.getElementById("btn-export").addEventListener("click", async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -1630,18 +2025,117 @@ document.addEventListener("DOMContentLoaded", () => {
   // Resizable split
   initResizer();
 
-  // Social links — open in a new Chrome tab
-  const SOCIAL = {
-    "link-x":     "https://x.com/0x4161",
-    "link-insta":  "https://instagram.com/fx_py3",
-    "link-li":     "https://linkedin.com/in/ahmad-alanazi-b1040933b/",
-  };
-  Object.entries(SOCIAL).forEach(([id, url]) => {
-    const btn = document.getElementById(id);
-    if (btn) btn.addEventListener("click", () => chrome.tabs.create({ url }));
+  // Target sub-tabs
+  document.querySelectorAll(".tgt-sub-bar .sub-tab[data-tgtsub]").forEach(t =>
+    t.addEventListener("click", () => {
+      document.querySelectorAll(".tgt-sub-bar .sub-tab").forEach(b => b.classList.remove("active"));
+      t.classList.add("active");
+      document.querySelectorAll(".tgt-sub-panel").forEach(p => {
+        p.classList.toggle("active", p.id === `tgt-${t.dataset.tgtsub}`);
+        p.classList.toggle("hidden", p.id !== `tgt-${t.dataset.tgtsub}`);
+      });
+    })
+  );
+  document.getElementById("tgt-filter").addEventListener("input", e => {
+    tgtFilter = e.target.value;
+    renderSiteMap();
+  });
+  document.getElementById("tgt-inscope-only").addEventListener("change", e => {
+    tgtInScopeOnly = e.target.checked;
+    renderSiteMap();
+  });
+  document.getElementById("tgt-scope-save").addEventListener("click", () => {
+    // Sync scope to Settings too
+    document.getElementById("cfg-scope-include").value = document.getElementById("tgt-scope-include").value;
+    document.getElementById("cfg-scope-exclude").value = document.getElementById("tgt-scope-exclude").value;
+    saveSettings();
+    renderSiteMap();
+    const st = document.getElementById("tgt-scope-status");
+    st.textContent = "Saved";
+    setTimeout(() => { st.textContent = ""; }, 1500);
+  });
+
+  // Target tree resizer
+  (function() {
+    const handle = document.getElementById("tgt-resizer");
+    const pane   = document.getElementById("tgt-tree-pane");
+    let dragging = false, startX = 0, startW = 0;
+    handle.addEventListener("mousedown", e => {
+      dragging = true; startX = e.clientX; startW = pane.getBoundingClientRect().width;
+      document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
+    });
+    document.addEventListener("mousemove", e => {
+      if (!dragging) return;
+      pane.style.flex = "none";
+      pane.style.width = Math.max(150, startW + e.clientX - startX) + "px";
+    });
+    document.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
+    });
+  })();
+
+  // Intruder
+  const intrMSel = document.getElementById("intr-method");
+  METHODS.forEach(m => { const o = el("option"); o.value = m; o.textContent = m; intrMSel.appendChild(o); });
+  document.getElementById("intr-request").addEventListener("input", intrCountPositions);
+  document.getElementById("intr-add-pos").addEventListener("click", () => {
+    const ta = document.getElementById("intr-request");
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const val = ta.value;
+    const selected = val.slice(start, end) || "payload";
+    ta.value = val.slice(0, start) + `§${selected}§` + val.slice(end);
+    ta.selectionStart = start + 1;
+    ta.selectionEnd   = start + 1 + selected.length;
+    ta.focus();
+    intrCountPositions();
+  });
+  document.getElementById("intr-clear-pos").addEventListener("click", () => {
+    const ta = document.getElementById("intr-request");
+    ta.value = ta.value.replace(/§/g, "");
+    intrCountPositions();
+  });
+  document.getElementById("intr-start").addEventListener("click", intrStart);
+  document.getElementById("intr-stop").addEventListener("click", intrStop);
+
+  // Decoder
+  document.querySelectorAll(".dec-btn").forEach(btn =>
+    btn.addEventListener("click", async () => {
+      const input = document.getElementById("dec-input").value;
+      const result = decOp(btn.dataset.op, input);
+      document.getElementById("dec-output").value = (result instanceof Promise) ? await result : result;
+    })
+  );
+  document.getElementById("dec-swap").addEventListener("click", () => {
+    const inp = document.getElementById("dec-input");
+    const out = document.getElementById("dec-output");
+    const tmp = inp.value;
+    inp.value = out.value;
+    out.value = tmp;
+  });
+  document.getElementById("dec-clear").addEventListener("click", () => {
+    document.getElementById("dec-input").value = "";
+    document.getElementById("dec-output").value = "";
+  });
+
+  // Settings
+  document.getElementById("mr-add").addEventListener("click", addMRRule);
+  document.getElementById("cfg-save").addEventListener("click", saveSettings);
+  document.getElementById("cfg-reset").addEventListener("click", () => {
+    settings = { ...DEFAULT_SETTINGS };
+    loadSettingsUI();
+    saveSettings();
   });
 
   // Boot
+  loadSettings().then(() => {
+    loadSettingsUI();
+    // Sync scope to Target tab
+    document.getElementById("tgt-scope-include").value = settings.scopeInclude || "";
+    document.getElementById("tgt-scope-exclude").value = settings.scopeExclude || "";
+    bg({ type: "UPDATE_SETTINGS", settings });
+  });
   loadAll();
   startPoll();
 });
