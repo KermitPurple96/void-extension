@@ -10,7 +10,8 @@
     "debugger",
     "scripting",
     "alarms",
-    "cookies"
+    "cookies",
+    "unlimitedStorage"
   ],
   "host_permissions": ["<all_urls>"],
   "devtools_page": "devtools.html",
@@ -30,7 +31,7 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src *"
+    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://localhost:* http://localhost:*"
   },
   "web_accessible_resources": [
     {

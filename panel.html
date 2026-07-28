@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+    content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
   <link rel="stylesheet" href="panel.css">
 </head>
 <body>
@@ -11,14 +11,17 @@
 
   <!-- ── Tab bar ── -->
   <div class="tabbar">
-    <button class="tab"        data-tab="target"   >Target</button>
+    <button class="tab"        data-tab="target"   >Project</button>
     <button class="tab active" data-tab="intercept">Intercept <span class="bdg hidden" id="bdg-intercept">0</span></button>
     <button class="tab"        data-tab="history"  >History <span class="bdg" id="bdg-history">0</span></button>
-    <button class="tab"        data-tab="repeater" >Repeater</button>
+    <button class="tab"        data-tab="repeater" >Repeater <span class="bdg hidden" id="bdg-repeater">0</span></button>
     <button class="tab"        data-tab="intruder" >Intruder</button>
     <button class="tab"        data-tab="probe"    >Probe <span class="bdg" id="bdg-probe">0</span></button>
+    <button class="tab"        data-tab="logger"    >Logger <span class="bdg" id="bdg-logger">0</span></button>
+    <button class="tab"        data-tab="containers">Containers</button>
     <button class="tab"        data-tab="headers"  >Headers</button>
     <button class="tab"        data-tab="decoder"  >Decoder</button>
+    <button class="tab"        data-tab="sensitive">Sensitive <span class="bdg" id="bdg-sensitive">0</span></button>
     <button class="tab"        data-tab="settings" >Settings</button>
     <div class="tabbar-gap"></div>
     <span id="site-host" class="site-host">—</span>
@@ -29,14 +32,44 @@
   <!-- ═══════════════════════════ TARGET ══════════════════════════════════════ -->
   <div id="tab-target" class="tab-panel hidden">
 
-    <!-- Sub-tabs: Site Map | Endpoints | Scope -->
+    <!-- Sub-tabs: Session | Site Map | Endpoints | Scope -->
     <div class="tgt-sub-bar">
+      <button class="sub-tab" data-tgtsub="session">Session</button>
       <button class="sub-tab active" data-tgtsub="sitemap">Site Map</button>
       <button class="sub-tab" data-tgtsub="endpoints">Endpoints <span class="bdg" id="bdg-endpoints">0</span></button>
       <button class="sub-tab" data-tgtsub="scope">Scope</button>
       <div class="tabbar-gap"></div>
       <input id="tgt-filter" type="text" class="tgt-filter-inp" placeholder="Filter URLs…" spellcheck="false" autocomplete="off">
       <label class="rep-autocookie"><input type="checkbox" id="tgt-inscope-only"> In-scope only</label>
+    </div>
+
+    <!-- Session sub-panel -->
+    <div id="tgt-session" class="tgt-sub-panel hidden">
+      <div class="settings-scroll">
+        <div class="settings-section">
+          <div class="settings-section-title">Project Session</div>
+          <div class="settings-section-desc">
+            Save or restore a full session — history, repeater tabs, intruder config, endpoints, settings.
+          </div>
+          <div class="settings-row">
+            <select id="session-configs" class="filter-sel session-config-sel">
+              <option value="">Saved sessions…</option>
+            </select>
+            <button id="session-config-load" class="btn btn-sm btn-accent">Load</button>
+            <button id="session-config-del" class="btn btn-sm btn-danger">Delete</button>
+          </div>
+          <div class="settings-actions">
+            <button id="session-save" class="btn btn-accent">Save to Browser</button>
+            <input id="session-name" type="text" class="settings-inp" placeholder="Session name (optional)" spellcheck="false">
+          </div>
+          <div class="settings-actions">
+            <button id="session-export" class="btn btn-sm btn-ghost">Export .json</button>
+            <button id="session-import" class="btn btn-sm btn-ghost">Import .json</button>
+            <input type="file" id="session-file" accept=".json,.void" hidden>
+            <span id="session-status" class="settings-status"></span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Site Map sub-panel -->
@@ -48,8 +81,8 @@
         </div>
         <!-- Resize handle -->
         <div class="tgt-resizer" id="tgt-resizer"></div>
-        <!-- Right: URL table for selected node -->
-        <div class="tgt-table-pane">
+        <!-- Middle: URL table for selected node -->
+        <div class="tgt-table-pane" id="tgt-table-pane">
           <table class="hist-table">
             <thead>
               <tr>
@@ -64,6 +97,42 @@
             <tbody id="tgt-table-body"></tbody>
           </table>
           <div id="tgt-table-empty" class="empty">Select a node from the tree</div>
+        </div>
+        <!-- Right: detail pane -->
+        <div class="tgt-detail-resizer" id="tgt-detail-resizer"></div>
+        <div id="tgt-detail" class="tgt-detail hidden">
+          <div class="hist-detail-topbar">
+            <button id="tgt-detail-close" class="btn btn-sm btn-ghost">✕</button>
+            <span id="tgt-detail-title" class="hist-detail-title"></span>
+            <button id="tgt-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
+            <button id="tgt-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+          </div>
+          <div class="hist-detail-body">
+            <div class="hist-detail-pane" id="tgt-req-side">
+              <div class="hist-detail-sub-tabs">
+                <button class="sub-tab active" data-tgtpane="req-headers">Headers</button>
+                <button class="sub-tab" data-tgtpane="req-body">Body</button>
+              </div>
+              <div id="tgt-req-headers-pane" class="hist-sub-pane active"><pre id="tgt-req-headers-pre" class="raw-pre"></pre></div>
+              <div id="tgt-req-body-pane" class="hist-sub-pane hidden"><pre id="tgt-req-body-pre" class="raw-pre"></pre></div>
+              <div class="detail-search-bar">
+                <input id="tgt-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
+                <span id="tgt-req-search-count" class="detail-search-count"></span>
+              </div>
+            </div>
+            <div class="hist-detail-pane" id="tgt-resp-side">
+              <div class="hist-detail-sub-tabs">
+                <button class="sub-tab active" data-tgtpane="resp-headers">Headers</button>
+                <button class="sub-tab" data-tgtpane="resp-body">Body</button>
+              </div>
+              <div id="tgt-resp-headers-pane" class="hist-sub-pane active"><pre id="tgt-resp-headers-pre" class="raw-pre"></pre></div>
+              <div id="tgt-resp-body-pane" class="hist-sub-pane hidden"><pre id="tgt-resp-body-pre" class="raw-pre"></pre></div>
+              <div class="detail-search-bar">
+                <input id="tgt-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
+                <span id="tgt-resp-search-count" class="detail-search-count"></span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -90,8 +159,47 @@
         <span id="ep-crawl-status" class="crawl-status-text">Starting…</span>
         <button id="ep-crawl-stop" class="btn btn-xs btn-danger">Stop</button>
       </div>
-      <div id="ep-list"   class="req-list"></div>
-      <div id="ep-empty"  class="empty hidden">No endpoints — interact with the page or refresh</div>
+      <div class="ep-split">
+        <div class="ep-split-left" id="ep-split-left">
+          <div id="ep-list"   class="req-list"></div>
+          <div id="ep-empty"  class="empty hidden">No endpoints — interact with the page or refresh</div>
+        </div>
+        <div class="ep-resizer" id="ep-resizer"></div>
+        <div id="ep-detail" class="ep-detail hidden">
+          <div class="hist-detail-topbar">
+            <button id="ep-detail-close" class="btn btn-sm btn-ghost">✕</button>
+            <span id="ep-detail-title" class="hist-detail-title"></span>
+            <button id="ep-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
+            <button id="ep-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+          </div>
+          <div class="hist-detail-body">
+            <div class="hist-detail-pane" id="ep-req-side">
+              <div class="hist-detail-sub-tabs">
+                <button class="sub-tab active" data-eppane="req-headers">Headers</button>
+                <button class="sub-tab" data-eppane="req-body">Body</button>
+              </div>
+              <div id="ep-req-headers-pane" class="hist-sub-pane active"><pre id="ep-req-headers-pre" class="raw-pre"></pre></div>
+              <div id="ep-req-body-pane" class="hist-sub-pane hidden"><pre id="ep-req-body-pre" class="raw-pre"></pre></div>
+              <div class="detail-search-bar">
+                <input id="ep-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
+                <span id="ep-req-search-count" class="detail-search-count"></span>
+              </div>
+            </div>
+            <div class="hist-detail-pane" id="ep-resp-side">
+              <div class="hist-detail-sub-tabs">
+                <button class="sub-tab active" data-eppane="resp-headers">Headers</button>
+                <button class="sub-tab" data-eppane="resp-body">Body</button>
+              </div>
+              <div id="ep-resp-headers-pane" class="hist-sub-pane active"><pre id="ep-resp-headers-pre" class="raw-pre"></pre></div>
+              <div id="ep-resp-body-pane" class="hist-sub-pane hidden"><pre id="ep-resp-body-pre" class="raw-pre"></pre></div>
+              <div class="detail-search-bar">
+                <input id="ep-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
+                <span id="ep-resp-search-count" class="detail-search-count"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Scope sub-panel -->
@@ -138,31 +246,37 @@
       ⚠ Debugger attached — Chrome shows a banner on the tab. Test only on authorised targets.
     </div>
 
-    <!-- Request list -->
-    <div id="ic-list"  class="req-list"></div>
-    <div id="ic-empty" class="empty">
-      No paused requests.<br>
-      Attach debugger → turn Intercept ON → interact with the page.
-    </div>
-
-    <!-- Inline editor (replaces list when editing) -->
-    <div id="ic-editor" class="ic-editor hidden">
-      <div class="editor-topbar">
-        <button id="ed-back"    class="btn btn-sm btn-ghost">← Back</button>
-        <select id="ed-method"  class="method-sel"></select>
-        <input  id="ed-url"     class="url-inp" type="text" spellcheck="false" autocomplete="off">
-        <button id="ed-forward" class="btn btn-sm btn-success">Forward →</button>
-        <button id="ed-to-rep"  class="btn btn-sm btn-ghost">→ Repeater</button>
-        <button id="ed-drop"    class="btn btn-sm btn-danger">Drop ✕</button>
-      </div>
-      <div class="split-v">
-        <div class="split-pane">
-          <div class="pane-label">Headers</div>
-          <textarea id="ed-headers" class="raw-ta" spellcheck="false"></textarea>
+    <!-- Split layout: list left, editor right -->
+    <div class="ic-split">
+      <!-- Left: Request list -->
+      <div class="ic-split-left" id="ic-split-left">
+        <div id="ic-list" class="req-list"></div>
+        <div id="ic-empty" class="empty">
+          No paused requests.<br>
+          Attach debugger → turn Intercept ON → interact with the page.
         </div>
-        <div class="split-pane">
-          <div class="pane-label">Body</div>
-          <textarea id="ed-body" class="raw-ta" spellcheck="false" placeholder="(empty)"></textarea>
+      </div>
+      <!-- Resize handle -->
+      <div class="ic-resizer" id="ic-resizer"></div>
+      <!-- Right: Inline editor -->
+      <div id="ic-editor" class="ic-editor hidden">
+        <div class="editor-topbar">
+          <button id="ed-back"    class="btn btn-sm btn-ghost">✕</button>
+          <select id="ed-method"  class="method-sel"></select>
+          <input  id="ed-url"     class="url-inp" type="text" spellcheck="false" autocomplete="off">
+          <button id="ed-forward" class="btn btn-sm btn-success">Forward →</button>
+          <button id="ed-to-rep"  class="btn btn-sm btn-ghost">→ Repeater</button>
+          <button id="ed-drop"    class="btn btn-sm btn-danger">Drop ✕</button>
+        </div>
+        <div class="split-v">
+          <div class="split-pane">
+            <div class="pane-label">Headers</div>
+            <textarea id="ed-headers" class="raw-ta" spellcheck="false"></textarea>
+          </div>
+          <div class="split-pane">
+            <div class="pane-label">Body</div>
+            <textarea id="ed-body" class="raw-ta" spellcheck="false" placeholder="(empty)"></textarea>
+          </div>
         </div>
       </div>
     </div>
@@ -172,7 +286,7 @@
   <!-- ═══════════════════════════ HISTORY ════════════════════════════════════ -->
   <div id="tab-history" class="tab-panel hidden">
     <div class="filter-bar">
-      <input id="hist-filter" type="text" placeholder="Search everything…" spellcheck="false" autocomplete="off">
+      <input id="hist-filter" type="text" placeholder="Search… (or host:example status:200 method:POST body:password)" spellcheck="false" autocomplete="off">
       <select id="hist-flt-method" class="filter-sel">
         <option value="">All methods</option>
         <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option>
@@ -204,64 +318,73 @@
       </select>
       <button id="hist-clear" class="btn btn-sm btn-ghost">Clear</button>
     </div>
-    <div class="hist-table-wrap">
-      <table class="hist-table" id="hist-table">
-        <thead>
-          <tr>
-            <th class="hist-th-sortable" data-sort="id" style="width:36px"># ▾</th>
-            <th class="hist-th-sortable" data-sort="method" style="width:60px">Method</th>
-            <th class="hist-th-sortable" data-sort="host" style="width:180px">Host</th>
-            <th class="hist-th-sortable" data-sort="path">Path</th>
-            <th class="hist-th-sortable" data-sort="status" style="width:52px">Status</th>
-            <th class="hist-th-sortable" data-sort="mimeType" style="width:80px">Type</th>
-            <th class="hist-th-sortable" data-sort="length" style="width:64px">Length</th>
-            <th class="hist-th-sortable" data-sort="elapsed" style="width:52px">Ms</th>
-            <th class="hist-th-sortable" data-sort="time" style="width:130px">Time</th>
-          </tr>
-        </thead>
-        <tbody id="hist-tbody"></tbody>
-      </table>
-    </div>
-    <div id="hist-empty" class="empty">
-      No requests captured.<br>
-      Attach debugger to start recording HTTP history.
-    </div>
-    <!-- Detail pane (shown when a row is clicked) -->
-    <div id="hist-detail" class="hist-detail hidden">
-      <div class="hist-detail-topbar">
-        <button id="hist-detail-close" class="btn btn-sm btn-ghost">← Back</button>
-        <span id="hist-detail-title" class="hist-detail-title"></span>
-        <button id="hist-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
-        <button id="hist-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
-        <button id="hist-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">↗ Open</button>
-      </div>
-      <div class="hist-detail-body">
-        <!-- Request side -->
-        <div class="hist-detail-pane">
-          <div class="hist-detail-sub-tabs">
-            <button class="sub-tab active" data-histpane="req-headers">Headers</button>
-            <button class="sub-tab" data-histpane="req-body">Body</button>
-          </div>
-          <div id="hist-req-headers-pane" class="hist-sub-pane active"><pre id="hist-req-headers-pre" class="raw-pre"></pre></div>
-          <div id="hist-req-body-pane" class="hist-sub-pane hidden"><pre id="hist-req-body-pre" class="raw-pre"></pre></div>
+    <!-- Split layout: table left, detail right -->
+    <div class="hist-split">
+      <!-- Left: table -->
+      <div class="hist-split-left" id="hist-split-left">
+        <div class="hist-table-wrap">
+          <table class="hist-table" id="hist-table">
+            <thead>
+              <tr>
+                <th class="hist-th-sortable" data-sort="id" style="width:36px"># ▾</th>
+                <th class="hist-th-sortable colfilter-th" data-sort="method" data-colfilter="method" style="width:60px">Method <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable colfilter-th" data-sort="host" data-colfilter="host" style="width:180px">Host <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable" data-sort="path">Path</th>
+                <th class="hist-th-sortable colfilter-th" data-sort="status" data-colfilter="status" style="width:52px">Status <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable colfilter-th" data-sort="mimeType" data-colfilter="mimeType" style="width:80px">Type <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable" data-sort="length" style="width:64px">Length</th>
+                <th class="hist-th-sortable" data-sort="elapsed" style="width:52px">Ms</th>
+                <th class="hist-th-sortable" data-sort="time" style="width:130px">Time</th>
+              </tr>
+            </thead>
+            <tbody id="hist-tbody"></tbody>
+          </table>
         </div>
-        <!-- Response side -->
-        <div class="hist-detail-pane">
-          <div class="hist-detail-sub-tabs">
-            <button class="sub-tab active" data-histpane="resp-headers">Headers</button>
-            <button class="sub-tab" data-histpane="resp-body">Body</button>
-            <span id="hist-reflect-badge" class="reflect-badge hidden">Reflections</span>
-          </div>
-          <div id="hist-resp-headers-pane" class="hist-sub-pane active"><pre id="hist-resp-headers-pre" class="raw-pre"></pre></div>
-          <div id="hist-resp-body-pane" class="hist-sub-pane hidden"><pre id="hist-resp-body-pre" class="raw-pre"></pre></div>
+        <div id="hist-empty" class="empty">
+          No requests captured.<br>
+          Attach debugger to start recording HTTP history.
         </div>
       </div>
-      <!-- Search bar at bottom -->
-      <div class="detail-search-bar">
-        <input id="hist-detail-search" type="text" class="detail-search-inp" placeholder="Search in request/response…" spellcheck="false">
-        <span id="hist-detail-search-count" class="detail-search-count"></span>
-        <button id="hist-detail-search-prev" class="btn btn-xs btn-ghost">▲</button>
-        <button id="hist-detail-search-next" class="btn btn-xs btn-ghost">▼</button>
+      <!-- Resize handle -->
+      <div class="hist-resizer" id="hist-resizer"></div>
+      <!-- Right: detail pane -->
+      <div id="hist-detail" class="hist-detail hidden">
+        <div class="hist-detail-topbar">
+          <button id="hist-detail-close" class="btn btn-sm btn-ghost">✕</button>
+          <span id="hist-detail-title" class="hist-detail-title"></span>
+          <button id="hist-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
+          <button id="hist-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+          <button id="hist-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">↗ Open</button>
+        </div>
+        <div class="hist-detail-body">
+          <!-- Request side -->
+          <div class="hist-detail-pane" id="hist-req-side">
+            <div class="hist-detail-sub-tabs">
+              <button class="sub-tab active" data-histpane="req-headers">Headers</button>
+              <button class="sub-tab" data-histpane="req-body">Body</button>
+            </div>
+            <div id="hist-req-headers-pane" class="hist-sub-pane active"><pre id="hist-req-headers-pre" class="raw-pre"></pre></div>
+            <div id="hist-req-body-pane" class="hist-sub-pane hidden"><pre id="hist-req-body-pre" class="raw-pre"></pre></div>
+            <div class="detail-search-bar">
+              <input id="hist-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
+              <span id="hist-req-search-count" class="detail-search-count"></span>
+            </div>
+          </div>
+          <!-- Response side -->
+          <div class="hist-detail-pane" id="hist-resp-side">
+            <div class="hist-detail-sub-tabs">
+              <button class="sub-tab active" data-histpane="resp-headers">Headers</button>
+              <button class="sub-tab" data-histpane="resp-body">Body</button>
+              <span id="hist-reflect-badge" class="reflect-badge hidden">Reflections</span>
+            </div>
+            <div id="hist-resp-headers-pane" class="hist-sub-pane active"><pre id="hist-resp-headers-pre" class="raw-pre"></pre></div>
+            <div id="hist-resp-body-pane" class="hist-sub-pane hidden"><pre id="hist-resp-body-pre" class="raw-pre"></pre></div>
+            <div class="detail-search-bar">
+              <input id="hist-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
+              <span id="hist-resp-search-count" class="detail-search-count"></span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -276,8 +399,10 @@
     </div>
 
     <div class="rep-topbar">
+      <button id="rep-hist-back" class="btn btn-xs btn-ghost rep-hist-btn" title="Previous request (history)" disabled>◀</button>
+      <button id="rep-hist-fwd"  class="btn btn-xs btn-ghost rep-hist-btn" title="Next request (history)" disabled>▶</button>
       <select id="rep-method" class="method-sel"></select>
-      <input  id="rep-url"    class="url-inp flex1" type="text"
+      <input  id="rep-url"    class="url-inp" type="text"
               placeholder="https://target.com/api/…" spellcheck="false" autocomplete="off">
       <button id="rep-target-toggle" class="btn btn-xs btn-ghost rep-target-btn" title="Edit target (connect to different host/IP)">✎ Target</button>
       <button id="rep-send"   class="btn btn-send">Send</button>
@@ -321,6 +446,10 @@
         <div id="resp-pane-raw"  class="resp-pane hidden"><pre id="resp-raw-pre"></pre></div>
         <div id="resp-empty" class="empty">Hit Send to see response</div>
         <div id="resp-loading" class="loading hidden">Sending…</div>
+        <div class="detail-search-bar">
+          <input id="rep-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
+          <span id="rep-resp-search-count" class="detail-search-count"></span>
+        </div>
       </div>
 
     </div>
@@ -384,14 +513,14 @@
 
         <!-- Results table -->
         <div class="intr-results-wrap">
-          <table class="hist-table intr-results-table">
+          <table class="hist-table intr-results-table" id="intr-table">
             <thead>
               <tr>
-                <th style="width:30px">#</th>
-                <th style="width:180px">Payload</th>
-                <th style="width:48px">Status</th>
-                <th style="width:56px">Length</th>
-                <th style="width:48px">Ms</th>
+                <th class="hist-th-sortable" data-intrsort="id" style="width:30px">#</th>
+                <th class="hist-th-sortable" data-intrsort="payload" style="width:180px">Payload</th>
+                <th class="hist-th-sortable colfilter-th" data-intrsort="status" data-colfilter="status" style="width:48px">Status <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable" data-intrsort="length" style="width:56px">Length</th>
+                <th class="hist-th-sortable" data-intrsort="elapsed" style="width:48px">Ms</th>
                 <th>Response (preview)</th>
               </tr>
             </thead>
@@ -457,6 +586,8 @@
         <button class="sub-tab active" data-findtab="sources">Sources <span class="bdg" id="bdg-p-src">0</span></button>
         <button class="sub-tab" data-findtab="sinks">Sinks <span class="bdg" id="bdg-p-snk">0</span></button>
         <button class="sub-tab" data-findtab="flows">Flows <span class="bdg" id="bdg-p-flw">0</span></button>
+        <div class="tabbar-gap"></div>
+        <label class="rep-autocookie"><input type="checkbox" id="probe-ctrl-only" checked> Controllable only</label>
         <button class="sub-tab" data-findtab="runtime">Runtime <span class="bdg" id="bdg-p-rt">0</span></button>
       </div>
 
@@ -637,6 +768,148 @@
 
   </div>
 
+  <!-- ═══════════════════════════ LOGGER ═══════════════════════════════════ -->
+  <div id="tab-logger" class="tab-panel hidden">
+    <div class="filter-bar">
+      <input id="log-filter" type="text" placeholder="host:api status:200 method:POST body:token source:Admin (or plain text)" spellcheck="false" autocomplete="off">
+      <select id="log-flt-method" class="filter-sel">
+        <option value="">All methods</option>
+        <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option>
+        <option>DELETE</option><option>OPTIONS</option><option>HEAD</option>
+      </select>
+      <select id="log-flt-status" class="filter-sel">
+        <option value="">All status</option>
+        <option value="2">2xx</option><option value="3">3xx</option>
+        <option value="4">4xx</option><option value="5">5xx</option>
+      </select>
+      <select id="log-flt-source" class="filter-sel">
+        <option value="">All sources</option>
+        <option value="proxy">Proxy</option>
+        <option value="repeater">Repeater</option>
+      </select>
+      <label class="rep-autocookie"><input type="checkbox" id="log-scope-only"> In-scope</label>
+      <button id="log-sync" class="btn btn-sm btn-accent" title="Sync history from container windows (reads ~/Downloads/void-sync/)">Sync Containers</button>
+      <button id="log-merge" class="btn btn-sm btn-ghost">+ Import</button>
+      <input type="file" id="log-merge-file" accept=".json" hidden multiple>
+      <button id="log-export" class="btn btn-sm btn-ghost">Export</button>
+      <button id="log-clear" class="btn btn-sm btn-ghost">Clear</button>
+    </div>
+    <div class="hist-split">
+      <div class="hist-split-left" id="log-split-left">
+        <div class="hist-table-wrap">
+          <table class="hist-table" id="log-table">
+            <thead>
+              <tr>
+                <th class="hist-th-sortable" data-logsort="id" style="width:30px">#</th>
+                <th class="hist-th-sortable colfilter-th" data-logsort="source" data-colfilter="source" style="width:56px">Source <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable colfilter-th" data-logsort="method" data-colfilter="method" style="width:52px">Method <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable colfilter-th" data-logsort="host" data-colfilter="host" style="width:160px">Host <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable" data-logsort="path">Path</th>
+                <th class="hist-th-sortable colfilter-th" data-logsort="status" data-colfilter="status" style="width:44px">Status <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable" data-logsort="length" style="width:52px">Length</th>
+                <th class="hist-th-sortable" data-logsort="elapsed" style="width:44px">Ms</th>
+                <th class="hist-th-sortable" data-logsort="time" style="width:110px">Time</th>
+              </tr>
+            </thead>
+            <tbody id="log-tbody"></tbody>
+          </table>
+        </div>
+        <div id="log-empty" class="empty">
+          Logger aggregates traffic from all sources.<br>
+          Attach debugger to capture, or <b>+ Import</b> history from containers.
+        </div>
+      </div>
+      <div class="hist-resizer" id="log-resizer"></div>
+      <div id="log-detail" class="hist-detail hidden">
+        <div class="hist-detail-topbar">
+          <button id="log-detail-close" class="btn btn-sm btn-ghost">✕</button>
+          <span id="log-detail-title" class="hist-detail-title"></span>
+          <button id="log-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
+          <button id="log-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+          <button id="log-detail-open" class="btn btn-sm btn-ghost">↗</button>
+        </div>
+        <div class="hist-detail-body">
+          <div class="hist-detail-pane" id="log-req-side">
+            <div class="hist-detail-sub-tabs">
+              <button class="sub-tab active" data-logpane="req-headers">Headers</button>
+              <button class="sub-tab" data-logpane="req-body">Body</button>
+            </div>
+            <div id="log-req-headers-pane" class="hist-sub-pane active"><pre id="log-req-headers-pre" class="raw-pre"></pre></div>
+            <div id="log-req-body-pane" class="hist-sub-pane hidden"><pre id="log-req-body-pre" class="raw-pre"></pre></div>
+            <div class="detail-search-bar">
+              <input id="log-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
+              <span id="log-req-search-count" class="detail-search-count"></span>
+            </div>
+          </div>
+          <div class="hist-detail-pane" id="log-resp-side">
+            <div class="hist-detail-sub-tabs">
+              <button class="sub-tab active" data-logpane="resp-headers">Headers</button>
+              <button class="sub-tab" data-logpane="resp-body">Body</button>
+            </div>
+            <div id="log-resp-headers-pane" class="hist-sub-pane active"><pre id="log-resp-headers-pre" class="raw-pre"></pre></div>
+            <div id="log-resp-body-pane" class="hist-sub-pane hidden"><pre id="log-resp-body-pre" class="raw-pre"></pre></div>
+            <div class="detail-search-bar">
+              <input id="log-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
+              <span id="log-resp-search-count" class="detail-search-count"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ CONTAINERS ═════════════════════════════════ -->
+  <div id="tab-containers" class="tab-panel hidden">
+    <div class="cnt-toolbar">
+      <button id="cnt-add" class="btn btn-accent">+ New Container</button>
+      <span class="cnt-info">Each container launches an isolated Chrome with its own cookies. Set the extension path once below.</span>
+    </div>
+    <div class="cnt-extpath-bar">
+      <label class="settings-label-sm">Extension path</label>
+      <input id="cnt-ext-path" type="text" class="settings-inp" placeholder="/home/user/void-extension" spellcheck="false">
+      <button id="cnt-ext-path-save" class="btn btn-xs btn-ghost">Save</button>
+      <span class="cnt-sep">|</span>
+      <label class="settings-label-sm">Container ID</label>
+      <input id="cnt-register-name" type="text" class="settings-inp" placeholder="Set in container window" spellcheck="false">
+      <button id="cnt-register-save" class="btn btn-xs btn-accent">Register</button>
+    </div>
+    <!-- Container list -->
+    <div id="cnt-list" class="cnt-list"></div>
+    <div id="cnt-empty" class="empty">
+      No containers yet. Create one to start testing with isolated sessions.<br>
+      Each container launches an isolated Chrome instance with its own cookies, storage, and cache.
+    </div>
+    <!-- New/Edit form (hidden by default) -->
+    <div id="cnt-form" class="cnt-form hidden">
+      <div class="settings-row">
+        <label class="settings-label-sm">Name</label>
+        <input id="cnt-name" type="text" class="settings-inp" placeholder="Admin, User, Guest…" spellcheck="false">
+      </div>
+      <div class="settings-row">
+        <label class="settings-label-sm">Color</label>
+        <div id="cnt-colors" class="cnt-color-row">
+          <button class="cnt-color-btn cnt-c-blue active" data-color="blue"></button>
+          <button class="cnt-color-btn cnt-c-red" data-color="red"></button>
+          <button class="cnt-color-btn cnt-c-green" data-color="green"></button>
+          <button class="cnt-color-btn cnt-c-yellow" data-color="yellow"></button>
+          <button class="cnt-color-btn cnt-c-purple" data-color="purple"></button>
+          <button class="cnt-color-btn cnt-c-pink" data-color="pink"></button>
+          <button class="cnt-color-btn cnt-c-cyan" data-color="cyan"></button>
+          <button class="cnt-color-btn cnt-c-orange" data-color="orange"></button>
+          <button class="cnt-color-btn cnt-c-grey" data-color="grey"></button>
+        </div>
+      </div>
+      <div class="settings-row">
+        <label class="settings-label-sm">Start URL</label>
+        <input id="cnt-start-url" type="text" class="settings-inp" placeholder="https://target.com/login" spellcheck="false">
+      </div>
+      <div class="settings-actions">
+        <button id="cnt-form-save" class="btn btn-accent">Create</button>
+        <button id="cnt-form-cancel" class="btn btn-sm btn-ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════════════════ HEADERS ════════════════════════════════════ -->
   <div id="tab-headers" class="tab-panel hidden">
     <div class="hdr-sub-bar">
@@ -699,6 +972,143 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════ SENSITIVE ═══════════════════════════════════ -->
+  <div id="tab-sensitive" class="tab-panel hidden">
+    <div class="sens-toolbar">
+      <button id="sens-scan" class="btn btn-accent">Scan History</button>
+      <button id="sens-clear" class="btn btn-sm btn-ghost">Clear</button>
+      <label class="rep-autocookie"><input type="checkbox" id="sens-scope-only"> In-scope only</label>
+      <select id="sens-flt-cat" class="filter-sel">
+        <option value="">All categories</option>
+        <option value="Tokens & Keys">Tokens & Keys</option>
+        <option value="General Secrets">General Secrets</option>
+        <option value="Cloud & Webhooks">Cloud & Webhooks</option>
+        <option value="Sensitive Files">Sensitive Files</option>
+        <option value="Custom">Custom Rules</option>
+      </select>
+      <select id="sens-flt-sev" class="filter-sel">
+        <option value="">All severities</option>
+        <option value="critical">Critical</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+      </select>
+      <input id="sens-filter" type="text" class="tgt-filter-inp" placeholder="Filter…" spellcheck="false" autocomplete="off">
+      <button id="sens-export" class="btn btn-sm btn-ghost">Export CSV</button>
+      <span id="sens-status" class="settings-status"></span>
+    </div>
+    <!-- Stats bar -->
+    <div id="sens-stats" class="probe-stats hidden">
+      <div class="probe-stat">
+        <span class="probe-stat-val" id="sens-total">0</span>
+        <span class="probe-stat-lbl">Total</span>
+      </div>
+      <div class="probe-stat probe-stat-hot">
+        <span class="probe-stat-val" id="sens-crit">0</span>
+        <span class="probe-stat-lbl">Critical</span>
+      </div>
+      <div class="probe-stat">
+        <span class="probe-stat-val" id="sens-high">0</span>
+        <span class="probe-stat-lbl">High</span>
+      </div>
+      <div class="probe-stat">
+        <span class="probe-stat-val" id="sens-med">0</span>
+        <span class="probe-stat-lbl">Medium</span>
+      </div>
+      <div class="probe-stat">
+        <span class="probe-stat-val" id="sens-low">0</span>
+        <span class="probe-stat-lbl">Low</span>
+      </div>
+    </div>
+    <!-- Split layout: table left, detail right -->
+    <div class="hist-split">
+      <div class="hist-split-left" id="sens-split-left">
+        <div class="hist-table-wrap">
+          <table class="hist-table" id="sens-table">
+            <thead>
+              <tr>
+                <th class="hist-th-sortable" data-senssort="id" style="width:30px"># ▾</th>
+                <th class="hist-th-sortable" data-senssort="severity" style="width:60px">Severity</th>
+                <th class="hist-th-sortable colfilter-th" data-senssort="cat" data-colfilter="cat" style="width:120px">Category <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable colfilter-th" data-senssort="desc" data-colfilter="desc" style="width:160px">Description <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable" data-senssort="match">Match</th>
+                <th class="hist-th-sortable colfilter-th" data-senssort="section" data-colfilter="section" style="width:50px">Section <span class="colfilter-ico">▼</span></th>
+                <th class="hist-th-sortable" data-senssort="url">URL</th>
+              </tr>
+            </thead>
+            <tbody id="sens-tbody"></tbody>
+          </table>
+        </div>
+        <div id="sens-empty" class="empty">
+          Click <b>Scan History</b> to search for sensitive data in captured HTTP traffic.
+        </div>
+      </div>
+      <div class="hist-resizer" id="sens-resizer"></div>
+      <div id="sens-detail" class="hist-detail hidden">
+        <div class="hist-detail-topbar">
+          <button id="sens-detail-close" class="btn btn-sm btn-ghost">✕</button>
+          <span id="sens-detail-title" class="hist-detail-title"></span>
+          <button id="sens-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
+          <button id="sens-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+          <button id="sens-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">↗</button>
+        </div>
+        <div class="hist-detail-body">
+          <div class="hist-detail-pane" id="sens-req-side">
+            <div class="hist-detail-sub-tabs">
+              <button class="sub-tab active" data-senspane="req-headers">Headers</button>
+              <button class="sub-tab" data-senspane="req-body">Body</button>
+            </div>
+            <div id="sens-req-headers-pane" class="hist-sub-pane active"><pre id="sens-req-headers-pre" class="raw-pre"></pre></div>
+            <div id="sens-req-body-pane" class="hist-sub-pane hidden"><pre id="sens-req-body-pre" class="raw-pre"></pre></div>
+            <div class="detail-search-bar">
+              <input id="sens-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
+              <span id="sens-req-search-count" class="detail-search-count"></span>
+            </div>
+          </div>
+          <div class="hist-detail-pane" id="sens-resp-side">
+            <div class="hist-detail-sub-tabs">
+              <button class="sub-tab active" data-senspane="resp-headers">Headers</button>
+              <button class="sub-tab" data-senspane="resp-body">Body</button>
+            </div>
+            <div id="sens-resp-headers-pane" class="hist-sub-pane active"><pre id="sens-resp-headers-pre" class="raw-pre"></pre></div>
+            <div id="sens-resp-body-pane" class="hist-sub-pane hidden"><pre id="sens-resp-body-pre" class="raw-pre"></pre></div>
+            <div class="detail-search-bar">
+              <input id="sens-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
+              <span id="sens-resp-search-count" class="detail-search-count"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Custom rules panel -->
+    <div class="sens-custom-bar">
+      <button id="sens-custom-toggle" class="btn btn-xs btn-ghost">Custom Rules ▸</button>
+    </div>
+    <div id="sens-custom" class="sens-custom hidden">
+      <div id="sens-custom-list" class="sens-custom-list"></div>
+      <div class="sens-custom-form">
+        <input id="sens-custom-desc" type="text" class="settings-inp" placeholder="Description (e.g. Internal API token)">
+        <input id="sens-custom-regex" type="text" class="settings-inp" placeholder="Regex or plain text to search" spellcheck="false">
+        <select id="sens-custom-sev" class="filter-sel">
+          <option value="critical">Critical</option>
+          <option value="high" selected>High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <select id="sens-custom-section" class="filter-sel">
+          <option value="all">All sections</option>
+          <option value="resp_body">Response body</option>
+          <option value="resp_headers">Response headers</option>
+          <option value="req_url">Request URL</option>
+          <option value="req_body">Request body</option>
+          <option value="req_headers">Request headers</option>
+        </select>
+        <label class="rep-autocookie"><input type="checkbox" id="sens-custom-isregex" checked> Regex</label>
+        <button id="sens-custom-add" class="btn btn-xs btn-accent">Add</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════════════════ SETTINGS ═════════════════════════════════ -->
   <div id="tab-settings" class="tab-panel hidden">
     <div class="settings-scroll">
@@ -715,6 +1125,55 @@
       <div class="settings-section">
         <div class="settings-section-title">Auto Headers</div>
         <div class="settings-section-desc">Headers injected into every outgoing request (intercepted + Repeater). One per line: <code>Name: Value</code></div>
+        <div class="settings-row">
+          <select id="cfg-hdr-preset" class="filter-sel">
+            <option value="">+ Add preset header…</option>
+            <optgroup label="User-Agent">
+              <option value="User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36">Chrome 131 — Windows</option>
+              <option value="User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15">Safari 18 — macOS</option>
+              <option value="User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0">Firefox 133 — Windows</option>
+              <option value="User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36">Chrome 131 — Linux</option>
+              <option value="User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1">Safari — iPhone</option>
+              <option value="User-Agent: Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36">Chrome — Android</option>
+              <option value="User-Agent: curl/8.9.0">curl</option>
+              <option value="User-Agent: Googlebot/2.1 (+http://www.google.com/bot.html)">Googlebot</option>
+            </optgroup>
+            <optgroup label="Content-Type">
+              <option value="Content-Type: application/json">application/json</option>
+              <option value="Content-Type: application/x-www-form-urlencoded">x-www-form-urlencoded</option>
+              <option value="Content-Type: multipart/form-data">multipart/form-data</option>
+              <option value="Content-Type: text/xml">text/xml</option>
+              <option value="Content-Type: application/xml">application/xml</option>
+            </optgroup>
+            <optgroup label="Authorization">
+              <option value="Authorization: Bearer TOKEN_HERE">Bearer token</option>
+              <option value="Authorization: Basic BASE64_HERE">Basic auth</option>
+              <option value="X-API-Key: KEY_HERE">X-API-Key</option>
+            </optgroup>
+            <optgroup label="Accept">
+              <option value="Accept: application/json">application/json</option>
+              <option value="Accept: text/html,application/xhtml+xml,*/*;q=0.9">HTML (browser)</option>
+              <option value="Accept: */*">*/*</option>
+            </optgroup>
+            <optgroup label="CORS / Origin">
+              <option value="Origin: https://example.com">Origin</option>
+              <option value="Referer: https://example.com/">Referer</option>
+              <option value="X-Forwarded-For: 127.0.0.1">X-Forwarded-For</option>
+              <option value="X-Real-IP: 127.0.0.1">X-Real-IP</option>
+              <option value="X-Original-URL: /admin">X-Original-URL</option>
+              <option value="X-Rewrite-URL: /admin">X-Rewrite-URL</option>
+            </optgroup>
+            <optgroup label="Security Testing">
+              <option value="X-Forwarded-Host: evil.com">X-Forwarded-Host</option>
+              <option value="X-Forwarded-Proto: https">X-Forwarded-Proto</option>
+              <option value="X-Custom-IP-Authorization: 127.0.0.1">X-Custom-IP-Authorization</option>
+              <option value="X-CSRF-Token: TOKEN_HERE">X-CSRF-Token</option>
+              <option value="X-Requested-With: XMLHttpRequest">X-Requested-With (AJAX)</option>
+              <option value="If-None-Match: invalid">If-None-Match (cache bypass)</option>
+              <option value="Cache-Control: no-cache">Cache-Control: no-cache</option>
+            </optgroup>
+          </select>
+        </div>
         <textarea id="cfg-auto-headers" class="raw-ta settings-ta" rows="4" spellcheck="false"
                   placeholder="Cookie: session=abc123&#10;X-Custom: value"></textarea>
       </div>
@@ -776,10 +1235,13 @@
         <span id="cfg-status" class="settings-status"></span>
       </div>
 
+
     </div>
   </div>
 
 </div>
+<script src="sensitive-rules.js"></script>
 <script src="panel.js"></script>
 </body>
 </html>
+ 

@@ -3,7 +3,57 @@
 // ── Keep service worker alive (MV3 can kill it after ~30s idle) ───────────────
 // We use an alarm that fires every 25s to prevent the SW from being suspended.
 chrome.alarms.create("keepAlive", { periodInMinutes: 0.4 });
-chrome.alarms.onAlarm.addListener(() => {}); // noop — just wakes the SW
+chrome.alarms.onAlarm.addListener(() => {}); // keepAlive
+
+// ── WebSocket sync with other Void instances (containers) ────────────────────
+let syncWs = null;
+let syncName = "main";
+let syncRemoteEntries = []; // entries received from other instances
+let syncLastSentCount = 0;
+
+function syncConnect() {
+  if (syncWs && syncWs.readyState <= 1) return; // already connected/connecting
+  try {
+    syncWs = new WebSocket("ws://localhost:17580");
+    syncWs.onopen = () => {
+      chrome.storage.local.get("voidContainerName", r => {
+        syncName = r.voidContainerName || "main";
+        syncWs.send(JSON.stringify({ type: "register", name: syncName }));
+        syncPushHistory(); // send our history immediately
+      });
+    };
+    syncWs.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "init" || msg.type === "update") {
+          // Received entries from other instances
+          const entries = msg.entries || [];
+          if (msg.type === "init") syncRemoteEntries = entries;
+          else {
+            // Merge — remove old entries from this sender, add new
+            syncRemoteEntries = syncRemoteEntries.filter(e => e._logLabel !== msg.from);
+            syncRemoteEntries = syncRemoteEntries.concat(entries);
+          }
+        }
+      } catch {}
+    };
+    syncWs.onclose = () => { syncWs = null; };
+    syncWs.onerror = () => { syncWs = null; };
+  } catch { syncWs = null; }
+}
+
+function syncPushHistory() {
+  if (!syncWs || syncWs.readyState !== 1) return;
+  let allHistory = [];
+  for (const [, t] of tabs) allHistory = allHistory.concat(t.history);
+  if (allHistory.length === syncLastSentCount) return; // no change
+  syncLastSentCount = allHistory.length;
+  syncWs.send(JSON.stringify({ type: "history", entries: allHistory }));
+}
+
+// Try to connect on startup, retry periodically
+syncConnect();
+setInterval(() => { syncConnect(); syncPushHistory(); }, 5000);
 
 // ── Settings (shared across tabs) ────────────────────────────────────────────
 let voidSettings = {
@@ -96,12 +146,15 @@ function parseAutoHeaders() {
 }
 
 function fetchResponseBody(tabId, requestId, tabState, histIdx, retries = 3) {
+  if (!tabState.attached) return; // don't try if not attached
   chrome.debugger.sendCommand(
     { tabId }, "Network.getResponseBody",
     { requestId },
     (result) => {
-      if (chrome.runtime.lastError || !result) {
-        // Retry after a short delay — body might not be available yet
+      const err = chrome.runtime.lastError;
+      if (err || !result) {
+        // Don't retry if debugger is gone
+        if (err && /not attached/i.test(err.message || "")) return;
         if (retries > 0) {
           setTimeout(() => fetchResponseBody(tabId, requestId, tabState, histIdx, retries - 1), 200);
         }
@@ -139,6 +192,13 @@ function getTab(id) {
   return tabs.get(id);
 }
 
+
+// Clean up tabs when closed
+chrome.tabs.onRemoved.addListener(id => {
+  tabs.delete(id);
+  probeInjectedTabs.delete(id);
+});
+
 // ── Debugger events ───────────────────────────────────────────────────────────
 
 chrome.debugger.onEvent.addListener((src, method, params) => {
@@ -171,7 +231,24 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
       entry.path = u.pathname + u.search;
     } catch {}
     t.history.push(entry);
+    // Cap history to prevent unbounded memory growth
+    if (t.history.length > 10000) {
+      t.history.splice(0, 1000);
+      t.historyMap = {};
+      t.history.forEach((e, i) => { if (e.id) t.historyMap[e.id] = i; });
+    }
     t.historyMap[params.requestId] = t.history.length - 1;
+
+    // Auto-populate endpoints from network traffic
+    const epUrl = entry.url;
+    if (epUrl && !t._epSeen) t._epSeen = new Set(t.endpoints.map(e => e.url));
+    if (epUrl && !t._epSeen.has(epUrl)) {
+      const epType = netGuessType(epUrl, params.type);
+      if (epType) {
+        t.endpoints.push({ url: epUrl, method: entry.method, type: epType });
+        t._epSeen.add(epUrl);
+      }
+    }
   }
 
   // ── HTTP History: capture responses ────────────────────────────────────
@@ -184,6 +261,7 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
       t.history[idx].mimeType    = resp.mimeType || "";
       t.history[idx].length      = resp.encodedDataLength || 0;
       t.history[idx].elapsed     = Date.now() - t.history[idx].time;
+
       t.history[idx].respHeaders = resp.headers || {};
     }
   }
@@ -228,7 +306,9 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
         try { opts.postData = btoa(unescape(encodeURIComponent(mr.body))); } catch {}
       }
       chrome.debugger.sendCommand(
-        { tabId: src.tabId }, "Fetch.continueRequest", opts, () => {}
+        { tabId: src.tabId }, "Fetch.continueRequest", opts, () => {
+          void chrome.runtime.lastError;
+        }
       );
       return;
     }
@@ -338,23 +418,64 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
   }
 });
 
-chrome.debugger.onDetach.addListener(src => {
-  const t = tabs.get(src.tabId);
+// Tabs pending auto-reattach: tabId → { intercepting: bool }
+const pendingReattach = new Map();
+
+chrome.debugger.onDetach.addListener((src, reason) => {
+  const tabId = src.tabId;
+  const t = tabs.get(tabId);
   if (!t) return;
+  const wasIntercepting = t.intercepting;
+  const wasAttached = t.attached;
   t.attached     = false;
   t.intercepting = false;
   t.pending      = {};
+
+  if (wasAttached && !t._userDetached) {
+    pendingReattach.set(tabId, { intercepting: wasIntercepting });
+    setTimeout(() => doReattach(tabId), reason === "canceled_by_user" ? 300 : 0);
+  }
+  t._userDetached = false;
 });
 
+function doReattach(tabId) {
+  const info = pendingReattach.get(tabId);
+  if (!info) return;
+  info._retries = (info._retries || 0) + 1;
+  if (info._retries > 20) { pendingReattach.delete(tabId); return; }
+  chrome.debugger.attach({ tabId }, "1.3", () => {
+    if (chrome.runtime.lastError) return; // retry via onUpdated
+    pendingReattach.delete(tabId);
+    const t = getTab(tabId);
+    t.attached = true;
+    chrome.debugger.sendCommand({ tabId }, "Network.enable", {}, () => {
+      void chrome.runtime.lastError;
+    });
+    if (info.intercepting) {
+      chrome.debugger.sendCommand({ tabId }, "Fetch.enable", {
+        patterns: [{ urlPattern: "*", requestStage: "Request" }],
+      }, () => {
+        if (!chrome.runtime.lastError && info.intercepting) t.intercepting = true;
+      });
+    }
+  });
+}
+
 chrome.tabs.onUpdated.addListener((tabId, info) => {
+  // Re-attach as soon as the tab starts loading or completes
+  if (pendingReattach.has(tabId)) {
+    doReattach(tabId);
+  }
   if (info.status === "loading") {
     const t = tabs.get(tabId);
-    if (t) { t.endpoints = []; t.technologies = []; t.headers = {}; t.pending = {}; }
+    if (t) {
+      t.endpoints = []; t.technologies = []; t.headers = {};
+      t.pending = {}; t._epSeen = null;
+    }
     probeInjectedTabs.delete(tabId);
   }
 });
 
-chrome.tabs.onRemoved.addListener(id => { tabs.delete(id); probeInjectedTabs.delete(id); });
 
 // ── Message handler ───────────────────────────────────────────────────────────
 
@@ -363,6 +484,8 @@ const ALLOWED = new Set([
   "ATTACH","DETACH","INTERCEPT_ON","INTERCEPT_OFF",
   "FORWARD","DROP","SEND_REQUEST",
   "GET_DATA","GET_INTERCEPTED","GET_HISTORY","CLEAR_HISTORY","REPORT","CLEAR",
+  "RESTORE_HISTORY","RESTORE_ENDPOINTS",
+  "CNT_LAUNCH","CNT_AUTO_EXPORT","GET_EXT_PATH","SYNC_GET_REMOTE",
   "LOOKUP","CRAWL_START","CRAWL_STOP","UPDATE_SETTINGS","GET_COOKIES",
   "PROBE_INJECT","PROBE_CMD","PROBE_STATUS","PROBE_FINDINGS",
 ]);
@@ -457,6 +580,17 @@ async function probeBootstrap(tabId) {
 
 // ── Crawler ────────────────────────────────────────────────────────────────
 let crawlAbortCtrl = null;
+
+function netGuessType(url, resourceType) {
+  const u = url.toLowerCase().split("?")[0];
+  // Skip static assets
+  if (/\.(css|woff2?|ttf|eot|png|jpe?g|gif|webp|ico|svg|map)$/.test(u)) return null;
+  if (resourceType === "Image" || resourceType === "Font" || resourceType === "Stylesheet") return null;
+  if (/\/api\/|\/v\d+\/|\/graphql|\/rest\//.test(u) || resourceType === "XHR" || resourceType === "Fetch") return "api";
+  if (/\.(js|mjs)$/.test(u) || resourceType === "Script") return "script";
+  if (resourceType === "Document") return "link";
+  return "link";
+}
 
 function crawlGuessType(url) {
   const u = url.toLowerCase().split("?")[0];
@@ -586,7 +720,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // ── Recon from content script ───────────────────────────────────────────
     case "REPORT": {
-      if (!tabId) break;
+      if (!tabId) { sendResponse({ ok: true }); break; }
       const t = getTab(tabId);
       if (Array.isArray(msg.endpoints)) {
         const seen = new Set(t.endpoints.map(e => e.url));
@@ -611,7 +745,67 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
         }
       }
+      sendResponse({ ok: true });
       break;
+    }
+
+    // ── Session restore ────────────────────────────────────────────────────
+    case "RESTORE_HISTORY": {
+      if (!tabId) { sendResponse({ ok: false }); break; }
+      const t = getTab(tabId);
+      t.history = msg.history || [];
+      t.historyMap = {};
+      t.history.forEach((e, i) => { if (e.id) t.historyMap[e.id] = i; });
+      sendResponse({ ok: true });
+      break;
+    }
+    case "RESTORE_ENDPOINTS": {
+      if (!tabId) { sendResponse({ ok: false }); break; }
+      const t = getTab(tabId);
+      t.endpoints = msg.endpoints || [];
+      t._epSeen = null;
+      sendResponse({ ok: true });
+      break;
+    }
+
+    // ── Containers (launch isolated Chrome instance) ────────────────────
+    case "SYNC_GET_REMOTE": {
+      sendResponse({ entries: syncRemoteEntries, connected: !!(syncWs && syncWs.readyState === 1) });
+      break;
+    }
+
+    case "CNT_LAUNCH": {
+      sendResponse({ ok: false, reason: "no-native" });
+      break;
+    }
+
+    case "CNT_AUTO_EXPORT": {
+      // Auto-export this instance's history to Downloads for cross-container sync
+      const name = msg.name || "void-container";
+      let allHistory = [];
+      for (const [, t] of tabs) { allHistory = allHistory.concat(t.history); }
+      const data = JSON.stringify({ name, timestamp: new Date().toISOString(), history: allHistory });
+      const blob = new Blob([data], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      chrome.downloads.download({
+        url,
+        filename: `void-sync/${name}.json`,
+        conflictAction: "overwrite",
+        saveAs: false,
+      }, (downloadId) => {
+        void chrome.runtime.lastError;
+        URL.revokeObjectURL(url);
+        sendResponse({ ok: !!downloadId, count: allHistory.length });
+      });
+      return true;
+    }
+
+    case "GET_EXT_PATH": {
+      chrome.management.getSelf(info => {
+        void chrome.runtime.lastError;
+        sendResponse({ path: "", id: info?.id || "", installType: info?.installType || "" });
+      });
+      return true;
     }
 
     // ── Panel reads ─────────────────────────────────────────────────────────
@@ -643,7 +837,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case "CLEAR_HISTORY": {
-      if (!tabId) break;
+      if (!tabId) { sendResponse({ ok: false }); break; }
       const t = getTab(tabId);
       t.history = []; t.historyMap = {};
       sendResponse({ ok: true });
@@ -667,9 +861,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case "CLEAR": {
-      if (!tabId) break;
+      if (!tabId) { sendResponse({ ok: false }); break; }
       const t = getTab(tabId);
-      t.endpoints = []; t.technologies = []; t.headers = {};
+      t.endpoints = []; t.technologies = []; t.headers = {}; t._epSeen = null;
       sendResponse({ ok: true });
       break;
     }
@@ -678,15 +872,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case "ATTACH": {
       if (!tabId) { sendResponse({ ok: false, error: "no tabId" }); break; }
       const t = getTab(tabId);
-      if (t.attached) { sendResponse({ ok: true }); break; }
+
       chrome.debugger.attach({ tabId }, "1.3", () => {
-        if (chrome.runtime.lastError) {
-          sendResponse({ ok: false, error: chrome.runtime.lastError.message });
+        const err = chrome.runtime.lastError;
+        if (err && !/already attached/i.test(err.message)) {
+          sendResponse({ ok: false, error: err.message });
           return;
         }
+        // Attached (or was already attached) — enable Network
         t.attached = true;
-        chrome.debugger.sendCommand({ tabId }, "Network.enable", {}, () => {});
-        sendResponse({ ok: true });
+        chrome.debugger.sendCommand({ tabId }, "Network.enable", {}, () => {
+          void chrome.runtime.lastError; // may already be enabled
+          sendResponse({ ok: true });
+        });
       });
       return true; // async
     }
@@ -695,14 +893,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case "DETACH": {
       if (!tabId) { sendResponse({ ok: false }); break; }
       const t = getTab(tabId);
-      if (!t.attached) { sendResponse({ ok: true }); break; }
+      t._userDetached = true; // prevent auto-reattach
+      t.intercepting = false;
+      t.attached = false;
+      pendingReattach.delete(tabId);
       // Forward all pending before detaching
       Object.keys(t.pending).forEach(id => {
-        chrome.debugger.sendCommand({ tabId }, "Fetch.continueRequest", { requestId: id }, () => {});
+        chrome.debugger.sendCommand({ tabId }, "Fetch.continueRequest", { requestId: id }, () => {
+          void chrome.runtime.lastError; // suppress
+        });
       });
-      t.pending = {}; t.intercepting = false;
+      t.pending = {};
       chrome.debugger.detach({ tabId }, () => {
-        t.attached = false;
+        void chrome.runtime.lastError; // suppress if already detached
         sendResponse({ ok: true });
       });
       return true;
@@ -712,17 +915,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case "INTERCEPT_ON": {
       if (!tabId) { sendResponse({ ok: false }); break; }
       const t = getTab(tabId);
-      if (!t.attached) { sendResponse({ ok: false, error: "not attached" }); break; }
-      chrome.debugger.sendCommand({ tabId }, "Fetch.enable", {
-        patterns: [{ urlPattern: "*", requestStage: "Request" }],
-      }, () => {
-        if (chrome.runtime.lastError) {
-          sendResponse({ ok: false, error: chrome.runtime.lastError.message });
-          return;
-        }
-        t.intercepting = true;
-        sendResponse({ ok: true });
-      });
+
+      function doFetchEnable() {
+        chrome.debugger.sendCommand({ tabId }, "Network.enable", {}, () => {
+          void chrome.runtime.lastError;
+          chrome.debugger.sendCommand({ tabId }, "Fetch.enable", {
+            patterns: [{ urlPattern: "*", requestStage: "Request" }],
+          }, () => {
+            if (chrome.runtime.lastError) {
+              sendResponse({ ok: false, error: chrome.runtime.lastError.message });
+              return;
+            }
+            t.intercepting = true;
+            sendResponse({ ok: true });
+          });
+        });
+      }
+
+      if (!t.attached) {
+        // Try to attach first (might have lost state after SW restart)
+        chrome.debugger.attach({ tabId }, "1.3", () => {
+          const err = chrome.runtime.lastError;
+          if (err && !/already attached/i.test(err.message)) {
+            sendResponse({ ok: false, error: "not attached: " + err.message });
+            return;
+          }
+          t.attached = true;
+          doFetchEnable();
+        });
+      } else {
+        doFetchEnable();
+      }
       return true;
     }
 
@@ -730,13 +953,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case "INTERCEPT_OFF": {
       if (!tabId) { sendResponse({ ok: false }); break; }
       const t = getTab(tabId);
+      t.intercepting = false;
       if (!t.attached) { sendResponse({ ok: true }); break; }
       Object.keys(t.pending).forEach(id => {
-        chrome.debugger.sendCommand({ tabId }, "Fetch.continueRequest", { requestId: id }, () => {});
+        chrome.debugger.sendCommand({ tabId }, "Fetch.continueRequest", { requestId: id }, () => {
+          void chrome.runtime.lastError;
+        });
       });
       t.pending = {};
       chrome.debugger.sendCommand({ tabId }, "Fetch.disable", {}, () => {
-        t.intercepting = false;
+        void chrome.runtime.lastError;
         sendResponse({ ok: true });
       });
       return true;
@@ -762,6 +988,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       chrome.debugger.sendCommand({ tabId }, "Fetch.continueRequest", opts, () => {
+        void chrome.runtime.lastError;
         delete t.pending[requestId];
         sendResponse({ ok: true });
       });
@@ -775,6 +1002,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const { requestId } = msg;
       chrome.debugger.sendCommand({ tabId }, "Fetch.failRequest",
         { requestId, errorReason: "BlockedByClient" }, () => {
+          void chrome.runtime.lastError;
           delete t.pending[requestId];
           sendResponse({ ok: true });
         });

@@ -1,8 +1,15 @@
 "use strict";
 
+// ── Suppress "Extension context invalidated" errors after extension reload ───
+window.addEventListener("unhandledrejection", e => {
+  if (e.reason?.message && /context invalidated|disconnected/i.test(e.reason.message)) {
+    e.preventDefault();
+  }
+});
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 const TAB_ID  = chrome.devtools.inspectedWindow.tabId;
-const METHODS = ["GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"];
+const METHODS = ["GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS","TRACE","CONNECT"];
 const REQUIRED_HDRS = [
   "content-security-policy","strict-transport-security","x-frame-options",
   "x-content-type-options","referrer-policy","permissions-policy",
@@ -27,13 +34,17 @@ let filterHistScope = false;
 let filterHistExt = "";
 let filterHistReflect = false;
 let activeSubResp = "body";
+// Remember which sub-tab is active per side across request clicks
+let detailActiveReqPane = "req-headers";
+let detailActiveRespPane = "resp-headers";
 let historyData = [];
 let histDetailEntry = null;
 let histSortKey = "id";
 let histSortAsc = false; // false = newest first by default
+let histColFilters = {};
 
 // ── Repeater tabs state ──────────────────────────────────────────────────────
-let repTabs = [{ id: 0, label: "1", method: "GET", url: "", headers: "", body: "", response: null, autoCookie: false, targetHost: "", targetPort: "", targetTls: true }];
+let repTabs = [{ id: 0, label: "1", method: "GET", url: "", headers: "", body: "", response: null, autoCookie: false, targetHost: "", targetPort: "", targetTls: true, history: [], histIdx: -1 }];
 let repActiveTab = 0;
 let repNextId = 1;
 
@@ -43,21 +54,54 @@ let intrAbort = null;
 let intrResults = [];
 let intrPayloadSets = [""]; // one textarea per position
 let intrActiveSet = 0;
+let intrSortKey = "id";
+let intrSortAsc = true;
+let intrColFilters = {};
 
 // ── Messaging to background (with auto-retry on SW restart) ──────────────────
+let _contextDead = false;
+let bgSyncTimer = null;
+let logSyncTimer = null;
+
 function sendMsg(msg) {
-  return new Promise(resolve =>
-    chrome.runtime.sendMessage({ ...msg, tabId: TAB_ID }, r => {
-      if (chrome.runtime.lastError) { resolve(null); return; }
-      resolve(r ?? null);
-    })
-  );
+  if (_contextDead) return Promise.resolve(null);
+  return new Promise(resolve => {
+    try {
+      chrome.runtime.sendMessage({ ...msg, tabId: TAB_ID }, r => {
+        if (chrome.runtime.lastError) {
+          const err = chrome.runtime.lastError.message || "";
+          if (/context invalidated|disconnected/i.test(err)) {
+            _contextDead = true;
+            stopAllTimers();
+          }
+          resolve(null);
+          return;
+        }
+        resolve(r ?? null);
+      });
+    } catch (e) {
+      if (/context invalidated|disconnected/i.test(e.message || "")) {
+        _contextDead = true;
+        stopAllTimers();
+      }
+      resolve(null);
+    }
+  });
+}
+
+function stopAllTimers() {
+  clearInterval(pollTimer);   pollTimer = null;
+  clearInterval(histTimer);   histTimer = null;
+  clearInterval(bgSyncTimer); bgSyncTimer = null;
+  clearInterval(logSyncTimer); logSyncTimer = null;
 }
 
 async function bg(msg, retries = 3) {
+  if (_contextDead) return null;
   for (let i = 0; i < retries; i++) {
     const res = await sendMsg(msg);
     if (res !== null) return res;
+    if (_contextDead) return null;
     await new Promise(r => setTimeout(r, 300));
   }
   return null;
@@ -68,6 +112,7 @@ async function wakeSW() {
   for (let i = 0; i < 4; i++) {
     const r = await sendMsg({ type: "PING" });
     if (r?.ok) return true;
+    if (_contextDead) return false;
     await new Promise(r => setTimeout(r, 200));
   }
   return false;
@@ -87,6 +132,7 @@ function showTab(name) {
   });
   if (name === "intercept") startPoll(); else stopPoll();
   if (name === "history") startHistPoll(); else stopHistPoll();
+  if (name === "logger") { logSyncLocal(); logSyncRemote(); logRender(); startLogSync(); } else stopLogSync();
   if (name === "target") { pollHistory().then(() => renderSiteMap()); renderEndpoints(); }
   if (name === "probe" && probeInjected) probeStartPoll(); else probeStopPoll();
 }
@@ -118,6 +164,25 @@ async function pollHistory() {
   setBadge("bdg-history", historyData.length);
 }
 
+// ── Background state sync (runs always, keeps badges/data fresh) ─────────────
+function startBgSync() {
+  if (bgSyncTimer) return;
+  bgSyncTimer = setInterval(async () => {
+    if (_contextDead) { stopAllTimers(); return; }
+    const d = await sendMsg({ type: "GET_DATA" });
+    if (!d) return; // SW might be restarting, skip this tick
+    const wasAttached = state.attached;
+    state = { ...state, ...d };
+    if (state.attached !== wasAttached) renderInterceptStatus();
+    const hst = await sendMsg({ type: "GET_HISTORY" });
+    if (hst) {
+      historyData = hst.history || [];
+      setBadge("bdg-history", historyData.length);
+    }
+    setBadge("bdg-endpoints", (state.endpoints || []).length);
+  }, 2000);
+}
+
 // ── Load all data ─────────────────────────────────────────────────────────────
 async function loadAll() {
   // Wake SW first, then inject content script
@@ -146,6 +211,7 @@ async function loadAll() {
   renderEndpoints();
   renderHeaders();
   updateBadges();
+  startBgSync();
 }
 
 // ── Badges ────────────────────────────────────────────────────────────────────
@@ -156,11 +222,13 @@ function updateBadges() {
 }
 function setBadge(id, n) {
   const b = document.getElementById(id);
+  if (!b) return;
   b.textContent = n;
   b.className   = n > 0 ? "bdg has-data" : "bdg";
 }
 function updateInterceptBadge() {
   const b = document.getElementById("bdg-intercept");
+  if (!b) return;
   if (intercepted.length > 0) { b.textContent = intercepted.length; b.className = "bdg has-warn"; }
   else { b.className = "bdg hidden"; }
 }
@@ -212,16 +280,7 @@ function renderInterceptList() {
 
   const list   = document.getElementById("ic-list");
   const empty  = document.getElementById("ic-empty");
-  const editor = document.getElementById("ic-editor");
 
-  if (editingReq) {
-    list.classList.add("hidden");
-    empty.classList.add("hidden");
-    editor.classList.remove("hidden");
-    return;
-  }
-  editor.classList.add("hidden");
-  list.classList.remove("hidden");
   list.replaceChildren();
 
   if (!intercepted.length) { empty.classList.remove("hidden"); return; }
@@ -229,27 +288,26 @@ function renderInterceptList() {
 
   intercepted.forEach(req => {
     const row = el("div", "req-row");
+    if (editingReq && editingReq.requestId === req.requestId) row.classList.add("hist-selected");
     ap(row,
       txt("span", `method-pill m-${req.method.toLowerCase()}`, req.method),
       txt("span", "req-type",  req.resourceType || "other"),
       txt("span", "req-url",   req.url),
     );
     const acts = el("div", "req-actions");
-    const btnEdit = txt("button", "btn btn-xs btn-ghost",   "Edit");
     const btnRep  = txt("button", "btn btn-xs btn-ghost",   "→ Rep");
     const btnIntr = txt("button", "btn btn-xs btn-ghost",   "→ Intr");
     const btnOpen = txt("button", "btn btn-xs btn-ghost",   "↗"); btnOpen.title = "Open in new tab";
     const btnFwd  = txt("button", "btn btn-xs btn-success", "Forward →");
     const btnDrop = txt("button", "btn btn-xs btn-danger",  "Drop");
 
-    btnEdit.addEventListener("click", e => { e.stopPropagation(); openEditor(req); });
     btnRep.addEventListener("click",  e => { e.stopPropagation(); sendToRepeater(req); });
     btnIntr.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder(req); });
     btnOpen.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: req.url }); });
     btnFwd.addEventListener("click",  e => { e.stopPropagation(); doForward(req.requestId, null); });
     btnDrop.addEventListener("click", e => { e.stopPropagation(); doDrop(req.requestId); });
 
-    ap(acts, btnEdit, btnRep, btnIntr, btnOpen, btnFwd, btnDrop);
+    ap(acts, btnRep, btnIntr, btnOpen, btnFwd, btnDrop);
     row.appendChild(acts);
     row.addEventListener("click", () => openEditor(req));
     list.appendChild(row);
@@ -268,14 +326,27 @@ function openEditor(req) {
     mSel.appendChild(o);
   });
 
-  document.getElementById("ed-url").value     = req.url;
+  const edUrl = document.getElementById("ed-url");
+  edUrl.value     = req.url;
+  autoSizeUrlInput(edUrl);
   document.getElementById("ed-headers").value = headersToRaw(req.headers || {});
   document.getElementById("ed-body").value    = req.body || "";
 
+  const editor = document.getElementById("ic-editor");
+  editor.classList.remove("hidden");
+  editor.classList.add("visible");
+  document.getElementById("ic-resizer").classList.add("visible");
   renderInterceptList();
 }
 
-function closeEditor() { editingReq = null; renderInterceptList(); }
+function closeEditor() {
+  editingReq = null;
+  const editor = document.getElementById("ic-editor");
+  editor.classList.add("hidden");
+  editor.classList.remove("visible");
+  document.getElementById("ic-resizer").classList.remove("visible");
+  renderInterceptList();
+}
 
 function headersToRaw(headers) {
   return Object.entries(headers).map(([k,v]) => `${k}: ${v}`).join("\n");
@@ -321,6 +392,255 @@ async function dropFromEditor() {
   await doDrop(id);
 }
 
+// ═══════════════════════════ LOGGER (cross-container aggregator) ═════════════
+
+let logEntries = [];       // all entries from all sources
+let logDetailEntry = null;
+let logSortKey = "id";
+let logSortAsc = false;
+let logColFilters = {};
+let logFilterText = "";
+let logFilterMeth = "";
+let logFilterStat = "";
+let logFilterSource = "";
+let logScopeOnly = false;
+let logNextId = 1;
+
+// Sync local history into logger (idempotent — uses stable IDs)
+function logSyncLocal() {
+  // Track what's already in the logger from local sources
+  const existingUrls = new Set(logEntries.filter(e => e._logSource === "local").map(e => e._logStableKey));
+
+  for (const e of historyData) {
+    const key = `${e.time}_${e.method}_${e.url}`;
+    if (existingUrls.has(key)) continue;
+    logEntries.push({ ...e, _logId: logNextId++, _logSource: "local", _logLabel: "Proxy", _logStableKey: key });
+    existingUrls.add(key);
+  }
+
+  // Add repeater entries (use tab id as stable key)
+  const existingRep = new Set(logEntries.filter(e => e._logSource === "repeater").map(e => e._logStableKey));
+  for (const tab of repTabs) {
+    if (!tab.response || !tab.url) continue;
+    const key = `rep_${tab.id}_${tab.response?.status}_${tab.response?.elapsed}`;
+    if (existingRep.has(key)) continue;
+    const r = tab.response;
+    const entry = {
+      method: tab.method, url: tab.url, host: "", path: "",
+      headers: {}, body: tab.body, status: r.status, statusText: r.statusText || "",
+      respHeaders: r.headers || {}, respBody: r.body || "",
+      length: r.size || 0, mimeType: r.headers?.["content-type"] || "",
+      time: 0, elapsed: r.elapsed || 0,
+      _logId: logNextId++, _logSource: "repeater", _logLabel: tab.customLabel || "Repeater", _logStableKey: key,
+    };
+    try { const u = new URL(tab.url); entry.host = u.host; entry.path = u.pathname + u.search; } catch {}
+    logEntries.push(entry);
+  }
+}
+
+function logImportFile(file) {
+  return file.text().then(text => {
+    const data = JSON.parse(text);
+    const imported = data.history || [];
+    if (!imported.length) return;
+    const name = data.name || file.name.replace(/\.json$/, "");
+    for (const e of imported) {
+      logEntries.push({ ...e, _logId: logNextId++, _logSource: "container", _logLabel: name });
+    }
+    // Also add this source to the filter dropdown
+    const sel = document.getElementById("log-flt-source");
+    if (![...sel.options].some(o => o.value === name)) {
+      const o = el("option"); o.value = name; o.textContent = name;
+      sel.appendChild(o);
+    }
+  });
+}
+
+function logRender() {
+  const tbody = document.getElementById("log-tbody");
+  const empty = document.getElementById("log-empty");
+  tbody.replaceChildren();
+
+  let items = [...logEntries];
+
+  // Filters
+  if (logFilterMeth) items = items.filter(e => e.method === logFilterMeth);
+  if (logFilterStat) items = items.filter(e => e.status && String(e.status).startsWith(logFilterStat));
+  if (logFilterSource) items = items.filter(e => e._logSource === logFilterSource || e._logLabel === logFilterSource);
+  if (logScopeOnly) items = items.filter(e => tgtIsInScope(e.url));
+  for (const [field, allowed] of Object.entries(logColFilters)) {
+    if (!allowed) continue;
+    items = items.filter(e => {
+      const val = field === "source" ? (e._logLabel || "") : field === "status" ? String(e.status ?? "") : String(e[field] ?? "");
+      return allowed.has(val);
+    });
+  }
+
+  // Advanced text search (same field:value syntax as History)
+  if (logFilterText) {
+    const fieldRe = /(\w+):(\S+)/g;
+    const fieldFilters = [];
+    let plain = logFilterText;
+    let fm;
+    while ((fm = fieldRe.exec(logFilterText)) !== null) {
+      fieldFilters.push({ field: fm[1].toLowerCase(), value: fm[2].toLowerCase() });
+      plain = plain.replace(fm[0], "");
+    }
+    plain = plain.trim().toLowerCase();
+    items = items.filter(e => {
+      for (const { field, value } of fieldFilters) {
+        switch (field) {
+          case "host":   if (!(e.host||"").toLowerCase().includes(value)) return false; break;
+          case "path":   if (!(e.path||"").toLowerCase().includes(value)) return false; break;
+          case "url":    if (!(e.url||"").toLowerCase().includes(value)) return false; break;
+          case "method": if ((e.method||"").toLowerCase() !== value) return false; break;
+          case "status": if (!String(e.status||"").startsWith(value)) return false; break;
+          case "body":   if (!(e.body||"").toLowerCase().includes(value) && !(e.respBody||"").toLowerCase().includes(value)) return false; break;
+          case "header": {
+            const h = [...Object.entries(e.headers||{}), ...Object.entries(e.respHeaders||{})].map(([k,v])=>`${k}: ${v}`).join("\n").toLowerCase();
+            if (!h.includes(value)) return false; break;
+          }
+          case "source": if (!(e._logLabel||"").toLowerCase().includes(value) && !(e._logSource||"").toLowerCase().includes(value)) return false; break;
+        }
+      }
+      if (plain) {
+        const hay = [e.url, e.method, e.host, String(e.status||""), e.body||"", e.respBody||"",
+          ...Object.entries(e.headers||{}).map(([k,v])=>`${k}:${v}`),
+          ...Object.entries(e.respHeaders||{}).map(([k,v])=>`${k}:${v}`),
+        ].join("\n").toLowerCase();
+        if (!hay.includes(plain)) return false;
+      }
+      return true;
+    });
+  }
+
+  // Sort
+  items.sort((a, b) => {
+    let va, vb;
+    switch (logSortKey) {
+      case "id":      va = a._logId; vb = b._logId; break;
+      case "source":  va = a._logLabel||""; vb = b._logLabel||""; break;
+      case "method":  va = a.method; vb = b.method; break;
+      case "host":    va = a.host||""; vb = b.host||""; break;
+      case "path":    va = a.path||""; vb = b.path||""; break;
+      case "status":  va = a.status||0; vb = b.status||0; break;
+      case "length":  va = a.length||0; vb = b.length||0; break;
+      case "elapsed": va = a.elapsed||0; vb = b.elapsed||0; break;
+      case "time":    va = a.time||0; vb = b.time||0; break;
+      default:        va = a._logId; vb = b._logId;
+    }
+    if (typeof va === "string") { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+    return (va < vb ? -1 : va > vb ? 1 : 0) * (logSortAsc ? 1 : -1);
+  });
+
+  // Sort indicators
+  document.querySelectorAll("#log-table .hist-th-sortable").forEach(th => {
+    const key = th.dataset.logsort;
+    const arrow = key === logSortKey ? (logSortAsc ? " \u25B4" : " \u25BE") : "";
+    let sp = th.querySelector(".sort-label");
+    if (!sp) { sp = document.createElement("span"); sp.className = "sort-label"; const raw = th.firstChild?.nodeType === 3 ? th.firstChild.textContent.trim() : ""; if (th.firstChild?.nodeType === 3) th.firstChild.remove(); th.insertBefore(sp, th.firstChild); sp.textContent = raw; }
+    sp.textContent = sp.textContent.replace(/ [\u25B4\u25BE]$/, "") + arrow;
+  });
+
+  setBadge("bdg-logger", logEntries.length);
+
+  if (!items.length) { empty.classList.remove("hidden"); document.getElementById("log-table").parentElement.classList.add("hidden"); return; }
+  empty.classList.add("hidden");
+  document.getElementById("log-table").parentElement.classList.remove("hidden");
+
+  const SRC_COLORS = { proxy: "hist-src-proxy", repeater: "hist-src-repeater", container: "hist-src-container" };
+  for (const e of items.slice(0, 3000)) {
+    const tr = document.createElement("tr");
+    tr.className = "tgt-clickable";
+    const statusCls = !e.status ? "hist-td-status-wait" : e.status < 300 ? "hist-td-status-ok" : e.status < 400 ? "hist-td-status-rdir" : "hist-td-status-err";
+    const len = e.length > 1024 ? `${(e.length/1024).toFixed(1)}k` : e.length || "";
+    const ts = e.time ? fmtTime(e.time) : "";
+    const srcCls = SRC_COLORS[e._logSource] || "hist-src-proxy";
+    const srcLbl = (e._logLabel || "PRX").slice(0, 5);
+    const mCls = esc((e.method||"").toLowerCase().replace(/[^a-z]/g, ""));
+    tr.innerHTML = `
+      <td class="hist-td-num">${Number(e._logId)||0}</td>
+      <td><span class="hist-src-badge ${srcCls}">${esc(srcLbl)}</span></td>
+      <td><span class="method-pill m-${mCls}">${esc(e.method)}</span></td>
+      <td title="${esc(e.host)}">${esc(e.host)}</td>
+      <td title="${esc(e.path)}">${esc(e.path)}</td>
+      <td class="${statusCls}">${esc(String(e.status ?? "\u2026"))}</td>
+      <td class="hist-td-len">${esc(String(len))}</td>
+      <td class="hist-td-elapsed">${e.elapsed ? Number(e.elapsed)||"" : ""}</td>
+      <td class="hist-td-timestamp">${esc(ts)}</td>
+    `;
+    tr._logEntry = e;
+    if (logDetailEntry === e) tr.classList.add("hist-selected");
+    tr.addEventListener("click", () => logOpenDetail(e));
+    tbody.appendChild(tr);
+  }
+}
+
+function logOpenDetail(entry) {
+  logDetailEntry = entry;
+  const detail = document.getElementById("log-detail");
+  document.getElementById("log-detail-title").textContent = `[${entry._logLabel}] ${entry.status||"\u2026"} ${entry.method} ${entry.url}`;
+  let reqHdrs = `${entry.method} ${entry.path||"/"} HTTP/1.1\nHost: ${entry.host}\n`;
+  reqHdrs += Object.entries(entry.headers||{}).map(([k,v])=>`${k}: ${v}`).join("\n");
+  document.getElementById("log-req-headers-pre").textContent = reqHdrs;
+  document.getElementById("log-req-body-pre").textContent = entry.body || "(empty)";
+  let resHdrs = entry.status ? `HTTP/1.1 ${entry.status} ${entry.statusText||""}\n` : "(no response)\n";
+  resHdrs += Object.entries(entry.respHeaders||{}).map(([k,v])=>`${k}: ${v}`).join("\n");
+  document.getElementById("log-resp-headers-pre").textContent = resHdrs;
+  const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
+  document.getElementById("log-resp-body-pre").textContent = tryPretty(entry.respBody || "(body not captured)", ct);
+  // Restore sub-tabs
+  detail.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
+  detail.querySelectorAll(".hist-detail-sub-tabs .sub-tab").forEach(t => t.classList.remove("active"));
+  const rp = detailActiveReqPane.replace("req-",""), sp = detailActiveRespPane.replace("resp-","");
+  document.getElementById(`log-req-${rp}-pane`).classList.remove("hidden");
+  document.getElementById(`log-resp-${sp}-pane`).classList.remove("hidden");
+  detail.querySelectorAll(`.sub-tab[data-logpane="req-${rp}"]`).forEach(t => t.classList.add("active"));
+  detail.querySelectorAll(`.sub-tab[data-logpane="resp-${sp}"]`).forEach(t => t.classList.add("active"));
+  detail.classList.remove("hidden"); detail.classList.add("visible");
+  document.getElementById("log-resizer").classList.add("visible");
+  document.querySelectorAll("#log-tbody tr").forEach(r => r.classList.remove("hist-selected"));
+  document.querySelectorAll("#log-tbody tr").forEach(r => { if (r._logEntry === entry) r.classList.add("hist-selected"); });
+}
+
+function logCloseDetail() {
+  logDetailEntry = null;
+  document.getElementById("log-detail").classList.add("hidden");
+  document.getElementById("log-detail").classList.remove("visible");
+  document.getElementById("log-resizer").classList.remove("visible");
+}
+
+function startLogSync() {
+  if (logSyncTimer) return;
+  logSyncTimer = setInterval(() => { logSyncLocal(); logSyncRemote(); logRender(); }, 3000);
+}
+function stopLogSync() { clearInterval(logSyncTimer); logSyncTimer = null; }
+
+async function logSyncRemote() {
+  const res = await sendMsg({ type: "SYNC_GET_REMOTE" });
+  if (!res?.entries?.length) return;
+  const existing = new Set(logEntries.filter(e => e._logSource === "container").map(e => e._logStableKey));
+  for (const e of res.entries) {
+    const key = `${e.time || 0}_${e.method}_${e.url}_${e._logLabel}`;
+    if (existing.has(key)) continue;
+    logEntries.push({ ...e, _logId: logNextId++, _logStableKey: key });
+    existing.add(key);
+    const sel = document.getElementById("log-flt-source");
+    const label = e._logLabel || "container";
+    if (![...sel.options].some(o => o.value === label)) {
+      const o = el("option"); o.value = label; o.textContent = label; sel.appendChild(o);
+    }
+  }
+}
+
+function logExport() {
+  const data = { version: 1, name: "Logger Export", timestamp: new Date().toISOString(), history: logEntries };
+  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+  const a = el("a"); a.href = URL.createObjectURL(blob);
+  a.download = `void-logger-${new Date().toISOString().slice(0,10)}.json`; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ═══════════════════════════ HISTORY ════════════════════════════════════════
 
 function renderHistory() {
@@ -329,48 +649,77 @@ function renderHistory() {
   const table = document.getElementById("hist-table");
   const detail = document.getElementById("hist-detail");
 
-  if (histDetailEntry) return; // detail pane is open, don't re-render table
+  // Allow table re-render even when detail is open (split view)
 
   let items = historyData;
 
   // Dropdown filters
-  if (filterHistMeth) {
-    items = items.filter(e => e.method === filterHistMeth);
-  }
+  if (filterHistMeth) items = items.filter(e => e.method === filterHistMeth);
   if (filterHistStat) {
-    const prefix = filterHistStat.charAt(0); // "1","2","3","4","5"
+    const prefix = filterHistStat.charAt(0);
     items = items.filter(e => e.status && String(e.status).charAt(0) === prefix);
   }
   if (filterHistMime) {
     const q = filterHistMime.toLowerCase();
     items = items.filter(e => (e.mimeType || "").toLowerCase().includes(q));
   }
-  if (filterHistScope) {
-    items = items.filter(e => tgtIsInScope(e.url));
-  }
+  if (filterHistScope) items = items.filter(e => tgtIsInScope(e.url));
   if (filterHistExt === "no-static") {
     items = items.filter(e => !/\.(js|mjs|css|png|jpe?g|gif|webp|ico|svg|woff2?|ttf|eot|map)(\?|$)/i.test(e.path));
   }
-  if (filterHistReflect) {
-    items = items.filter(e => hasReflections(e));
+  if (filterHistReflect) items = items.filter(e => hasReflections(e));
+  // Column checkbox filters
+  for (const [field, allowed] of Object.entries(histColFilters)) {
+    if (!allowed) continue;
+    items = items.filter(e => {
+      const val = field === "mimeType" ? shortMime(e.mimeType) : String(e[field] ?? "");
+      return allowed.has(val);
+    });
   }
 
-  // Text search — matches against everything
+  // Advanced text search — supports field:value syntax AND plain text
   if (filterHist) {
-    const q = filterHist.toLowerCase();
+    const fieldRe = /(\w+):(\S+)/g;
+    const fieldFilters = [];
+    let plainQuery = filterHist;
+    let fm;
+    while ((fm = fieldRe.exec(filterHist)) !== null) {
+      fieldFilters.push({ field: fm[1].toLowerCase(), value: fm[2].toLowerCase() });
+      plainQuery = plainQuery.replace(fm[0], "");
+    }
+    plainQuery = plainQuery.trim().toLowerCase();
+
     items = items.filter(e => {
-      const haystack = [
-        e.url, e.method, e.host, e.path,
-        String(e.status || ""), e.statusText,
-        e.mimeType || "", e.resourceType || "",
-        // Search in request headers
-        ...Object.entries(e.headers || {}).map(([k,v]) => `${k}: ${v}`),
-        // Search in response headers
-        ...Object.entries(e.respHeaders || {}).map(([k,v]) => `${k}: ${v}`),
-        // Search in body
-        e.body || "", e.respBody || "",
-      ].join("\n").toLowerCase();
-      return haystack.includes(q);
+      // Field-specific filters
+      for (const { field, value } of fieldFilters) {
+        switch (field) {
+          case "host":   if (!(e.host || "").toLowerCase().includes(value)) return false; break;
+          case "path":   if (!(e.path || "").toLowerCase().includes(value)) return false; break;
+          case "url":    if (!(e.url || "").toLowerCase().includes(value)) return false; break;
+          case "method": if ((e.method || "").toLowerCase() !== value) return false; break;
+          case "status": if (!String(e.status || "").startsWith(value)) return false; break;
+          case "type":   if (!(e.mimeType || "").toLowerCase().includes(value)) return false; break;
+          case "body":   if (!(e.body || "").toLowerCase().includes(value) && !(e.respBody || "").toLowerCase().includes(value)) return false; break;
+          case "header": {
+            const allHdrs = [...Object.entries(e.headers || {}), ...Object.entries(e.respHeaders || {})].map(([k,v]) => `${k}: ${v}`).join("\n").toLowerCase();
+            if (!allHdrs.includes(value)) return false; break;
+          }
+          case "source": if ((e._source || "").toLowerCase() !== value) return false; break;
+          default:       if (!(e.url || "").toLowerCase().includes(`${field}:${value}`)) return false;
+        }
+      }
+      // Plain text search on everything
+      if (plainQuery) {
+        const haystack = [
+          e.url, e.method, e.host, e.path,
+          String(e.status || ""), e.mimeType || "",
+          ...Object.entries(e.headers || {}).map(([k,v]) => `${k}: ${v}`),
+          ...Object.entries(e.respHeaders || {}).map(([k,v]) => `${k}: ${v}`),
+          e.body || "", e.respBody || "",
+        ].join("\n").toLowerCase();
+        if (!haystack.includes(plainQuery)) return false;
+      }
+      return true;
     });
   }
 
@@ -408,7 +757,7 @@ function renderHistory() {
   });
 
   // Update sort indicators in headers
-  document.querySelectorAll(".hist-th-sortable").forEach(th => {
+  document.querySelectorAll("#hist-table .hist-th-sortable").forEach(th => {
     const key = th.dataset.sort;
     const arrow = key === histSortKey ? (histSortAsc ? " ▴" : " ▾") : "";
     th.textContent = th.textContent.replace(/ [▴▾]$/, "") + arrow;
@@ -425,16 +774,18 @@ function renderHistory() {
     const len = entry.length > 1024 ? `${(entry.length / 1024).toFixed(1)}k` : entry.length || "";
     const ts = entry.time ? fmtTime(entry.time) : "";
 
+    const safeMethod = esc(entry.method);
+    const safeMethodCls = esc(entry.method.toLowerCase().replace(/[^a-z]/g, ""));
     tr.innerHTML = `
-      <td class="hist-td-num">${entry._idx}</td>
-      <td><span class="method-pill m-${entry.method.toLowerCase()}">${entry.method}</span></td>
+      <td class="hist-td-num">${Number(entry._idx) || 0}</td>
+      <td><span class="method-pill m-${safeMethodCls}">${safeMethod}</span></td>
       <td title="${esc(entry.host)}">${esc(entry.host)}</td>
       <td title="${esc(entry.path)}">${esc(entry.path)}</td>
-      <td class="${statusCls}">${entry.status ?? "…"}</td>
+      <td class="${statusCls}">${esc(String(entry.status ?? "…"))}</td>
       <td class="hist-td-mime">${esc(shortMime(entry.mimeType))}</td>
-      <td class="hist-td-len">${len}</td>
-      <td class="hist-td-elapsed">${entry.elapsed ? entry.elapsed : ""}</td>
-      <td class="hist-td-timestamp">${ts}</td>
+      <td class="hist-td-len">${esc(String(len))}</td>
+      <td class="hist-td-elapsed">${entry.elapsed ? Number(entry.elapsed) || "" : ""}</td>
+      <td class="hist-td-timestamp">${esc(ts)}</td>
     `;
     if (entry.respBody && hasReflections(entry)) {
       const dot = document.createElement("span");
@@ -442,12 +793,14 @@ function renderHistory() {
       dot.title = "Reflections detected";
       tr.querySelector("td:nth-child(5)").appendChild(dot);
     }
+    tr._histEntry = entry;
+    if (histDetailEntry && entry === histDetailEntry) tr.classList.add("hist-selected");
     tr.addEventListener("click", () => openHistDetail(entry));
     tbody.appendChild(tr);
   }
 }
 
-function esc(s) { return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function esc(s) { return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function shortMime(m) {
   if (!m) return "";
   return m.replace(/^application\//, "").replace(/^text\//, "").split(";")[0];
@@ -483,27 +836,38 @@ function openHistDetail(entry) {
   const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
   document.getElementById("hist-resp-body-pre").textContent = tryPretty(respBody, ct);
 
-  // Reset sub-tabs to headers active
+  // Restore remembered sub-tab selection
   detail.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
   detail.querySelectorAll(".hist-detail-sub-tabs .sub-tab").forEach(t => t.classList.remove("active"));
-  document.getElementById("hist-req-headers-pane").classList.remove("hidden");
-  document.getElementById("hist-resp-headers-pane").classList.remove("hidden");
-  detail.querySelectorAll('.sub-tab[data-histpane$="-headers"]').forEach(t => t.classList.add("active"));
+  document.getElementById(`hist-${detailActiveReqPane}-pane`).classList.remove("hidden");
+  document.getElementById(`hist-${detailActiveRespPane}-pane`).classList.remove("hidden");
+  detail.querySelectorAll(`.sub-tab[data-histpane="${detailActiveReqPane}"]`).forEach(t => t.classList.add("active"));
+  detail.querySelectorAll(`.sub-tab[data-histpane="${detailActiveRespPane}"]`).forEach(t => t.classList.add("active"));
 
   detail.classList.remove("hidden");
-  document.getElementById("hist-table").parentElement.classList.add("hidden");
-  document.getElementById("hist-empty").classList.add("hidden");
+  detail.classList.add("visible");
+  document.getElementById("hist-resizer").classList.add("visible");
+
+  // Highlight selected row
+  document.querySelectorAll("#hist-tbody tr").forEach(r => r.classList.remove("hist-selected"));
+  const rows = document.querySelectorAll("#hist-tbody tr");
+  for (const r of rows) {
+    if (r._histEntry === entry) { r.classList.add("hist-selected"); break; }
+  }
 
   // Highlight reflections + clear search
   highlightReflections(entry);
-  document.getElementById("hist-detail-search").value = "";
-  document.getElementById("hist-detail-search-count").textContent = "";
+  if (histReqSearch) histReqSearch.clear();
+  if (histRespSearch) histRespSearch.clear();
 }
 
 function closeHistDetail() {
   histDetailEntry = null;
-  document.getElementById("hist-detail").classList.add("hidden");
-  renderHistory();
+  const detail = document.getElementById("hist-detail");
+  detail.classList.add("hidden");
+  detail.classList.remove("visible");
+  document.getElementById("hist-resizer").classList.remove("visible");
+  document.querySelectorAll("#hist-tbody tr").forEach(r => r.classList.remove("hist-selected"));
 }
 
 function histDetailToRepeater() {
@@ -514,7 +878,6 @@ function histDetailToRepeater() {
     headers: histDetailEntry.headers || {},
     body:    histDetailEntry.body || "",
   });
-  closeHistDetail();
 }
 
 // ── Send to Repeater ──────────────────────────────────────────────────────────
@@ -532,14 +895,20 @@ function sendToRepeater(req) {
     id: repNextId++,
     label: repTabs.length + 1 + "",
     method, url, headers: rawHdrs, body, response: null, autoCookie: false,
-    targetHost: "", targetPort: "", targetTls: true,
+    targetHost: "", targetPort: "", targetTls: true, history: [], histIdx: -1,
   };
   repTabs.push(newTab);
   repActiveTab = newTab.id;
   renderRepTabs();
   loadRepTab(newTab);
 
-  showTab("repeater");
+  // Flash the Repeater badge to notify the user
+  const bdg = document.getElementById("bdg-repeater");
+  const pending = repTabs.filter(t => !t.response).length;
+  bdg.textContent = "+" + repTabs.length;
+  bdg.className = "bdg has-data";
+  clearTimeout(bdg._timer);
+  bdg._timer = setTimeout(() => { bdg.className = "bdg hidden"; }, 3000);
 }
 
 // ═══════════════════════════ REPEATER ════════════════════════════════════════
@@ -558,12 +927,66 @@ function saveRepTabState() {
   tab.targetTls  = document.getElementById("rep-target-tls").checked;
 }
 
+// Ensure a method exists in a <select> dropdown, add if missing
+function ensureMethod(selectEl, method) {
+  if (!method) return;
+  for (const o of selectEl.options) { if (o.value === method) return; }
+  const o = el("option"); o.value = method; o.textContent = method;
+  selectEl.appendChild(o);
+}
+
+// Fast load for history navigation — direct .value, no focus/select overhead
+function loadRepTabFast(tab) {
+  const mSel = document.getElementById("rep-method");
+  ensureMethod(mSel, tab.method);
+  mSel.value = tab.method;
+  document.getElementById("rep-url").value = tab.url;
+  document.getElementById("rep-headers").value = tab.headers;
+  document.getElementById("rep-body-ta").value = tab.body;
+  autoSizeUrlInput(document.getElementById("rep-url"));
+
+  clearRespPanes();
+  const subTabs = document.getElementById("resp-sub-tabs");
+  const empty   = document.getElementById("resp-empty");
+  const label   = document.getElementById("resp-label");
+
+  if (tab.response) {
+    const r = tab.response;
+    label.textContent = `RESPONSE — ${r.status} ${r.statusText}${r.size ? ` ${(r.size/1024).toFixed(1)} KB` : ""}${r.elapsed ? ` ${r.elapsed}ms` : ""}`;
+    document.getElementById("resp-body-pre").textContent = tryPretty(r.body || "(empty body)", r.headers?.["content-type"] || "");
+    const hdrsText = Object.entries(r.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+    document.getElementById("resp-hdrs-pre").textContent = hdrsText || "(no headers)";
+    document.getElementById("resp-raw-pre").textContent  = `HTTP/1.1 ${r.status} ${r.statusText}\n${hdrsText}\n\n${r.body || ""}`;
+    subTabs.classList.remove("hidden");
+    empty.classList.add("hidden");
+    switchRespPane(activeSubResp);
+  } else {
+    label.textContent = "RESPONSE";
+    subTabs.classList.add("hidden");
+    empty.classList.remove("hidden");
+  }
+  updateRepHistButtons();
+}
+
+// Set input/textarea value preserving undo history
+function setFieldValue(field, val) {
+  field.focus();
+  field.select();
+  // execCommand('insertText') preserves native undo stack
+  if (!document.execCommand("insertText", false, val)) {
+    field.value = val; // fallback
+  }
+}
+
 function loadRepTab(tab) {
   const mSel = document.getElementById("rep-method");
-  for (const o of mSel.options) { if (o.value === tab.method) { o.selected = true; break; } }
-  document.getElementById("rep-url").value        = tab.url;
-  document.getElementById("rep-headers").value    = tab.headers;
-  document.getElementById("rep-body-ta").value    = tab.body;
+  ensureMethod(mSel, tab.method);
+  mSel.value = tab.method;
+  const repUrl = document.getElementById("rep-url");
+  setFieldValue(repUrl, tab.url);
+  setFieldValue(document.getElementById("rep-headers"), tab.headers);
+  setFieldValue(document.getElementById("rep-body-ta"), tab.body);
+  autoSizeUrlInput(repUrl);
   document.getElementById("rep-autocookie").checked = !!tab.autoCookie;
   document.getElementById("rep-target-host").value  = tab.targetHost || "";
   document.getElementById("rep-target-port").value  = tab.targetPort || "";
@@ -594,6 +1017,7 @@ function loadRepTab(tab) {
     subTabs.classList.add("hidden");
     empty.classList.remove("hidden");
   }
+  updateRepHistButtons();
 }
 
 function renderRepTabs() {
@@ -607,12 +1031,15 @@ function renderRepTabs() {
     btn.className = "rep-tab-btn" + (tab.id === repActiveTab ? " active" : "");
     btn.dataset.reptab = tab.id;
 
-    // Label — show short path if available
-    let label = tab.label;
-    if (tab.url) {
+    // Label — custom name or short path
+    let label = tab.customLabel || tab.label;
+    if (!tab.customLabel && tab.url) {
       try { const u = new URL(tab.url); label = u.pathname.split("/").pop() || tab.label; } catch {}
     }
-    btn.textContent = label;
+
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = label;
+    btn.appendChild(labelSpan);
 
     // Close button (only if more than 1 tab)
     if (repTabs.length > 1) {
@@ -627,6 +1054,30 @@ function renderRepTabs() {
     }
 
     btn.addEventListener("click", () => switchRepTab(tab.id));
+
+    // Double-click to rename
+    btn.addEventListener("dblclick", e => {
+      e.stopPropagation();
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "rep-tab-rename";
+      input.value = tab.customLabel || label;
+      input.size = Math.max(4, input.value.length + 1);
+      labelSpan.replaceWith(input);
+      input.focus();
+      input.select();
+      const finish = () => {
+        const val = input.value.trim();
+        if (val) { tab.customLabel = val; }
+        renderRepTabs();
+      };
+      input.addEventListener("blur", finish);
+      input.addEventListener("keydown", ev => {
+        if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
+        if (ev.key === "Escape") { ev.preventDefault(); input.value = ""; input.blur(); }
+      });
+    });
+
     bar.insertBefore(btn, addBtn);
   });
 }
@@ -653,11 +1104,67 @@ function closeRepTab(id) {
 
 function addRepTab() {
   saveRepTabState();
-  const newTab = { id: repNextId++, label: repTabs.length + 1 + "", method: "GET", url: "", headers: "", body: "", response: null };
+  const newTab = { id: repNextId++, label: repTabs.length + 1 + "", method: "GET", url: "", headers: "", body: "", response: null, history: [], histIdx: -1 };
   repTabs.push(newTab);
   repActiveTab = newTab.id;
   renderRepTabs();
   loadRepTab(newTab);
+}
+
+// ── Repeater history navigation ──────────────────────────────────────────────
+function repHistPush(tab) {
+  const snap = { method: tab.method, url: tab.url, headers: tab.headers, body: tab.body, response: tab.response };
+  if (!tab.history) { tab.history = []; tab.histIdx = -1; }
+  // Trim forward history if we're not at the end
+  if (tab.histIdx < tab.history.length - 1) {
+    tab.history = tab.history.slice(0, tab.histIdx + 1);
+  }
+  tab.history.push(snap);
+  tab.histIdx = tab.history.length - 1;
+  updateRepHistButtons();
+}
+
+function repHistBack() {
+  const tab = repTabs.find(t => t.id === repActiveTab);
+  if (!tab || !tab.history || tab.histIdx <= 0) return;
+  saveRepTabState();
+  tab.histIdx--;
+  const snap = tab.history[tab.histIdx];
+  tab.method = snap.method; tab.url = snap.url; tab.headers = snap.headers; tab.body = snap.body; tab.response = snap.response;
+  loadRepTabFast(tab);
+  updateRepHistButtons();
+}
+
+function repHistForward() {
+  const tab = repTabs.find(t => t.id === repActiveTab);
+  if (!tab || !tab.history || tab.histIdx >= tab.history.length - 1) return;
+  saveRepTabState();
+  tab.histIdx++;
+  const snap = tab.history[tab.histIdx];
+  tab.method = snap.method; tab.url = snap.url; tab.headers = snap.headers; tab.body = snap.body; tab.response = snap.response;
+  loadRepTabFast(tab);
+  updateRepHistButtons();
+}
+
+function updateRepHistButtons() {
+  const tab = repTabs.find(t => t.id === repActiveTab);
+  const backBtn = document.getElementById("rep-hist-back");
+  const fwdBtn  = document.getElementById("rep-hist-fwd");
+  if (!backBtn || !fwdBtn) return;
+  const hasHist = tab && tab.history && tab.history.length > 0;
+  backBtn.disabled = !hasHist || tab.histIdx <= 0;
+  fwdBtn.disabled  = !hasHist || tab.histIdx >= tab.history.length - 1;
+}
+
+// ── URL input auto-sizer ────────────────────────────────────────────────────
+const _urlSizer = document.createElement("span");
+_urlSizer.className = "url-sizer";
+document.body.appendChild(_urlSizer);
+
+function autoSizeUrlInput(inp) {
+  _urlSizer.textContent = inp.value || inp.placeholder || "";
+  const w = _urlSizer.scrollWidth + 18; // 18 = padding
+  inp.style.minWidth = Math.max(120, Math.min(w, inp.parentElement.clientWidth * 0.85)) + "px";
 }
 
 async function doSend() {
@@ -736,11 +1243,12 @@ async function doSend() {
   subTabs.classList.remove("hidden");
   switchRespPane(activeSubResp);
 
-  // Save response to current repeater tab
+  // Save response to current repeater tab + push to history
   const curTab = repTabs.find(t => t.id === repActiveTab);
   if (curTab) {
     curTab.response = res;
     saveRepTabState();
+    repHistPush(curTab);
   }
 }
 
@@ -796,13 +1304,40 @@ function initResizer() {
 
 // ═══════════════════════════ ENDPOINTS ═══════════════════════════════════════
 
+function guessEpType(entry) {
+  const u = (entry.url || "").toLowerCase();
+  const rt = entry.resourceType || "";
+  if (rt === "XHR" || rt === "Fetch" || /\/api\/|\/v\d+\/|\/graphql|\/rest\//.test(u)) return "api";
+  if (/\.(js|mjs)(\?|$)/.test(u) || rt === "Script") return "script";
+  if (/\.(css|woff2?|ttf|eot|png|jpe?g|gif|webp|ico|svg|map)(\?|$)/.test(u)) return null;
+  if (rt === "Document") return "link";
+  return "link";
+}
+
 function renderEndpoints() {
   const list  = document.getElementById("ep-list");
   const empty = document.getElementById("ep-empty");
 
-  let items = state.endpoints || [];
+  // Merge state.endpoints + historyData (deduplicated by URL+method)
+  const seen = new Set();
+  let items = [];
+  for (const ep of (state.endpoints || [])) {
+    const key = `${ep.method || "GET"}|${ep.url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push(ep);
+  }
+  for (const h of historyData) {
+    const key = `${h.method}|${h.url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const t = guessEpType(h);
+    if (!t) continue; // skip static assets
+    items.push({ url: h.url, method: h.method, type: t });
+  }
   if (filterEp)     items = items.filter(e => e.url.toLowerCase().includes(filterEp));
   if (filterEpType) items = items.filter(e => e.type === filterEpType);
+  if (tgtInScopeOnly) items = items.filter(e => tgtIsInScope(e.url));
 
   setBadge("bdg-endpoints", (state.endpoints || []).length);
   list.replaceChildren();
@@ -822,7 +1357,8 @@ function renderEndpoints() {
     const cpyBtn = txt("button", "btn btn-xs btn-ghost", "Copy");
     const repBtn = txt("button", "btn btn-xs btn-ghost", "→ Rep");
 
-    cpyBtn.addEventListener("click", () => {
+    cpyBtn.addEventListener("click", e => {
+      e.stopPropagation();
       navigator.clipboard.writeText(ep.url).then(() => {
         cpyBtn.textContent = "✓";
         setTimeout(() => { cpyBtn.textContent = "Copy"; }, 1200);
@@ -830,12 +1366,13 @@ function renderEndpoints() {
     });
     const intrBtn = txt("button", "btn btn-xs btn-ghost", "→ Intr");
     const openBtn = txt("button", "btn btn-xs btn-ghost", "↗"); openBtn.title = "Open in new tab";
-    repBtn.addEventListener("click", () => sendToRepeater(ep));
-    intrBtn.addEventListener("click", () => intrSendToIntruder(ep));
-    openBtn.addEventListener("click", () => chrome.tabs.create({ url: ep.url }));
+    repBtn.addEventListener("click", e => { e.stopPropagation(); sendToRepeater(ep); });
+    intrBtn.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder(ep); });
+    openBtn.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: ep.url }); });
 
     ap(acts, cpyBtn, repBtn, intrBtn, openBtn);
     row.appendChild(acts);
+    row.addEventListener("click", () => openEpDetail(ep));
     list.appendChild(row);
   });
 }
@@ -857,13 +1394,14 @@ function extractReqValues(entry) {
     // JSON body values
     try {
       const j = JSON.parse(entry.body);
-      const extract = obj => {
+      const extract = (obj, depth) => {
+        if (depth > 5) return;
         for (const v of Object.values(obj)) {
           if (typeof v === "string" && v.length >= 3) vals.add(v);
-          else if (typeof v === "object" && v) extract(v);
+          else if (typeof v === "object" && v) extract(v, depth + 1);
         }
       };
-      extract(j);
+      extract(j, 0);
     } catch {}
   }
   // Cookie values
@@ -888,60 +1426,79 @@ function hasReflections(entry) {
   return detectReflections(entry).length > 0;
 }
 
-// ── Search within <pre> elements with highlight and auto-scroll ─────────────
-let detailSearchMatches = [];
-let detailSearchIdx = -1;
+// ── Reusable search within <pre> elements ────────────────────────────────────
+function createPaneSearch(container, inputEl, countEl) {
+  const state = { matches: [], idx: -1 };
 
-function detailSearch(query) {
-  // Clear previous highlights
-  document.querySelectorAll("#hist-detail .raw-pre").forEach(pre => {
-    if (pre._origText !== undefined) pre.textContent = pre._origText;
+  // Auto-inject ▲▼ nav buttons after the count element
+  const prevBtn = document.createElement("button");
+  prevBtn.className = "btn btn-xs btn-ghost search-nav-btn";
+  prevBtn.textContent = "\u25B2";
+  prevBtn.title = "Previous match (Shift+Enter)";
+  const nextBtn = document.createElement("button");
+  nextBtn.className = "btn btn-xs btn-ghost search-nav-btn";
+  nextBtn.textContent = "\u25BC";
+  nextBtn.title = "Next match (Enter)";
+  countEl.after(nextBtn);
+  countEl.after(prevBtn);
+
+  function clearHighlights() {
+    container.querySelectorAll(".raw-pre").forEach(pre => {
+      if (pre._origText !== undefined) { pre.textContent = pre._origText; delete pre._origText; }
+    });
+    state.matches = []; state.idx = -1;
+  }
+
+  function doSearch(query) {
+    clearHighlights();
+    if (!query || query.length < 2) { countEl.textContent = ""; return; }
+    const q = query.toLowerCase();
+    container.querySelectorAll(".raw-pre").forEach(pre => {
+      const text = pre.textContent;
+      if (!text.toLowerCase().includes(q)) return;
+      pre._origText = text;
+      const frag = document.createDocumentFragment();
+      let lastIdx = 0;
+      const lower = text.toLowerCase();
+      let pos;
+      while ((pos = lower.indexOf(q, lastIdx)) !== -1) {
+        if (pos > lastIdx) frag.appendChild(document.createTextNode(text.slice(lastIdx, pos)));
+        const mark = document.createElement("mark");
+        mark.className = "search-hl";
+        mark.textContent = text.slice(pos, pos + query.length);
+        frag.appendChild(mark);
+        state.matches.push(mark);
+        lastIdx = pos + query.length;
+      }
+      if (lastIdx < text.length) frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+      pre.textContent = "";
+      pre.appendChild(frag);
+    });
+    countEl.textContent = state.matches.length ? `${state.matches.length} found` : "0";
+    if (state.matches.length) doNav(0);
+  }
+
+  function doNav(idx) {
+    if (!state.matches.length) return;
+    if (state.matches[state.idx]) state.matches[state.idx].className = "search-hl";
+    state.idx = ((idx % state.matches.length) + state.matches.length) % state.matches.length;
+    const m = state.matches[state.idx];
+    m.className = "search-hl search-hl-current";
+    m.scrollIntoView({ behavior: "smooth", block: "center" });
+    countEl.textContent = `${state.idx + 1}/${state.matches.length}`;
+  }
+
+  inputEl.addEventListener("input", () => doSearch(inputEl.value));
+  inputEl.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); doNav(state.idx + (e.shiftKey ? -1 : 1)); }
   });
-  detailSearchMatches = [];
-  detailSearchIdx = -1;
-  const countEl = document.getElementById("hist-detail-search-count");
+  prevBtn.addEventListener("click", () => doNav(state.idx - 1));
+  nextBtn.addEventListener("click", () => doNav(state.idx + 1));
 
-  if (!query || query.length < 2) { countEl.textContent = ""; return; }
-
-  const q = query.toLowerCase();
-  document.querySelectorAll("#hist-detail .hist-sub-pane:not(.hidden) .raw-pre").forEach(pre => {
-    const text = pre.textContent;
-    pre._origText = text;
-    if (!text.toLowerCase().includes(q)) return;
-
-    // Build highlighted HTML
-    const frag = document.createDocumentFragment();
-    let lastIdx = 0;
-    const lower = text.toLowerCase();
-    let pos;
-    while ((pos = lower.indexOf(q, lastIdx)) !== -1) {
-      if (pos > lastIdx) frag.appendChild(document.createTextNode(text.slice(lastIdx, pos)));
-      const mark = document.createElement("mark");
-      mark.className = "search-hl";
-      mark.textContent = text.slice(pos, pos + query.length);
-      frag.appendChild(mark);
-      detailSearchMatches.push(mark);
-      lastIdx = pos + query.length;
-    }
-    if (lastIdx < text.length) frag.appendChild(document.createTextNode(text.slice(lastIdx)));
-    pre.textContent = "";
-    pre.appendChild(frag);
-  });
-
-  countEl.textContent = detailSearchMatches.length ? `${detailSearchMatches.length} found` : "0 found";
-  if (detailSearchMatches.length) detailSearchNav(0);
+  return { search: doSearch, nav: doNav, clear() { clearHighlights(); inputEl.value = ""; countEl.textContent = ""; } };
 }
 
-function detailSearchNav(idx) {
-  if (!detailSearchMatches.length) return;
-  if (detailSearchMatches[detailSearchIdx]) detailSearchMatches[detailSearchIdx].className = "search-hl";
-  detailSearchIdx = ((idx % detailSearchMatches.length) + detailSearchMatches.length) % detailSearchMatches.length;
-  const m = detailSearchMatches[detailSearchIdx];
-  m.className = "search-hl search-hl-current";
-  m.scrollIntoView({ behavior: "smooth", block: "center" });
-  document.getElementById("hist-detail-search-count").textContent =
-    `${detailSearchIdx + 1}/${detailSearchMatches.length}`;
-}
+let histReqSearch, histRespSearch;
 
 function highlightReflections(entry) {
   const reflections = detectReflections(entry);
@@ -1304,17 +1861,18 @@ function tgtRenderTable(entries) {
       : entry.status < 400 ? "hist-td-status-rdir" : "hist-td-status-err";
     const len = entry.length > 1024 ? `${(entry.length/1024).toFixed(1)}k` : entry.length || "";
 
+    const smCls = esc(entry.method.toLowerCase().replace(/[^a-z]/g, ""));
     tr.innerHTML = `
-      <td><span class="method-pill m-${entry.method.toLowerCase()}">${entry.method}</span></td>
-      <td title="${esc(entry.url)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(entry.url)}</td>
-      <td class="${statusCls}">${entry.status ?? "…"}</td>
-      <td class="hist-td-len">${len}</td>
+      <td><span class="method-pill m-${smCls}">${esc(entry.method)}</span></td>
+      <td title="${esc(entry.url)}" class="tgt-url-cell">${esc(entry.url)}</td>
+      <td class="${statusCls}">${esc(String(entry.status ?? "…"))}</td>
+      <td class="hist-td-len">${esc(String(len))}</td>
       <td class="hist-td-mime">${esc(shortMime(entry.mimeType))}</td>
     `;
 
     // Actions cell
     const actTd = document.createElement("td");
-    actTd.style.whiteSpace = "nowrap";
+    actTd.className = "tgt-act-cell";
     const repBtn = txt("button", "btn btn-xs btn-ghost", "→ Rep");
     const intrBtn = txt("button", "btn btn-xs btn-ghost", "→ Intr");
     const openBtn = txt("button", "btn btn-xs btn-ghost", "↗");
@@ -1324,12 +1882,156 @@ function tgtRenderTable(entries) {
     openBtn.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: entry.url }); });
     ap(actTd, repBtn, intrBtn, openBtn);
     tr.appendChild(actTd);
-    tr.style.cursor = "pointer";
+    tr.className = "tgt-clickable";
+    tr._entry = entry;
+    if (tgtDetailEntry && tgtDetailEntry === entry) tr.classList.add("hist-selected");
+    tr.addEventListener("click", () => openTgtDetail(entry));
     tbody.appendChild(tr);
   });
 }
 
+// ── Target/Endpoint detail pane ──────────────────────────────────────────────
+let tgtDetailEntry = null;
+let epDetailEntry  = null;
+
+function openTgtDetail(entry) {
+  tgtDetailEntry = entry;
+  const detail = document.getElementById("tgt-detail");
+  document.getElementById("tgt-detail-title").textContent = `${entry.status || "…"} ${entry.method} ${entry.url}`;
+
+  let reqHdrs = `${entry.method} ${entry.path || "/"} HTTP/1.1\nHost: ${entry.host}\n`;
+  reqHdrs += Object.entries(entry.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+  document.getElementById("tgt-req-headers-pre").textContent = reqHdrs;
+  document.getElementById("tgt-req-body-pre").textContent = entry.body || "(empty)";
+
+  let resHdrs = entry.status ? `HTTP/1.1 ${entry.status} ${entry.statusText || ""}\n` : "(no response)\n";
+  resHdrs += Object.entries(entry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+  document.getElementById("tgt-resp-headers-pre").textContent = resHdrs;
+  const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
+  document.getElementById("tgt-resp-body-pre").textContent = tryPretty(entry.respBody || "(body not captured)", ct);
+
+  // Restore remembered sub-tab selection
+  detail.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
+  detail.querySelectorAll(".hist-detail-sub-tabs .sub-tab").forEach(t => t.classList.remove("active"));
+  const tgtReqP = detailActiveReqPane.replace("req-","");
+  const tgtRespP = detailActiveRespPane.replace("resp-","");
+  document.getElementById(`tgt-req-${tgtReqP}-pane`).classList.remove("hidden");
+  document.getElementById(`tgt-resp-${tgtRespP}-pane`).classList.remove("hidden");
+  detail.querySelectorAll(`.sub-tab[data-tgtpane="req-${tgtReqP}"]`).forEach(t => t.classList.add("active"));
+  detail.querySelectorAll(`.sub-tab[data-tgtpane="resp-${tgtRespP}"]`).forEach(t => t.classList.add("active"));
+
+  detail.classList.remove("hidden");
+  detail.classList.add("visible");
+  document.getElementById("tgt-detail-resizer").classList.add("visible");
+
+  // Highlight selected row
+  document.querySelectorAll("#tgt-table-body tr").forEach(r => r.classList.remove("hist-selected"));
+  document.querySelectorAll("#tgt-table-body tr").forEach(r => {
+    if (r._entry === entry) r.classList.add("hist-selected");
+  });
+}
+
+function closeTgtDetail() {
+  tgtDetailEntry = null;
+  const detail = document.getElementById("tgt-detail");
+  detail.classList.add("hidden");
+  detail.classList.remove("visible");
+  document.getElementById("tgt-detail-resizer").classList.remove("visible");
+  document.querySelectorAll("#tgt-table-body tr").forEach(r => r.classList.remove("hist-selected"));
+}
+
+function openEpDetail(entry) {
+  epDetailEntry = entry;
+  // Find matching history entry for full data
+  const histEntry = historyData.find(h => h.url === entry.url && h.method === (entry.method || "GET")) || entry;
+
+  const detail = document.getElementById("ep-detail");
+  document.getElementById("ep-detail-title").textContent = `${histEntry.status || "…"} ${histEntry.method || entry.method || "GET"} ${entry.url}`;
+
+  let reqHdrs = `${histEntry.method || "GET"} ${histEntry.path || "/"} HTTP/1.1\nHost: ${histEntry.host || ""}\n`;
+  reqHdrs += Object.entries(histEntry.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+  document.getElementById("ep-req-headers-pre").textContent = reqHdrs;
+  document.getElementById("ep-req-body-pre").textContent = histEntry.body || "(empty)";
+
+  let resHdrs = histEntry.status ? `HTTP/1.1 ${histEntry.status} ${histEntry.statusText || ""}\n` : "(no response)\n";
+  resHdrs += Object.entries(histEntry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+  document.getElementById("ep-resp-headers-pre").textContent = resHdrs;
+  const ct = histEntry.respHeaders?.["content-type"] || histEntry.respHeaders?.["Content-Type"] || "";
+  document.getElementById("ep-resp-body-pre").textContent = tryPretty(histEntry.respBody || "(body not captured)", ct);
+
+  // Restore remembered sub-tab selection
+  detail.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
+  detail.querySelectorAll(".hist-detail-sub-tabs .sub-tab").forEach(t => t.classList.remove("active"));
+  const epReqP = detailActiveReqPane.replace("req-","");
+  const epRespP = detailActiveRespPane.replace("resp-","");
+  document.getElementById(`ep-req-${epReqP}-pane`).classList.remove("hidden");
+  document.getElementById(`ep-resp-${epRespP}-pane`).classList.remove("hidden");
+  detail.querySelectorAll(`.sub-tab[data-eppane="req-${epReqP}"]`).forEach(t => t.classList.add("active"));
+  detail.querySelectorAll(`.sub-tab[data-eppane="resp-${epRespP}"]`).forEach(t => t.classList.add("active"));
+
+  detail.classList.remove("hidden");
+  detail.classList.add("visible");
+  document.getElementById("ep-resizer").classList.add("visible");
+}
+
+function closeEpDetail() {
+  epDetailEntry = null;
+  const detail = document.getElementById("ep-detail");
+  detail.classList.add("hidden");
+  detail.classList.remove("visible");
+  document.getElementById("ep-resizer").classList.remove("visible");
+}
+
 // ═══════════════════════════ INTRUDER ═════════════════════════════════════════
+
+function intrRenderResults() {
+  const tbody = document.getElementById("intr-results");
+  tbody.replaceChildren();
+  let filtered = intrResults;
+  for (const [field, allowed] of Object.entries(intrColFilters)) {
+    if (allowed) filtered = filtered.filter(e => allowed.has(String(e[field] ?? "")));
+  }
+  const sorted = [...filtered].sort((a, b) => {
+    let va, vb;
+    switch (intrSortKey) {
+      case "id":      va = a.id; vb = b.id; break;
+      case "payload": va = a.payload; vb = b.payload; break;
+      case "status":  va = a.status || 0; vb = b.status || 0; break;
+      case "length":  va = a.length || 0; vb = b.length || 0; break;
+      case "elapsed": va = a.elapsed || 0; vb = b.elapsed || 0; break;
+      default:        va = a.id; vb = b.id;
+    }
+    if (typeof va === "string") { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+    if (va < vb) return intrSortAsc ? -1 : 1;
+    if (va > vb) return intrSortAsc ? 1 : -1;
+    return 0;
+  });
+  // Update sort indicators
+  document.querySelectorAll("#intr-table .hist-th-sortable").forEach(th => {
+    const key = th.dataset.intrsort;
+    const arrow = key === intrSortKey ? (intrSortAsc ? " \u25B4" : " \u25BE") : "";
+    let sp = th.querySelector(".sort-label");
+    if (!sp) { sp = document.createElement("span"); sp.className = "sort-label"; const raw = th.firstChild?.nodeType === 3 ? th.firstChild.textContent.trim() : ""; if (th.firstChild?.nodeType === 3) th.firstChild.remove(); th.insertBefore(sp, th.firstChild); sp.textContent = raw; }
+    sp.textContent = sp.textContent.replace(/ [\u25B4\u25BE]$/, "") + arrow;
+  });
+  for (const entry of sorted) {
+    const tr = document.createElement("tr");
+    const statusCls = entry.status === "err" ? "hist-td-status-err"
+      : entry.status < 300 ? "hist-td-status-ok"
+      : entry.status < 400 ? "hist-td-status-rdir" : "hist-td-status-err";
+    const lenStr = entry.length > 1024 ? `${(entry.length/1024).toFixed(1)}k` : entry.length;
+    const preview = (entry.body || "").slice(0, 120).replace(/\n/g, " ");
+    tr.innerHTML = `
+      <td class="hist-td-num">${Number(entry.id) || 0}</td>
+      <td title="${esc(entry.payload)}">${esc(entry.payload)}</td>
+      <td class="${statusCls}">${esc(String(entry.status))}</td>
+      <td class="hist-td-len">${esc(String(lenStr))}</td>
+      <td class="hist-td-elapsed">${Number(entry.elapsed) || 0}</td>
+      <td class="hist-td-mime" title="${esc(preview)}">${esc(preview)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
 
 function intrCountPositions() {
   const raw = document.getElementById("intr-request").value;
@@ -1475,6 +2177,9 @@ async function intrStart() {
   if (!requests.length) { document.getElementById("intr-status").textContent = "No positions/payloads"; return; }
 
   intrResults = [];
+  intrColFilters = {};
+  document.querySelectorAll("#intr-table .colfilter-drop").forEach(d => d.remove());
+  document.querySelectorAll("#intr-table .colfilter-ico").forEach(i => i.classList.remove("active"));
   intrRunning = true;
   intrAbort = new AbortController();
   const tbody = document.getElementById("intr-results");
@@ -1541,11 +2246,11 @@ async function intrStart() {
       const lenStr = entry.length > 1024 ? `${(entry.length/1024).toFixed(1)}k` : entry.length;
       const preview = (entry.body || "").slice(0, 120).replace(/\n/g, " ");
       tr.innerHTML = `
-        <td class="hist-td-num">${entry.id}</td>
+        <td class="hist-td-num">${Number(entry.id) || 0}</td>
         <td title="${esc(entry.payload)}">${esc(entry.payload)}</td>
-        <td class="${statusCls}">${entry.status}</td>
-        <td class="hist-td-len">${lenStr}</td>
-        <td class="hist-td-elapsed">${entry.elapsed}</td>
+        <td class="${statusCls}">${esc(String(entry.status))}</td>
+        <td class="hist-td-len">${esc(String(lenStr))}</td>
+        <td class="hist-td-elapsed">${Number(entry.elapsed) || 0}</td>
         <td class="hist-td-mime" title="${esc(preview)}">${esc(preview)}</td>
       `;
       tbody.appendChild(tr);
@@ -1579,8 +2284,11 @@ function intrSendToIntruder(req) {
   const body   = req.body || "";
 
   const mSel = document.getElementById("intr-method");
-  for (const o of mSel.options) { if (o.value === method) { o.selected = true; break; } }
-  document.getElementById("intr-url").value = url;
+  ensureMethod(mSel, method);
+  mSel.value = method;
+  const intrUrlInp = document.getElementById("intr-url");
+  intrUrlInp.value = url;
+  autoSizeUrlInput(intrUrlInp);
 
   // Build raw request template
   let raw = "";
@@ -1679,16 +2387,22 @@ function probeManipCls(m) { return m === "full" ? "probe-manip-full" : m === "pa
 function probeSevCls(s) { return (s === "critical" || s === "high") ? "probe-sev-critical" : s === "medium" ? "probe-sev-medium" : "probe-sev-low"; }
 function probeShortFile(f) { return !f ? "" : f.length > 30 ? "\u2026" + f.slice(-30) : f; }
 
+function probeIsControllable(m) { return m === "full" || m === "partial"; }
+
 function probeRenderSources(sources) {
   const tbody = document.getElementById("probe-src-tbody");
   const empty = document.getElementById("probe-src-empty");
   tbody.replaceChildren();
-  if (!sources?.length) { empty.classList.remove("hidden"); return; }
+  const ctrlOnly = document.getElementById("probe-ctrl-only")?.checked;
+  let filtered = sources || [];
+  if (ctrlOnly) filtered = filtered.filter(s => probeIsControllable(s.manipulable));
+  setBadge("bdg-p-src", filtered.length);
+  if (!filtered.length) { empty.classList.remove("hidden"); return; }
   empty.classList.add("hidden");
-  const sorted = [...sources].sort((a, b) => ({ full: 0, partial: 1 }[a.manipulable] ?? 2) - ({ full: 0, partial: 1 }[b.manipulable] ?? 2));
+  const sorted = [...filtered].sort((a, b) => ({ full: 0, partial: 1 }[a.manipulable] ?? 2) - ({ full: 0, partial: 1 }[b.manipulable] ?? 2));
   for (const s of sorted) {
     const tr = document.createElement("tr");
-    tr.style.cursor = "pointer";
+    tr.className = "tgt-clickable";
     ap(tr,
       txt("td", "hist-td-num", String(s.id)),
       txt("td", probeManipCls(s.manipulable), probeManipIcon(s.manipulable)),
@@ -1712,7 +2426,7 @@ function probeRenderSinks(sinks) {
   empty.classList.add("hidden");
   for (const s of sinks) {
     const tr = document.createElement("tr");
-    tr.style.cursor = "pointer";
+    tr.className = "tgt-clickable";
     ap(tr,
       txt("td", "hist-td-num", String(s.id)),
       txt("td", probeSevCls(s.sev), (s.sev || "").toUpperCase()),
@@ -1731,12 +2445,16 @@ function probeRenderFlows(flows) {
   const tbody = document.getElementById("probe-flw-tbody");
   const empty = document.getElementById("probe-flw-empty");
   tbody.replaceChildren();
-  if (!flows?.length) { empty.classList.remove("hidden"); return; }
+  const ctrlOnly = document.getElementById("probe-ctrl-only")?.checked;
+  let filtered = flows || [];
+  if (ctrlOnly) filtered = filtered.filter(f => probeIsControllable(f.srcManip));
+  setBadge("bdg-p-flw", filtered.length);
+  if (!filtered.length) { empty.classList.remove("hidden"); return; }
   empty.classList.add("hidden");
-  const sorted = [...flows].sort((a, b) => ({ likely: 0, possible: 1 }[a.expl] ?? 2) - ({ likely: 0, possible: 1 }[b.expl] ?? 2));
+  const sorted = [...filtered].sort((a, b) => ({ likely: 0, possible: 1 }[a.expl] ?? 2) - ({ likely: 0, possible: 1 }[b.expl] ?? 2));
   for (const f of sorted) {
     const tr = document.createElement("tr");
-    tr.style.cursor = "pointer";
+    tr.className = "tgt-clickable";
     const explIcon = f.expl === "likely" ? "\uD83D\uDD25" : f.expl === "possible" ? "\u26A0\uFE0F" : "\u2753";
     const explCls = f.expl === "likely" ? "probe-expl-likely" : f.expl === "possible" ? "probe-expl-possible" : "probe-expl-unlikely";
     ap(tr,
@@ -1827,11 +2545,11 @@ function probeShowDetail(type, item) {
       const nearby = probeFindingsData.sinks.filter(s => s.file === item.file && Math.abs(s.line - item.line) <= 10);
       if (nearby.length) {
         const nsec = el("div", "probe-detail-section");
-        const ntitle = el("div", "probe-detail-section-title"); ntitle.textContent = "Nearby Sinks (within 10 lines)"; ntitle.style.color = "var(--red)";
+        const ntitle = el("div", "probe-detail-section-title probe-color-red"); ntitle.textContent = "Nearby Sinks (within 10 lines)";
         nsec.appendChild(ntitle);
         for (const s of nearby) {
           const d = Math.abs(s.line - item.line);
-          const row = el("div"); row.style.cssText = "padding:2px 0";
+          const row = el("div", "probe-nearby-row");
           row.textContent = "[" + s.id + "] L" + s.line + " " + s.match + " (" + s.cat + ") \u2014 " + (d === 0 ? "\u26A1 SAME LINE" : d + " lines away");
           nsec.appendChild(row);
         }
@@ -1852,7 +2570,7 @@ function probeShowDetail(type, item) {
     title.textContent = "Flow \u2014 " + explIcon + " " + (item.expl || "").toUpperCase();
     const srcSec = el("div", "probe-detail-section");
     const srcTitle = txt("div", "probe-detail-section-title", "Source \u2192 [" + item.srcId + "] " + item.srcMatch);
-    srcTitle.style.color = "var(--accent)";
+    srcTitle.classList.add("probe-color-accent");
     srcSec.appendChild(srcTitle);
     srcSec.appendChild(probeDetailKV([
       ["Line", item.srcLine], ["Controllable", probeManipIcon(item.srcManip) + " " + item.srcManip, probeManipCls(item.srcManip)],
@@ -1861,7 +2579,7 @@ function probeShowDetail(type, item) {
     body.appendChild(srcSec);
     const snkSec = el("div", "probe-detail-section");
     const snkTitle = txt("div", "probe-detail-section-title", "Sink \u2192 [" + item.snkId + "] " + item.snkMatch);
-    snkTitle.style.color = "var(--red)";
+    snkTitle.classList.add("probe-color-red");
     snkSec.appendChild(snkTitle);
     snkSec.appendChild(probeDetailKV([["Line", item.snkLine], ["Category", item.snkCat]]));
     body.appendChild(snkSec);
@@ -1980,7 +2698,7 @@ function decOp(op, input) {
       // Decode
       case "b64-dec":     return decodeURIComponent(escape(atob(input.trim())));
       case "url-dec":     return decodeURIComponent(input);
-      case "html-dec":    { const t = document.createElement("textarea"); t.innerHTML = input; return t.value; }
+      case "html-dec":    { const dp = new DOMParser(); const d = dp.parseFromString(`<!DOCTYPE html><body>${input}`, "text/html"); return d.body.textContent || ""; }
       case "hex-dec":     return input.replace(/\s+/g," ").split(" ").filter(Boolean).map(h => String.fromCharCode(parseInt(h,16))).join("");
       case "unicode-dec": return input.replace(/\\u([0-9a-fA-F]{4})/g, (_,h) => String.fromCharCode(parseInt(h,16)));
       case "js-dec":      return input.replace(/\\x([0-9a-fA-F]{2})/g, (_,h) => String.fromCharCode(parseInt(h,16)))
@@ -2153,9 +2871,832 @@ function addMRRule() {
   renderMRRules();
 }
 
+// ═══════════════════════════ CONTAINERS ═══════════════════════════════════════
+
+const CNT_COLORS = {
+  blue:   { bg: "#4285f4", label: "Blue" },
+  red:    { bg: "#ea4335", label: "Red" },
+  green:  { bg: "#34a853", label: "Green" },
+  yellow: { bg: "#fbbc04", label: "Yellow" },
+  purple: { bg: "#a142f4", label: "Purple" },
+  pink:   { bg: "#f538a0", label: "Pink" },
+  cyan:   { bg: "#24c1e0", label: "Cyan" },
+  orange: { bg: "#fa903e", label: "Orange" },
+  grey:   { bg: "#9aa0a6", label: "Grey" },
+};
+
+let containers = []; // { id, name, color, startUrl }
+let cntNextId = 1;
+let cntEditId = null; // null = creating, number = editing
+let cntExtPath = ""; // path to void-extension on disk
+
+function loadContainers() {
+  return new Promise(r => chrome.storage.local.get("voidContainers", res => {
+    if (res.voidContainers) {
+      containers = res.voidContainers.list || [];
+      cntNextId = res.voidContainers.nextId || containers.length + 1;
+      cntExtPath = res.voidContainers.extPath || "";
+    }
+    r();
+  }));
+}
+
+function saveContainers() {
+  chrome.storage.local.set({ voidContainers: { list: containers, nextId: cntNextId, extPath: cntExtPath } });
+}
+
+function renderContainers() {
+  const list = document.getElementById("cnt-list");
+  const empty = document.getElementById("cnt-empty");
+  list.replaceChildren();
+
+  if (!containers.length) { empty.classList.remove("hidden"); return; }
+  empty.classList.add("hidden");
+
+  containers.forEach(cnt => {
+    const card = el("div", "cnt-card");
+    card.style.borderLeftColor = CNT_COLORS[cnt.color]?.bg || "#888";
+
+    const icon = el("div", "cnt-card-icon");
+    icon.style.background = CNT_COLORS[cnt.color]?.bg || "#888";
+    icon.textContent = (cnt.name || "?").slice(0, 2).toUpperCase();
+
+    const info = el("div", "cnt-card-info");
+    const name = el("div", "cnt-card-name");
+    name.textContent = cnt.name;
+    const meta = el("div", "cnt-card-meta");
+    meta.textContent = cnt.startUrl || "no URL set";
+    info.appendChild(name);
+    info.appendChild(meta);
+
+    const actions = el("div", "cnt-card-actions");
+
+    const launchBtn = txt("button", "btn btn-sm btn-accent", "Launch");
+    launchBtn.title = "Open isolated Chrome instance";
+    launchBtn.addEventListener("click", () => cntLaunch(cnt));
+
+    const copyBtn = txt("button", "btn btn-xs btn-ghost", "Copy Cmd");
+    copyBtn.title = "Copy launch command to clipboard";
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(cntBuildCmd(cnt)).then(() => {
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy Cmd"; }, 1500);
+      });
+    });
+
+    const editBtn = txt("button", "btn btn-xs btn-ghost", "Edit");
+    editBtn.addEventListener("click", () => cntShowForm(cnt));
+
+    const delBtn = txt("button", "btn btn-xs btn-danger", "Del");
+    delBtn.addEventListener("click", () => {
+      containers = containers.filter(c => c.id !== cnt.id);
+      saveContainers();
+      renderContainers();
+    });
+
+    ap(actions, launchBtn, copyBtn, editBtn, delBtn);
+    ap(card, icon, info, actions);
+    list.appendChild(card);
+  });
+}
+
+// Chrome autogenerated theme colors (R,G,B as 0-255)
+const CNT_THEME_RGB = {
+  blue:   "30,80,180",
+  red:    "180,30,30",
+  green:  "25,120,50",
+  yellow: "180,140,0",
+  purple: "100,40,180",
+  pink:   "180,40,120",
+  cyan:   "0,140,170",
+  orange: "200,100,20",
+  grey:   "80,85,90",
+};
+
+function cntBuildCmd(cnt) {
+  const safeName = (cnt.name || "container").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const dataDir = `$HOME/.void-containers/${safeName}`;
+  const url = cnt.startUrl || "about:blank";
+  const rgb = CNT_THEME_RGB[cnt.color] || CNT_THEME_RGB.blue;
+  const extFlag = cntExtPath
+    ? `--load-extension="${cntExtPath}"`
+    : `$(for d in "$HOME/void-extension" "$HOME/projects/void-extension" "/opt/void-extension"; do [ -f "$d/manifest.json" ] && echo "--load-extension=\\"$d\\"" && break; done)`;
+  // Write container name marker so the extension knows its identity for auto-sync
+  const markerCmd = `mkdir -p "${dataDir}" && echo '${safeName}' > "${dataDir}/_void_container_name"`;
+  // Also ensure shared sync directory exists
+  const sharedCmd = `mkdir -p "$HOME/.void-containers/_shared" "$HOME/Downloads/void-sync"`;
+  return `${markerCmd} && ${sharedCmd} && google-chrome --user-data-dir="${dataDir}" --no-first-run --no-default-browser-check --install-autogenerated-theme="${rgb}" ${extFlag} "${url}" &`;
+}
+
+async function cntLaunch(cnt) {
+  const cmd = cntBuildCmd(cnt);
+  navigator.clipboard.writeText(cmd);
+
+  const st = document.querySelector(".cnt-info");
+  if (st) {
+    st.textContent = `Command copied! Paste in terminal to launch "${cnt.name}"`;
+    setTimeout(() => { st.textContent = "Each container launches an isolated Chrome instance with its own cookies, storage, and cache."; }, 4000);
+  }
+}
+
+function cntShowForm(cnt) {
+  cntEditId = cnt ? cnt.id : null;
+  const form = document.getElementById("cnt-form");
+  document.getElementById("cnt-name").value = cnt ? cnt.name : "";
+  document.getElementById("cnt-start-url").value = cnt ? (cnt.startUrl || "") : "";
+  document.getElementById("cnt-form-save").textContent = cnt ? "Save" : "Create";
+
+  // Set color
+  const color = cnt ? cnt.color : "blue";
+  document.querySelectorAll("#cnt-colors .cnt-color-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.color === color);
+  });
+
+  form.classList.remove("hidden");
+}
+
+function cntHideForm() {
+  document.getElementById("cnt-form").classList.add("hidden");
+  cntEditId = null;
+}
+
+function cntSaveForm() {
+  const name = document.getElementById("cnt-name").value.trim();
+  if (!name) return;
+  const color = document.querySelector("#cnt-colors .cnt-color-btn.active")?.dataset.color || "blue";
+  const startUrl = document.getElementById("cnt-start-url").value.trim();
+
+  if (cntEditId !== null) {
+    const cnt = containers.find(c => c.id === cntEditId);
+    if (cnt) { cnt.name = name; cnt.color = color; cnt.startUrl = startUrl; }
+  } else {
+    containers.push({ id: cntNextId++, name, color, startUrl, cookies: [], tabs: [] });
+  }
+
+  saveContainers();
+  renderContainers();
+  cntHideForm();
+}
+
+// ═══════════════════════════ SENSITIVE DISCOVERER ═════════════════════════════
+
+let sensFindings = [];
+let sensFilterCat = "";
+let sensFilterSev = "";
+let sensFilterText = "";
+let sensScopeOnly = false;
+let sensCustomRules = []; // { desc, regex, severity, section, isRegex }
+let sensSortKey = "id";
+let sensSortAsc = true;
+const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
+// Column filters: { cat: Set|null, desc: Set|null, section: Set|null }
+let sensColFilters = {};
+
+// ── Generic column filter dropdown system ────────────────────────────────────
+function colFilterInit(tableId, items, getField, filterState, onFilter) {
+  document.querySelectorAll(`#${tableId} .colfilter-th[data-colfilter]`).forEach(th => {
+    const field = th.dataset.colfilter;
+    const ico = th.querySelector(".colfilter-ico");
+
+    th.addEventListener("click", e => {
+      if (!e.target.closest(".colfilter-ico")) return;
+      e.stopPropagation();
+      document.querySelectorAll(".colfilter-drop.open").forEach(d => d.classList.remove("open"));
+
+      let drop = th.querySelector(".colfilter-drop");
+      if (drop) { drop.remove(); } // rebuild with fresh values
+
+      drop = document.createElement("div");
+      drop.className = "colfilter-drop open";
+
+      const actions = document.createElement("div");
+      actions.className = "colfilter-actions";
+      const allBtn = document.createElement("button");
+      allBtn.className = "btn btn-xs btn-ghost"; allBtn.textContent = "All";
+      const noneBtn = document.createElement("button");
+      noneBtn.className = "btn btn-xs btn-ghost"; noneBtn.textContent = "None";
+      const invertBtn = document.createElement("button");
+      invertBtn.className = "btn btn-xs btn-ghost"; invertBtn.textContent = "Invert";
+      actions.append(allBtn, noneBtn, invertBtn);
+      drop.appendChild(actions);
+
+      const values = [...new Set(items().map(f => String(getField(f, field) ?? "")))].filter(Boolean).sort();
+      const activeSet = filterState[field];
+      const checkboxes = [];
+
+      for (const val of values) {
+        const label = document.createElement("label");
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !activeSet || activeSet.has(val);
+        cb.dataset.val = val;
+        const span = document.createElement("span");
+        span.textContent = val.length > 35 ? val.slice(0, 32) + "\u2026" : val;
+        span.title = val;
+        label.append(cb, span);
+        drop.appendChild(label);
+        checkboxes.push(cb);
+        cb.addEventListener("change", () => applyFilter());
+      }
+
+      function applyFilter() {
+        const checked = checkboxes.filter(c => c.checked).map(c => c.dataset.val);
+        if (checked.length === values.length) {
+          delete filterState[field];
+          ico.classList.remove("active");
+        } else {
+          filterState[field] = new Set(checked);
+          ico.classList.add("active");
+        }
+        onFilter();
+      }
+
+      allBtn.addEventListener("click", e => { e.stopPropagation(); checkboxes.forEach(c => c.checked = true); applyFilter(); });
+      noneBtn.addEventListener("click", e => { e.stopPropagation(); checkboxes.forEach(c => c.checked = false); applyFilter(); });
+      invertBtn.addEventListener("click", e => { e.stopPropagation(); checkboxes.forEach(c => c.checked = !c.checked); applyFilter(); });
+
+      th.appendChild(drop);
+      const closeHandler = ev => {
+        if (!drop.contains(ev.target) && ev.target !== ico) {
+          drop.classList.remove("open");
+          document.removeEventListener("click", closeHandler);
+        }
+      };
+      setTimeout(() => document.addEventListener("click", closeHandler), 0);
+    });
+  });
+}
+
+function sensScan() {
+  sensFindings = [];
+  sensColFilters = {};
+  // Remove old filter dropdowns so they rebuild with new values
+  document.querySelectorAll("#sens-table .colfilter-drop").forEach(d => d.remove());
+  document.querySelectorAll("#sens-table .colfilter-ico").forEach(i => i.classList.remove("active"));
+  const status = document.getElementById("sens-status");
+  status.textContent = "Scanning…";
+
+  const items = sensScopeOnly ? historyData.filter(e => tgtIsInScope(e.url)) : historyData;
+
+  // Compile built-in regexes
+  const rules = typeof SENSITIVE_RULES !== "undefined" ? SENSITIVE_RULES : [];
+  const compiled = rules.filter(r => r.active !== false).map(r => {
+    try { return { ...r, re: new RegExp(r.regex, "gi"), refRe: r.refiner ? new RegExp(r.refiner, "gi") : null }; }
+    catch { return null; }
+  }).filter(Boolean);
+
+  // Add custom rules
+  for (const cr of sensCustomRules) {
+    try {
+      const pattern = cr.isRegex ? cr.regex : cr.regex.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const sections = cr.section === "all" ? ["req_url","req_headers","req_body","resp_headers","resp_body"] : [cr.section];
+      compiled.push({ cat: "Custom", desc: cr.desc, severity: cr.severity, sections, re: new RegExp(pattern, "gi"), refRe: null });
+    } catch {}
+  }
+
+  let id = 0;
+  for (const entry of items) {
+    const sections = {
+      req_url: entry.url || "",
+      req_headers: Object.entries(entry.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n"),
+      req_body: entry.body || "",
+      resp_headers: Object.entries(entry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n"),
+      resp_body: entry.respBody || "",
+    };
+
+    for (const rule of compiled) {
+      const targetSections = rule.sections || ["resp_body", "resp_headers"];
+      for (const sec of targetSections) {
+        const text = sections[sec];
+        if (!text) continue;
+        rule.re.lastIndex = 0;
+        let m;
+        while ((m = rule.re.exec(text)) !== null) {
+          let matchStr = m[0];
+          // Apply refiner regex if present
+          if (rule.refRe) {
+            rule.refRe.lastIndex = 0;
+            const rm = rule.refRe.exec(matchStr);
+            if (rm) matchStr = rm[0] + matchStr;
+          }
+          sensFindings.push({
+            id: ++id,
+            severity: rule.severity || "medium",
+            cat: rule.cat,
+            desc: rule.desc,
+            match: matchStr.slice(0, 200),
+            section: sec,
+            url: entry.url,
+            method: entry.method,
+          });
+          // Limit matches per rule per entry
+          if (sensFindings.length > 10000) break;
+        }
+        if (sensFindings.length > 10000) break;
+      }
+      if (sensFindings.length > 10000) break;
+    }
+    if (sensFindings.length > 10000) break;
+  }
+
+  status.textContent = `Done — ${sensFindings.length} findings in ${items.length} requests`;
+  setTimeout(() => { status.textContent = ""; }, 3000);
+
+  sensRender();
+  setBadge("bdg-sensitive", sensFindings.length);
+}
+
+function sensRender() {
+  const tbody = document.getElementById("sens-tbody");
+  const empty = document.getElementById("sens-empty");
+  const stats = document.getElementById("sens-stats");
+  tbody.replaceChildren();
+
+  let items = sensFindings;
+  if (sensFilterCat) items = items.filter(f => f.cat === sensFilterCat);
+  if (sensFilterSev) items = items.filter(f => f.severity === sensFilterSev);
+  if (sensFilterText) {
+    const q = sensFilterText.toLowerCase();
+    items = items.filter(f => f.desc.toLowerCase().includes(q) || f.match.toLowerCase().includes(q) || f.url.toLowerCase().includes(q));
+  }
+  // Column checkbox filters
+  for (const [field, allowed] of Object.entries(sensColFilters)) {
+    if (allowed) items = items.filter(f => allowed.has(f[field]));
+  }
+
+  // Stats
+  const crit = sensFindings.filter(f => f.severity === "critical").length;
+  const high = sensFindings.filter(f => f.severity === "high").length;
+  const med  = sensFindings.filter(f => f.severity === "medium").length;
+  const low  = sensFindings.filter(f => f.severity === "low").length;
+  document.getElementById("sens-total").textContent = sensFindings.length;
+  document.getElementById("sens-crit").textContent = crit;
+  document.getElementById("sens-high").textContent = high;
+  document.getElementById("sens-med").textContent = med;
+  document.getElementById("sens-low").textContent = low;
+  stats.classList.toggle("hidden", !sensFindings.length);
+
+  // Sort
+  items = [...items].sort((a, b) => {
+    let va, vb;
+    switch (sensSortKey) {
+      case "id":       va = a.id; vb = b.id; break;
+      case "severity": va = SEV_ORDER[a.severity] ?? 9; vb = SEV_ORDER[b.severity] ?? 9; break;
+      case "cat":      va = a.cat; vb = b.cat; break;
+      case "desc":     va = a.desc; vb = b.desc; break;
+      case "match":    va = a.match; vb = b.match; break;
+      case "section":  va = a.section; vb = b.section; break;
+      case "url":      va = a.url; vb = b.url; break;
+      default:         va = a.id; vb = b.id;
+    }
+    if (typeof va === "string") { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+    if (va < vb) return sensSortAsc ? -1 : 1;
+    if (va > vb) return sensSortAsc ? 1 : -1;
+    return 0;
+  });
+
+  // Update sort indicators
+  document.querySelectorAll("#sens-table .hist-th-sortable").forEach(th => {
+    const key = th.dataset.senssort;
+    const arrow = key === sensSortKey ? (sensSortAsc ? " \u25B4" : " \u25BE") : "";
+    let sp = th.querySelector(".sort-label");
+    if (!sp) { sp = document.createElement("span"); sp.className = "sort-label"; const raw = th.firstChild?.nodeType === 3 ? th.firstChild.textContent.trim() : ""; if (th.firstChild?.nodeType === 3) th.firstChild.remove(); th.insertBefore(sp, th.firstChild); sp.textContent = raw; }
+    sp.textContent = sp.textContent.replace(/ [\u25B4\u25BE]$/, "") + arrow;
+  });
+
+  if (!items.length) {
+    empty.classList.remove("hidden");
+    document.getElementById("sens-table").parentElement.classList.add("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+  document.getElementById("sens-table").parentElement.classList.remove("hidden");
+
+  for (const f of items.slice(0, 2000)) {
+    const tr = document.createElement("tr");
+    tr.className = "tgt-clickable";
+    const sevCls = `sens-sev-${esc(f.severity)}`;
+    tr.innerHTML = `
+      <td class="hist-td-num">${Number(f.id)}</td>
+      <td class="${sevCls}">${esc(f.severity)}</td>
+      <td>${esc(f.cat)}</td>
+      <td>${esc(f.desc)}</td>
+      <td title="${esc(f.match)}" class="hist-td-mime">${esc(f.match.slice(0, 80))}</td>
+      <td class="hist-td-mime">${esc(f.section)}</td>
+      <td title="${esc(f.url)}" class="hist-td-mime">${esc(f.url.slice(0, 60))}</td>
+    `;
+    tr._finding = f;
+    if (sensDetailEntry?._finding === f) tr.classList.add("hist-selected");
+    tr.addEventListener("click", () => sensOpenDetail(f));
+    tbody.appendChild(tr);
+  }
+}
+
+function sensLoadCustomRules() {
+  chrome.storage.local.get("voidSensCustom", r => {
+    sensCustomRules = r.voidSensCustom || [];
+    sensRenderCustomRules();
+  });
+}
+
+function sensSaveCustomRules() {
+  chrome.storage.local.set({ voidSensCustom: sensCustomRules });
+}
+
+function sensRenderCustomRules() {
+  const list = document.getElementById("sens-custom-list");
+  list.replaceChildren();
+  sensCustomRules.forEach((cr, i) => {
+    const row = el("div", "sens-custom-rule");
+    const label = el("span"); label.textContent = `[${cr.severity}] ${cr.desc}: ${cr.regex}`;
+    label.title = `${cr.isRegex ? "Regex" : "Text"} | ${cr.section}`;
+    const del = txt("button", "btn btn-xs btn-danger", "×");
+    del.addEventListener("click", () => { sensCustomRules.splice(i, 1); sensSaveCustomRules(); sensRenderCustomRules(); });
+    ap(row, label, del);
+    list.appendChild(row);
+  });
+}
+
+function sensAddCustomRule() {
+  const desc = document.getElementById("sens-custom-desc").value.trim();
+  const regex = document.getElementById("sens-custom-regex").value.trim();
+  if (!regex) return;
+  const severity = document.getElementById("sens-custom-sev").value;
+  const section = document.getElementById("sens-custom-section").value;
+  const isRegex = document.getElementById("sens-custom-isregex").checked;
+
+  // Validate regex
+  if (isRegex) { try { new RegExp(regex); } catch (e) { alert("Invalid regex: " + e.message); return; } }
+
+  sensCustomRules.push({ desc: desc || regex.slice(0, 30), regex, severity, section, isRegex });
+  sensSaveCustomRules();
+  sensRenderCustomRules();
+  document.getElementById("sens-custom-desc").value = "";
+  document.getElementById("sens-custom-regex").value = "";
+}
+
+let sensDetailEntry = null;
+let sensReqSearch = null, sensRespSearch = null;
+
+function sensOpenDetail(finding) {
+  // Find the original history entry for this finding
+  const entry = historyData.find(e => e.url === finding.url && e.method === finding.method) || {
+    method: finding.method || "GET", url: finding.url, host: "", path: "",
+    headers: {}, body: "", status: null, respHeaders: {}, respBody: "",
+  };
+  try { const u = new URL(entry.url); if (!entry.host) entry.host = u.host; if (!entry.path) entry.path = u.pathname + u.search; } catch {}
+
+  sensDetailEntry = { ...entry, _finding: finding };
+  const detail = document.getElementById("sens-detail");
+  document.getElementById("sens-detail-title").textContent =
+    `[${finding.severity.toUpperCase()}] ${finding.desc} — ${finding.match.slice(0, 60)}`;
+
+  let reqHdrs = `${entry.method} ${entry.path || "/"} HTTP/1.1\nHost: ${entry.host}\n`;
+  reqHdrs += Object.entries(entry.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+  document.getElementById("sens-req-headers-pre").textContent = reqHdrs;
+  document.getElementById("sens-req-body-pre").textContent = entry.body || "(empty)";
+
+  let resHdrs = entry.status ? `HTTP/1.1 ${entry.status} ${entry.statusText || ""}\n` : "(no response)\n";
+  resHdrs += Object.entries(entry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+  document.getElementById("sens-resp-headers-pre").textContent = resHdrs;
+  const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
+  document.getElementById("sens-resp-body-pre").textContent = tryPretty(entry.respBody || "(body not captured)", ct);
+
+  // Restore remembered sub-tab selection
+  detail.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
+  detail.querySelectorAll(".hist-detail-sub-tabs .sub-tab").forEach(t => t.classList.remove("active"));
+  const rp = detailActiveReqPane.replace("req-","");
+  const sp = detailActiveRespPane.replace("resp-","");
+  document.getElementById(`sens-req-${rp}-pane`).classList.remove("hidden");
+  document.getElementById(`sens-resp-${sp}-pane`).classList.remove("hidden");
+  detail.querySelectorAll(`.sub-tab[data-senspane="req-${rp}"]`).forEach(t => t.classList.add("active"));
+  detail.querySelectorAll(`.sub-tab[data-senspane="resp-${sp}"]`).forEach(t => t.classList.add("active"));
+
+  detail.classList.remove("hidden");
+  detail.classList.add("visible");
+  document.getElementById("sens-resizer").classList.add("visible");
+
+  // Highlight selected row
+  document.querySelectorAll("#sens-tbody tr").forEach(r => r.classList.remove("hist-selected"));
+  document.querySelectorAll("#sens-tbody tr").forEach(r => {
+    if (r._finding === finding) r.classList.add("hist-selected");
+  });
+
+  // Auto-search: put the finding match in the correct search box and trigger
+  const matchText = finding.match || "";
+  const sec = finding.section || "";
+  const isReqSide = sec.startsWith("req_");
+
+  // Switch to the right sub-tab (body for body findings, headers for header findings)
+  const showBody = sec.endsWith("_body");
+  if (isReqSide) {
+    const pane = showBody ? "body" : "headers";
+    detail.querySelectorAll("#sens-req-side .hist-sub-pane").forEach(p => p.classList.add("hidden"));
+    detail.querySelectorAll("#sens-req-side .sub-tab").forEach(t => t.classList.remove("active"));
+    document.getElementById(`sens-req-${pane}-pane`).classList.remove("hidden");
+    detail.querySelectorAll(`.sub-tab[data-senspane="req-${pane}"]`).forEach(t => t.classList.add("active"));
+    detailActiveReqPane = `req-${pane}`;
+  } else {
+    const pane = showBody ? "body" : "headers";
+    detail.querySelectorAll("#sens-resp-side .hist-sub-pane").forEach(p => p.classList.add("hidden"));
+    detail.querySelectorAll("#sens-resp-side .sub-tab").forEach(t => t.classList.remove("active"));
+    document.getElementById(`sens-resp-${pane}-pane`).classList.remove("hidden");
+    detail.querySelectorAll(`.sub-tab[data-senspane="resp-${pane}"]`).forEach(t => t.classList.add("active"));
+    detailActiveRespPane = `resp-${pane}`;
+  }
+
+  // Trigger search with the match text in the correct pane
+  setTimeout(() => {
+    if (isReqSide && sensReqSearch) {
+      document.getElementById("sens-req-search").value = matchText;
+      sensReqSearch.search(matchText);
+    } else if (!isReqSide && sensRespSearch) {
+      document.getElementById("sens-resp-search").value = matchText;
+      sensRespSearch.search(matchText);
+    }
+    // Clear the other side
+    if (isReqSide && sensRespSearch) sensRespSearch.clear();
+    else if (!isReqSide && sensReqSearch) sensReqSearch.clear();
+  }, 50);
+}
+
+function sensCloseDetail() {
+  sensDetailEntry = null;
+  const detail = document.getElementById("sens-detail");
+  detail.classList.add("hidden");
+  detail.classList.remove("visible");
+  document.getElementById("sens-resizer").classList.remove("visible");
+  document.querySelectorAll("#sens-tbody tr").forEach(r => r.classList.remove("hist-selected"));
+}
+
+function sensExportCSV() {
+  if (!sensFindings.length) return;
+  const rows = [["#","Severity","Category","Description","Match","Section","URL"].join(",")];
+  for (const f of sensFindings) {
+    rows.push([f.id, f.severity, `"${f.cat}"`, `"${f.desc}"`, `"${f.match.replace(/"/g,'""')}"`, f.section, `"${f.url}"`].join(","));
+  }
+  const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+  const a = el("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `void-sensitive-${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ═══════════════════════════ SESSION SAVE / LOAD ═════════════════════════════
+
+function buildSessionData() {
+  // Capture current UI state
+  saveRepTabState();
+  intrPayloadSets[intrActiveSet] = document.getElementById("intr-payloads").value;
+
+  return {
+    version: 1,
+    timestamp: new Date().toISOString(),
+    // History
+    history: historyData,
+    // Repeater
+    repeater: {
+      tabs: repTabs.map(t => ({
+        id: t.id, label: t.label, customLabel: t.customLabel || null,
+        method: t.method, url: t.url, headers: t.headers, body: t.body,
+        response: t.response, autoCookie: t.autoCookie,
+        targetHost: t.targetHost, targetPort: t.targetPort, targetTls: t.targetTls,
+        history: t.history, histIdx: t.histIdx,
+      })),
+      activeTab: repActiveTab,
+      nextId: repNextId,
+    },
+    // Intruder
+    intruder: {
+      method:     document.getElementById("intr-method").value,
+      url:        document.getElementById("intr-url").value,
+      request:    document.getElementById("intr-request").value,
+      attack:     document.getElementById("intr-attack").value,
+      threads:    document.getElementById("intr-threads").value,
+      delay:      document.getElementById("intr-delay").value,
+      payloads:   intrPayloadSets,
+      activeSet:  intrActiveSet,
+      autocookie: document.getElementById("intr-autocookie").checked,
+    },
+    // Endpoints & technologies
+    endpoints:    state.endpoints || [],
+    technologies: state.technologies || [],
+    headers:      state.headers || {},
+    // Settings
+    settings,
+    // Target scope
+    scopeInclude: document.getElementById("tgt-scope-include").value,
+    scopeExclude: document.getElementById("tgt-scope-exclude").value,
+  };
+}
+
+// ── Save to browser (chrome.storage.local) ──────────────────────────────────
+async function saveSessionToBrowser() {
+  const nameInp = document.getElementById("session-name");
+  let name = nameInp.value.trim();
+  if (!name) {
+    let host = "session";
+    try { host = new URL(repTabs.find(t => t.url)?.url || "").hostname || "session"; } catch {}
+    name = `${host} — ${new Date().toISOString().slice(0,16).replace("T"," ")}`;
+  }
+  const data = buildSessionData();
+  data.name = name;
+
+  // Load existing list, append, save
+  const stored = await new Promise(r => chrome.storage.local.get("voidSessions", r));
+  const sessions = stored.voidSessions || {};
+  const key = "s_" + Date.now();
+  sessions[key] = data;
+  await new Promise(r => chrome.storage.local.set({ voidSessions: sessions }, r));
+
+  nameInp.value = "";
+  refreshSessionList();
+  sessionStatus(`Saved: ${name}`);
+}
+
+// ── Export to .json file ─────────────────────────────────────────────────────
+function exportSession() {
+  const data = buildSessionData();
+  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+  const a = el("a");
+  a.href = URL.createObjectURL(blob);
+  let host = "session";
+  try { host = new URL(repTabs.find(t => t.url)?.url || "").hostname || "session"; } catch {}
+  a.download = `void-${host}-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  sessionStatus("Exported");
+}
+
+// ── Delete saved session ─────────────────────────────────────────────────────
+async function deleteSelectedSession() {
+  const sel = document.getElementById("session-configs");
+  const key = sel.value;
+  if (!key) return;
+  const stored = await new Promise(r => chrome.storage.local.get("voidSessions", r));
+  const sessions = stored.voidSessions || {};
+  delete sessions[key];
+  await new Promise(r => chrome.storage.local.set({ voidSessions: sessions }, r));
+  refreshSessionList();
+  sessionStatus("Deleted");
+}
+
+// ── Refresh dropdown with saved sessions ─────────────────────────────────────
+async function refreshSessionList() {
+  const sel = document.getElementById("session-configs");
+  sel.replaceChildren();
+  const def = el("option"); def.value = ""; def.textContent = "Saved sessions…"; sel.appendChild(def);
+
+  const stored = await new Promise(r => chrome.storage.local.get("voidSessions", r));
+  const sessions = stored.voidSessions || {};
+  const keys = Object.keys(sessions).sort().reverse(); // newest first
+  for (const key of keys) {
+    const s = sessions[key];
+    const o = el("option");
+    o.value = key;
+    const histCount = (s.history || []).length;
+    const repCount = s.repeater?.tabs?.length || 0;
+    o.textContent = `${s.name || key} (${histCount} hist, ${repCount} rep)`;
+    sel.appendChild(o);
+  }
+}
+
+// ── Load session from saved or file ──────────────────────────────────────────
+async function loadSelectedSession() {
+  const sel = document.getElementById("session-configs");
+  const key = sel.value;
+  if (!key) return;
+  const stored = await new Promise(r => chrome.storage.local.get("voidSessions", r));
+  const data = (stored.voidSessions || {})[key];
+  if (!data) { sessionStatus("Session not found"); return; }
+  await applySessionData(data);
+}
+
+async function importSessionFile(file) {
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data.version) throw new Error("Invalid session file");
+    await applySessionData(data);
+  } catch (e) {
+    sessionStatus("Error: " + e.message);
+  }
+}
+
+function sessionStatus(msg) {
+  const st = document.getElementById("session-status");
+  st.textContent = msg;
+  setTimeout(() => { st.textContent = ""; }, 3000);
+}
+
+async function applySessionData(data) {
+  // Restore history
+  if (data.history) {
+    historyData = data.history;
+    await bg({ type: "RESTORE_HISTORY", history: data.history });
+    renderHistory();
+    setBadge("bdg-history", historyData.length);
+  }
+
+  // Restore repeater
+  if (data.repeater && data.repeater.tabs && data.repeater.tabs.length) {
+    repTabs = data.repeater.tabs.map(t => ({
+      id: t.id, label: t.label || "1", customLabel: t.customLabel || null,
+      method: t.method || "GET", url: t.url || "", headers: t.headers || "", body: t.body || "",
+      response: t.response || null, autoCookie: !!t.autoCookie,
+      targetHost: t.targetHost || "", targetPort: t.targetPort || "", targetTls: t.targetTls !== false,
+      history: t.history || [], histIdx: t.histIdx ?? -1,
+    }));
+    repNextId = data.repeater.nextId || (Math.max(...repTabs.map(t => t.id)) + 1);
+    repActiveTab = data.repeater.activeTab;
+    if (!repTabs.find(t => t.id === repActiveTab)) repActiveTab = repTabs[0].id;
+    renderRepTabs();
+    loadRepTabFast(repTabs.find(t => t.id === repActiveTab));
+  }
+
+  // Restore intruder
+  if (data.intruder) {
+    const d = data.intruder;
+    const mSel = document.getElementById("intr-method");
+    ensureMethod(mSel, d.method);
+    mSel.value = d.method || "GET";
+    document.getElementById("intr-url").value = d.url || "";
+    document.getElementById("intr-request").value = d.request || "";
+    document.getElementById("intr-attack").value = d.attack || "sniper";
+    document.getElementById("intr-threads").value = d.threads || "1";
+    document.getElementById("intr-delay").value = d.delay || "0";
+    document.getElementById("intr-autocookie").checked = !!d.autocookie;
+    intrPayloadSets = d.payloads || [""];
+    intrActiveSet = d.activeSet || 0;
+    document.getElementById("intr-payloads").value = intrPayloadSets[intrActiveSet] || "";
+    intrCountPositions();
+  }
+
+  // Restore endpoints/technologies
+  if (data.endpoints) {
+    state.endpoints = data.endpoints;
+    await bg({ type: "RESTORE_ENDPOINTS", endpoints: data.endpoints });
+    renderEndpoints();
+    setBadge("bdg-endpoints", state.endpoints.length);
+  }
+  if (data.technologies) state.technologies = data.technologies;
+  if (data.headers) state.headers = data.headers;
+
+  // Restore settings
+  if (data.settings) {
+    settings = { ...DEFAULT_SETTINGS, ...data.settings };
+    loadSettingsUI();
+    saveSettings();
+  }
+
+  // Restore scope
+  if (data.scopeInclude !== undefined) {
+    document.getElementById("tgt-scope-include").value = data.scopeInclude;
+    document.getElementById("cfg-scope-include").value = data.scopeInclude;
+  }
+  if (data.scopeExclude !== undefined) {
+    document.getElementById("tgt-scope-exclude").value = data.scopeExclude;
+    document.getElementById("cfg-scope-exclude").value = data.scopeExclude;
+  }
+
+  renderHeaders();
+  updateBadges();
+  sessionStatus(`Loaded — ${historyData.length} history, ${repTabs.length} repeater tabs`);
+}
+
 // ═══════════════════════════ INIT ════════════════════════════════════════════
 
 document.addEventListener("DOMContentLoaded", () => {
+
+  // Helper: register init blocks safely — one failing block won't kill the rest
+  function initBlock(name, fn) {
+    try { fn(); } catch (e) { console.error(`[Void] init "${name}" failed:`, e); }
+  }
+
+  // ── Scoped Ctrl+A: select only the pane under the mouse ────────────────────
+  let _hoveredPane = null;
+  document.addEventListener("mouseover", e => {
+    _hoveredPane = e.target.closest(".raw-pre, .raw-ta, .hist-sub-pane, .resp-pane");
+  });
+  document.addEventListener("keydown", e => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    if (e.key === "a" && _hoveredPane) {
+      e.preventDefault();
+      const sel = window.getSelection();
+      const range = document.createRange();
+      // Select the innermost pre/textarea content
+      const target = _hoveredPane.querySelector(".raw-pre") || _hoveredPane;
+      if (target.tagName === "TEXTAREA") {
+        target.focus();
+        target.select();
+      } else {
+        range.selectNodeContents(target);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+  });
 
   // Tab switching
   document.querySelectorAll(".tab[data-tab]").forEach(t =>
@@ -2184,6 +3725,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // Repeater history navigation
+  document.getElementById("rep-hist-back").addEventListener("click", repHistBack);
+  document.getElementById("rep-hist-fwd").addEventListener("click", repHistForward);
+
+  // URL auto-size on all url inputs
+  document.querySelectorAll(".url-inp").forEach(inp => {
+    inp.addEventListener("input", () => autoSizeUrlInput(inp));
+    autoSizeUrlInput(inp);
+  });
+
   // Repeater tabs
   document.getElementById("rep-tab-add").addEventListener("click", addRepTab);
   renderRepTabs();
@@ -2193,15 +3744,21 @@ document.addEventListener("DOMContentLoaded", () => {
     t.addEventListener("click", () => switchRespPane(t.dataset.resp))
   );
 
-  // History sortable columns
-  document.querySelectorAll(".hist-th-sortable").forEach(th =>
-    th.addEventListener("click", () => {
+  // History sortable columns + column filters
+  document.querySelectorAll("#hist-table .hist-th-sortable").forEach(th =>
+    th.addEventListener("click", e => {
+      if (e.target.closest(".colfilter-ico") || e.target.closest(".colfilter-drop")) return;
       const key = th.dataset.sort;
       if (histSortKey === key) { histSortAsc = !histSortAsc; }
       else { histSortKey = key; histSortAsc = (key === "id" ? false : true); }
       renderHistory();
     })
   );
+  colFilterInit("hist-table", () => historyData, (e, f) => {
+    if (f === "mimeType") return shortMime(e.mimeType);
+    if (f === "status") return String(e.status ?? "");
+    return String(e[f] ?? "");
+  }, histColFilters, renderHistory);
 
   // Headers sub-tabs
   document.querySelectorAll(".hdr-sub-bar .sub-tab[data-hdrsub]").forEach(t =>
@@ -2237,6 +3794,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("hist-clear").addEventListener("click", async () => {
     await bg({ type: "CLEAR_HISTORY" });
     historyData = [];
+    histColFilters = {};
+    document.querySelectorAll("#hist-table .colfilter-drop").forEach(d => d.remove());
+    document.querySelectorAll("#hist-table .colfilter-ico").forEach(i => i.classList.remove("active"));
     renderHistory();
     setBadge("bdg-history", 0);
   });
@@ -2246,13 +3806,46 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("hist-detail-close").addEventListener("click", closeHistDetail);
   document.getElementById("hist-detail-to-rep").addEventListener("click", histDetailToRepeater);
 
-  // Detail search
-  document.getElementById("hist-detail-search").addEventListener("input", e => detailSearch(e.target.value));
-  document.getElementById("hist-detail-search-next").addEventListener("click", () => detailSearchNav(detailSearchIdx + 1));
-  document.getElementById("hist-detail-search-prev").addEventListener("click", () => detailSearchNav(detailSearchIdx - 1));
-  document.getElementById("hist-detail-search").addEventListener("keydown", e => {
-    if (e.key === "Enter") { e.preventDefault(); detailSearchNav(e.shiftKey ? detailSearchIdx - 1 : detailSearchIdx + 1); }
-  });
+  // Per-pane search bars (history)
+  histReqSearch = createPaneSearch(
+    document.getElementById("hist-req-side"),
+    document.getElementById("hist-req-search"),
+    document.getElementById("hist-req-search-count")
+  );
+  histRespSearch = createPaneSearch(
+    document.getElementById("hist-resp-side"),
+    document.getElementById("hist-resp-search"),
+    document.getElementById("hist-resp-search-count")
+  );
+  // Per-pane search bars (target detail)
+  createPaneSearch(
+    document.getElementById("tgt-req-side"),
+    document.getElementById("tgt-req-search"),
+    document.getElementById("tgt-req-search-count")
+  );
+  createPaneSearch(
+    document.getElementById("tgt-resp-side"),
+    document.getElementById("tgt-resp-search"),
+    document.getElementById("tgt-resp-search-count")
+  );
+  // Per-pane search bars (endpoint detail)
+  createPaneSearch(
+    document.getElementById("ep-req-side"),
+    document.getElementById("ep-req-search"),
+    document.getElementById("ep-req-search-count")
+  );
+  createPaneSearch(
+    document.getElementById("ep-resp-side"),
+    document.getElementById("ep-resp-search"),
+    document.getElementById("ep-resp-search-count")
+  );
+  // Per-pane search (repeater response)
+  createPaneSearch(
+    document.getElementById("rep-resp-pane"),
+    document.getElementById("rep-resp-search"),
+    document.getElementById("rep-resp-search-count")
+  );
+
   document.getElementById("hist-detail-to-intr").addEventListener("click", () => {
     if (!histDetailEntry) return;
     intrSendToIntruder({
@@ -2261,7 +3854,6 @@ document.addEventListener("DOMContentLoaded", () => {
       headers: histDetailEntry.headers || {},
       body: histDetailEntry.body || "",
     });
-    closeHistDetail();
   });
   document.getElementById("hist-detail-open").addEventListener("click", () => {
     if (histDetailEntry?.url) chrome.tabs.create({ url: histDetailEntry.url });
@@ -2272,7 +3864,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const btn = e.target.closest(".sub-tab[data-histpane]");
     if (!btn) return;
     const paneId = btn.dataset.histpane;
-    // Find which side (parent .hist-detail-pane)
+    if (paneId.startsWith("req-")) detailActiveReqPane = paneId;
+    else detailActiveRespPane = paneId;
     const side = btn.closest(".hist-detail-pane");
     side.querySelectorAll(".sub-tab").forEach(t => t.classList.remove("active"));
     btn.classList.add("active");
@@ -2446,6 +4039,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("tgt-inscope-only").addEventListener("change", e => {
     tgtInScopeOnly = e.target.checked;
     renderSiteMap();
+    renderEndpoints();
   });
   document.getElementById("tgt-scope-save").addEventListener("click", () => {
     // Sync scope to Settings too
@@ -2457,6 +4051,94 @@ document.addEventListener("DOMContentLoaded", () => {
     st.textContent = "Saved";
     setTimeout(() => { st.textContent = ""; }, 1500);
   });
+
+  // Target detail pane handlers
+  document.getElementById("tgt-detail-close").addEventListener("click", closeTgtDetail);
+  document.getElementById("tgt-detail-to-rep").addEventListener("click", () => {
+    if (!tgtDetailEntry) return;
+    sendToRepeater({ method: tgtDetailEntry.method, url: tgtDetailEntry.url, headers: tgtDetailEntry.headers || {}, body: tgtDetailEntry.body || "" });
+  });
+  document.getElementById("tgt-detail-to-intr").addEventListener("click", () => {
+    if (!tgtDetailEntry) return;
+    intrSendToIntruder({ method: tgtDetailEntry.method, url: tgtDetailEntry.url, headers: tgtDetailEntry.headers || {}, body: tgtDetailEntry.body || "" });
+  });
+  document.getElementById("tgt-detail").addEventListener("click", e => {
+    const btn = e.target.closest(".sub-tab[data-tgtpane]");
+    if (!btn) return;
+    const paneId = btn.dataset.tgtpane;
+    if (paneId.startsWith("req-")) detailActiveReqPane = paneId;
+    else detailActiveRespPane = paneId;
+    const side = btn.closest(".hist-detail-pane");
+    side.querySelectorAll(".sub-tab").forEach(t => t.classList.remove("active"));
+    btn.classList.add("active");
+    side.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
+    side.querySelector(`#tgt-${paneId}-pane`).classList.remove("hidden");
+  });
+
+  // Endpoint detail pane handlers
+  document.getElementById("ep-detail-close").addEventListener("click", closeEpDetail);
+  document.getElementById("ep-detail-to-rep").addEventListener("click", () => {
+    if (!epDetailEntry) return;
+    const h = historyData.find(he => he.url === epDetailEntry.url) || epDetailEntry;
+    sendToRepeater({ method: h.method || epDetailEntry.method || "GET", url: epDetailEntry.url, headers: h.headers || {}, body: h.body || "" });
+  });
+  document.getElementById("ep-detail-to-intr").addEventListener("click", () => {
+    if (!epDetailEntry) return;
+    const h = historyData.find(he => he.url === epDetailEntry.url) || epDetailEntry;
+    intrSendToIntruder({ method: h.method || epDetailEntry.method || "GET", url: epDetailEntry.url, headers: h.headers || {}, body: h.body || "" });
+  });
+  document.getElementById("ep-detail").addEventListener("click", e => {
+    const btn = e.target.closest(".sub-tab[data-eppane]");
+    if (!btn) return;
+    const paneId = btn.dataset.eppane;
+    if (paneId.startsWith("req-")) detailActiveReqPane = paneId;
+    else detailActiveRespPane = paneId;
+    const side = btn.closest(".hist-detail-pane");
+    side.querySelectorAll(".sub-tab").forEach(t => t.classList.remove("active"));
+    btn.classList.add("active");
+    side.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
+    side.querySelector(`#ep-${paneId}-pane`).classList.remove("hidden");
+  });
+
+  // Target detail resizer
+  (function() {
+    const handle = document.getElementById("tgt-detail-resizer");
+    const pane   = document.getElementById("tgt-table-pane");
+    let dragging = false, startX = 0, startW = 0;
+    handle.addEventListener("mousedown", e => {
+      dragging = true; startX = e.clientX; startW = pane.getBoundingClientRect().width;
+      document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
+    });
+    document.addEventListener("mousemove", e => {
+      if (!dragging) return;
+      pane.style.flex = "none";
+      pane.style.width = Math.max(200, startW + e.clientX - startX) + "px";
+    });
+    document.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
+    });
+  })();
+
+  // Endpoint split resizer
+  (function() {
+    const handle = document.getElementById("ep-resizer");
+    const left   = document.getElementById("ep-split-left");
+    let dragging = false, startX = 0, startW = 0;
+    handle.addEventListener("mousedown", e => {
+      dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width;
+      document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
+    });
+    document.addEventListener("mousemove", e => {
+      if (!dragging) return;
+      left.style.flex = "none";
+      left.style.width = Math.max(200, startW + e.clientX - startX) + "px";
+    });
+    document.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
+    });
+  })();
 
   // Target tree resizer
   (function() {
@@ -2471,6 +4153,46 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!dragging) return;
       pane.style.flex = "none";
       pane.style.width = Math.max(150, startW + e.clientX - startX) + "px";
+    });
+    document.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
+    });
+  })();
+
+  // Intercept split resizer
+  (function() {
+    const handle = document.getElementById("ic-resizer");
+    const left   = document.getElementById("ic-split-left");
+    let dragging = false, startX = 0, startW = 0;
+    handle.addEventListener("mousedown", e => {
+      dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width;
+      document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
+    });
+    document.addEventListener("mousemove", e => {
+      if (!dragging) return;
+      left.style.flex = "none";
+      left.style.width = Math.max(200, startW + e.clientX - startX) + "px";
+    });
+    document.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
+    });
+  })();
+
+  // History split resizer
+  (function() {
+    const handle = document.getElementById("hist-resizer");
+    const left   = document.getElementById("hist-split-left");
+    let dragging = false, startX = 0, startW = 0;
+    handle.addEventListener("mousedown", e => {
+      dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width;
+      document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
+    });
+    document.addEventListener("mousemove", e => {
+      if (!dragging) return;
+      left.style.flex = "none";
+      left.style.width = Math.max(200, startW + e.clientX - startX) + "px";
     });
     document.addEventListener("mouseup", () => {
       if (!dragging) return;
@@ -2501,6 +4223,17 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("intr-start").addEventListener("click", intrStart);
   document.getElementById("intr-stop").addEventListener("click", intrStop);
+  // Intruder sortable columns
+  document.querySelectorAll("#intr-table .hist-th-sortable").forEach(th => {
+    th.addEventListener("click", e => {
+      if (e.target.closest(".colfilter-ico") || e.target.closest(".colfilter-drop")) return;
+      const key = th.dataset.intrsort;
+      if (intrSortKey === key) { intrSortAsc = !intrSortAsc; }
+      else { intrSortKey = key; intrSortAsc = true; }
+      intrRenderResults();
+    });
+  });
+  colFilterInit("intr-table", () => intrResults, (e, f) => String(e[f] ?? ""), intrColFilters, intrRenderResults);
 
   // Decoder
   document.querySelectorAll(".dec-btn").forEach(btn =>
@@ -2524,6 +4257,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Settings
   document.getElementById("mr-add").addEventListener("click", addMRRule);
+  // Auto Headers preset dropdown
+  document.getElementById("cfg-hdr-preset").addEventListener("change", e => {
+    const val = e.target.value;
+    if (!val) return;
+    const ta = document.getElementById("cfg-auto-headers");
+    const hdrName = val.split(":")[0].toLowerCase();
+    // Replace existing header with same name, or append
+    const lines = ta.value.split("\n").filter(l => l.trim());
+    const idx = lines.findIndex(l => l.toLowerCase().startsWith(hdrName + ":"));
+    if (idx >= 0) { lines[idx] = val; } else { lines.push(val); }
+    ta.value = lines.join("\n");
+    e.target.value = ""; // reset dropdown
+  });
+
   document.getElementById("cfg-save").addEventListener("click", saveSettings);
   document.getElementById("cfg-reset").addEventListener("click", () => {
     settings = { ...DEFAULT_SETTINGS };
@@ -2531,8 +4278,260 @@ document.addEventListener("DOMContentLoaded", () => {
     saveSettings();
   });
 
+  // Session management (Project → Session tab)
+  initBlock("session", () => {
+    document.getElementById("session-save").addEventListener("click", saveSessionToBrowser);
+    document.getElementById("session-export").addEventListener("click", exportSession);
+    document.getElementById("session-import").addEventListener("click", () => {
+      document.getElementById("session-file").click();
+    });
+    document.getElementById("session-file").addEventListener("change", e => {
+      const file = e.target.files[0];
+      if (file) importSessionFile(file);
+      e.target.value = "";
+    });
+    document.getElementById("session-config-load").addEventListener("click", loadSelectedSession);
+    document.getElementById("session-config-del").addEventListener("click", deleteSelectedSession);
+    refreshSessionList();
+  });
+
+  // ── Logger ─────────────────────────────────────────────────────────────────
+  initBlock("logger", () => {
+    document.getElementById("log-filter").addEventListener("input", e => { logFilterText = e.target.value; logRender(); });
+    document.getElementById("log-flt-method").addEventListener("change", e => { logFilterMeth = e.target.value; logRender(); });
+    document.getElementById("log-flt-status").addEventListener("change", e => { logFilterStat = e.target.value; logRender(); });
+    document.getElementById("log-flt-source").addEventListener("change", e => { logFilterSource = e.target.value; logRender(); });
+    document.getElementById("log-scope-only").addEventListener("change", e => { logScopeOnly = e.target.checked; logRender(); });
+    // Sync Containers: pull remote entries from WebSocket sync server
+    document.getElementById("log-sync").addEventListener("click", async () => {
+      const res = await bg({ type: "SYNC_GET_REMOTE" });
+      if (!res) return;
+      if (!res.connected) {
+        alert("Sync server not running.\n\nStart it with:\n  node void-sync-server.js\n\nThen register each container in Containers → Container ID → Register");
+        return;
+      }
+      // Merge remote entries into logger
+      const existing = new Set(logEntries.filter(e => e._logSource === "container").map(e => e._logStableKey));
+      let added = 0;
+      for (const e of (res.entries || [])) {
+        const key = `${e.time || 0}_${e.method}_${e.url}_${e._logLabel}`;
+        if (existing.has(key)) continue;
+        logEntries.push({ ...e, _logId: logNextId++, _logStableKey: key });
+        existing.add(key);
+        added++;
+        // Add source to filter dropdown
+        const sel = document.getElementById("log-flt-source");
+        const label = e._logLabel || "container";
+        if (![...sel.options].some(o => o.value === label)) {
+          const o = el("option"); o.value = label; o.textContent = label;
+          sel.appendChild(o);
+        }
+      }
+      logRender();
+      setBadge("bdg-logger", logEntries.length);
+    });
+    document.getElementById("log-merge").addEventListener("click", () => document.getElementById("log-merge-file").click());
+    document.getElementById("log-merge-file").addEventListener("change", async e => {
+      for (const file of e.target.files) await logImportFile(file);
+      e.target.value = "";
+      logRender();
+    });
+    document.getElementById("log-export").addEventListener("click", logExport);
+    document.getElementById("log-clear").addEventListener("click", () => { logEntries = []; logNextId = 1; logRender(); logCloseDetail(); });
+    document.getElementById("log-detail-close").addEventListener("click", logCloseDetail);
+    document.getElementById("log-detail-to-rep").addEventListener("click", () => {
+      if (!logDetailEntry) return;
+      sendToRepeater({ method: logDetailEntry.method, url: logDetailEntry.url, headers: logDetailEntry.headers||{}, body: logDetailEntry.body||"" });
+    });
+    document.getElementById("log-detail-to-intr").addEventListener("click", () => {
+      if (!logDetailEntry) return;
+      intrSendToIntruder({ method: logDetailEntry.method, url: logDetailEntry.url, headers: logDetailEntry.headers||{}, body: logDetailEntry.body||"" });
+    });
+    document.getElementById("log-detail-open").addEventListener("click", () => {
+      if (logDetailEntry?.url) chrome.tabs.create({ url: logDetailEntry.url });
+    });
+    document.getElementById("log-detail").addEventListener("click", e => {
+      const btn = e.target.closest(".sub-tab[data-logpane]");
+      if (!btn) return;
+      const paneId = btn.dataset.logpane;
+      if (paneId.startsWith("req-")) detailActiveReqPane = paneId; else detailActiveRespPane = paneId;
+      const side = btn.closest(".hist-detail-pane");
+      side.querySelectorAll(".sub-tab").forEach(t => t.classList.remove("active"));
+      btn.classList.add("active");
+      side.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
+      side.querySelector(`#log-${paneId}-pane`).classList.remove("hidden");
+    });
+    document.querySelectorAll("#log-table .hist-th-sortable").forEach(th => {
+      th.addEventListener("click", e => {
+        if (e.target.closest(".colfilter-ico") || e.target.closest(".colfilter-drop")) return;
+        const key = th.dataset.logsort;
+        if (logSortKey === key) logSortAsc = !logSortAsc;
+        else { logSortKey = key; logSortAsc = key === "id" ? false : true; }
+        logRender();
+      });
+    });
+    colFilterInit("log-table", () => logEntries, (e, f) => {
+      if (f === "source") return e._logLabel || "";
+      if (f === "status") return String(e.status ?? "");
+      return String(e[f] ?? "");
+    }, logColFilters, logRender);
+    createPaneSearch(document.getElementById("log-req-side"), document.getElementById("log-req-search"), document.getElementById("log-req-search-count"));
+    createPaneSearch(document.getElementById("log-resp-side"), document.getElementById("log-resp-search"), document.getElementById("log-resp-search-count"));
+    // Resizer
+    (function() {
+      const handle = document.getElementById("log-resizer"), left = document.getElementById("log-split-left");
+      let dragging = false, startX = 0, startW = 0;
+      handle.addEventListener("mousedown", e => { dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width; document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize"; });
+      document.addEventListener("mousemove", e => { if (!dragging) return; left.style.flex = "none"; left.style.width = Math.max(200, startW + e.clientX - startX) + "px"; });
+      document.addEventListener("mouseup", () => { if (!dragging) return; dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = ""; });
+    })();
+  });
+
+  // ── Sensitive Discoverer ────────────────────────────────────────────────────
+  initBlock("sensitive", () => {
+    document.getElementById("sens-scan").addEventListener("click", sensScan);
+    document.getElementById("sens-clear").addEventListener("click", () => {
+      sensFindings = [];
+      sensRender();
+      setBadge("bdg-sensitive", 0);
+    });
+    document.getElementById("sens-export").addEventListener("click", sensExportCSV);
+    document.getElementById("sens-scope-only").addEventListener("change", e => { sensScopeOnly = e.target.checked; });
+    document.getElementById("sens-flt-cat").addEventListener("change", e => { sensFilterCat = e.target.value; sensRender(); });
+    document.getElementById("sens-flt-sev").addEventListener("change", e => { sensFilterSev = e.target.value; sensRender(); });
+    document.getElementById("sens-filter").addEventListener("input", e => { sensFilterText = e.target.value; sensRender(); });
+    // Sortable columns (skip if clicking filter icon)
+    document.querySelectorAll("#sens-table .hist-th-sortable").forEach(th => {
+      th.addEventListener("click", e => {
+        if (e.target.closest(".colfilter-ico") || e.target.closest(".colfilter-drop")) return;
+        const key = th.dataset.senssort;
+        if (sensSortKey === key) { sensSortAsc = !sensSortAsc; }
+        else { sensSortKey = key; sensSortAsc = key === "severity"; }
+        sensRender();
+      });
+    });
+    // Column filter dropdowns
+    colFilterInit("sens-table",
+      () => sensFindings,
+      (f, field) => f[field],
+      sensColFilters,
+      () => sensRender()
+    );
+    document.getElementById("sens-custom-toggle").addEventListener("click", () => {
+      const panel = document.getElementById("sens-custom");
+      const btn = document.getElementById("sens-custom-toggle");
+      const hidden = panel.classList.toggle("hidden");
+      btn.textContent = hidden ? "Custom Rules \u25B8" : "Custom Rules \u25BE";
+    });
+    document.getElementById("sens-custom-add").addEventListener("click", sensAddCustomRule);
+    // Detail pane
+    document.getElementById("sens-detail-close").addEventListener("click", sensCloseDetail);
+    document.getElementById("sens-detail-to-rep").addEventListener("click", () => {
+      if (!sensDetailEntry) return;
+      sendToRepeater({ method: sensDetailEntry.method, url: sensDetailEntry.url, headers: sensDetailEntry.headers || {}, body: sensDetailEntry.body || "" });
+    });
+    document.getElementById("sens-detail-to-intr").addEventListener("click", () => {
+      if (!sensDetailEntry) return;
+      intrSendToIntruder({ method: sensDetailEntry.method, url: sensDetailEntry.url, headers: sensDetailEntry.headers || {}, body: sensDetailEntry.body || "" });
+    });
+    document.getElementById("sens-detail-open").addEventListener("click", () => {
+      if (sensDetailEntry?.url) chrome.tabs.create({ url: sensDetailEntry.url });
+    });
+    // Sub-tab switching
+    document.getElementById("sens-detail").addEventListener("click", e => {
+      const btn = e.target.closest(".sub-tab[data-senspane]");
+      if (!btn) return;
+      const paneId = btn.dataset.senspane;
+      if (paneId.startsWith("req-")) detailActiveReqPane = paneId;
+      else detailActiveRespPane = paneId;
+      const side = btn.closest(".hist-detail-pane");
+      side.querySelectorAll(".sub-tab").forEach(t => t.classList.remove("active"));
+      btn.classList.add("active");
+      side.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
+      side.querySelector(`#sens-${paneId}-pane`).classList.remove("hidden");
+    });
+    // Search bars (store refs for auto-search on finding click)
+    sensReqSearch = createPaneSearch(
+      document.getElementById("sens-req-side"),
+      document.getElementById("sens-req-search"),
+      document.getElementById("sens-req-search-count")
+    );
+    sensRespSearch = createPaneSearch(
+      document.getElementById("sens-resp-side"),
+      document.getElementById("sens-resp-search"),
+      document.getElementById("sens-resp-search-count")
+    );
+    // Resizer
+    (function() {
+      const handle = document.getElementById("sens-resizer");
+      const left = document.getElementById("sens-split-left");
+      let dragging = false, startX = 0, startW = 0;
+      handle.addEventListener("mousedown", e => {
+        dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width;
+        document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
+      });
+      document.addEventListener("mousemove", e => {
+        if (!dragging) return;
+        left.style.flex = "none";
+        left.style.width = Math.max(200, startW + e.clientX - startX) + "px";
+      });
+      document.addEventListener("mouseup", () => {
+        if (!dragging) return;
+        dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
+      });
+    })();
+    sensLoadCustomRules();
+  });
+
+  // ── Containers ──────────────────────────────────────────────────────────────
+  initBlock("containers", () => {
+    document.getElementById("cnt-add").addEventListener("click", () => cntShowForm(null));
+    document.getElementById("cnt-form-save").addEventListener("click", cntSaveForm);
+    document.getElementById("cnt-form-cancel").addEventListener("click", cntHideForm);
+    document.querySelectorAll("#cnt-colors .cnt-color-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#cnt-colors .cnt-color-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+      });
+    });
+    document.getElementById("cnt-ext-path-save").addEventListener("click", () => {
+      cntExtPath = document.getElementById("cnt-ext-path").value.trim();
+      saveContainers();
+    });
+    // Register this instance as a container (run in container windows)
+    document.getElementById("cnt-register-save").addEventListener("click", () => {
+      const name = document.getElementById("cnt-register-name").value.trim();
+      if (!name) return;
+      chrome.storage.local.set({ voidContainerName: name });
+      // Trigger immediate export
+      bg({ type: "CNT_AUTO_EXPORT", name });
+      document.getElementById("cnt-register-name").placeholder = `Registered as "${name}" — syncing`;
+    });
+    // Load current registration
+    chrome.storage.local.get("voidContainerName", r => {
+      if (r.voidContainerName) {
+        document.getElementById("cnt-register-name").value = r.voidContainerName;
+        document.getElementById("cnt-register-name").placeholder = `Registered as "${r.voidContainerName}"`;
+      }
+    });
+    loadContainers().then(() => {
+      if (!cntExtPath) {
+        // Can't auto-detect disk path from extension APIs.
+        // Set placeholder with helpful find command
+        document.getElementById("cnt-ext-path").placeholder = "/home/user/void-extension — paste your path here";
+      } else {
+        document.getElementById("cnt-ext-path").value = cntExtPath;
+      }
+      renderContainers();
+    });
+  });
+
   // ── Probe tab ───────────────────────────────────────────────────────────────
+  initBlock("probe", () => {
   document.getElementById("probe-scan").addEventListener("click", probeScan);
+  document.getElementById("probe-ctrl-only").addEventListener("change", () => {
+    if (probeFindingsData) { probeRenderSources(probeFindingsData.sources); probeRenderFlows(probeFindingsData.flows); }
+  });
   document.getElementById("probe-rescan").addEventListener("click", () => { probeCmd("scan"); probePrevTotal = -1; probeStableCount = 0; });
   document.getElementById("probe-export").addEventListener("click", () => probeCmd("export"));
   document.getElementById("probe-clear").addEventListener("click", probeClearAll);
@@ -2572,6 +4571,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (r.probeProtoPollution) document.getElementById("probe-protopoll").checked = true;
   });
 
+  }); // end initBlock("probe")
+
   // Boot
   loadSettings().then(() => {
     loadSettingsUI();
@@ -2581,5 +4582,6 @@ document.addEventListener("DOMContentLoaded", () => {
     bg({ type: "UPDATE_SETTINGS", settings });
   });
   loadAll();
-  startPoll();
+
+  // startPoll is called by showTab("intercept") — don't start it unconditionally
 });
