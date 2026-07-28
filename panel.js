@@ -3116,6 +3116,12 @@ function cntBuildCmd(cnt, os) {
 }
 
 async function cntLaunch(cnt) {
+  if (!cntExtPath) {
+    const st = document.querySelector(".cnt-info");
+    if (st) st.textContent = "Set the Extension path first! The container needs it to load Void Extension.";
+    document.getElementById("cnt-ext-path").focus();
+    return;
+  }
   const os = cntDetectOS();
   const cmd = cntBuildCmd(cnt, os);
   navigator.clipboard.writeText(cmd);
@@ -4869,12 +4875,20 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
     loadContainers().then(() => {
+      const inp = document.getElementById("cnt-ext-path");
       if (!cntExtPath) {
-        // Can't auto-detect disk path from extension APIs.
-        // Set placeholder with helpful find command
-        document.getElementById("cnt-ext-path").placeholder = "/home/user/void-extension — paste your path here";
+        // Auto-detect: try to get the extension's install path
+        // chrome.runtime.getURL gives us the extension URL; on --load-extension installs
+        // the ID is derived from the disk path, but we can't reverse it.
+        // Best we can do: suggest common paths based on OS
+        const os = cntDetectOS();
+        const hint = os === "win" ? "C:\\tmp\\void-extension" : "~/void-extension";
+        inp.placeholder = hint + " — REQUIRED for containers to load the extension";
+        inp.value = hint;
+        cntExtPath = hint;
+        saveContainers();
       } else {
-        document.getElementById("cnt-ext-path").value = cntExtPath;
+        inp.value = cntExtPath;
       }
       renderContainers();
     });
