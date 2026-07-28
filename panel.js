@@ -3077,10 +3077,10 @@ function cntBuildCmd(cnt, os) {
     lines.push('if (-not (Test-Path "$dataDir\\Default\\Preferences")) { \'{"extensions":{"ui":{"developer_mode":true}}}\' | Out-File -Encoding UTF8 "$dataDir\\Default\\Preferences" }');
     lines.push('"' + safeName + '" | Out-File -Encoding UTF8 "$dataDir\\_void_container_name"');
 
-    // Find chrome.exe
+    // Find chrome.exe (prefer Chromium — no enterprise policy restrictions)
     lines.push('$chrome = $null');
-    lines.push('@("$env:ProgramFiles\\Google\\Chrome\\Application\\chrome.exe","${env:ProgramFiles(x86)}\\Google\\Chrome\\Application\\chrome.exe","$env:LOCALAPPDATA\\Google\\Chrome\\Application\\chrome.exe") | ForEach-Object { if (Test-Path $_) { $chrome = $_ } }');
-    lines.push('if (-not $chrome) { Write-Host "Chrome not found"; exit 1 }');
+    lines.push('@("$env:USERPROFILE\\Downloads\\chrome-win\\chrome-win\\chrome.exe","$env:USERPROFILE\\Downloads\\chromium\\chrome.exe","$env:LOCALAPPDATA\\Chromium\\Application\\chrome.exe","$env:ProgramFiles\\Google\\Chrome\\Application\\chrome.exe","${env:ProgramFiles(x86)}\\Google\\Chrome\\Application\\chrome.exe","$env:LOCALAPPDATA\\Google\\Chrome\\Application\\chrome.exe") | ForEach-Object { if (Test-Path $_) { $chrome = $_ } }');
+    lines.push('if (-not $chrome) { Write-Host "Chrome/Chromium not found"; exit 1 }');
 
     let extFlag = "";
     if (extPath) {
