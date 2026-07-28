@@ -3,10 +3,33 @@
 // ── Keep service worker alive (MV3 can kill it after ~30s idle) ───────────────
 // We use an alarm that fires every 25s to prevent the SW from being suspended.
 chrome.alarms.create("keepAlive", { periodInMinutes: 0.4 });
-chrome.alarms.onAlarm.addListener(() => {}); // keepAlive
+chrome.alarms.onAlarm.addListener(() => { syncPushBurst(); });
 
-// ── WebSocket sync moved to panel.js (panel stays alive while DevTools is open) ─
-// The service worker is too short-lived for WebSocket connections in MV3.
+// ── WebSocket sync: fire-and-forget push on each alarm tick ─────────────────
+// Panel.js holds the persistent WS for receiving. The SW just pushes history
+// in short-lived bursts so containers without DevTools open still share traffic.
+let syncLastPushCount = 0;
+
+function syncPushBurst() {
+  let allHistory = [];
+  for (const [, t] of tabs) allHistory = allHistory.concat(t.history);
+  if (allHistory.length === syncLastPushCount) return; // nothing new
+  syncLastPushCount = allHistory.length;
+
+  try {
+    const ws = new WebSocket("ws://localhost:17580");
+    ws.onopen = () => {
+      chrome.storage.local.get("voidContainerName", r => {
+        const name = r.voidContainerName || "main";
+        ws.send(JSON.stringify({ type: "register", name }));
+        ws.send(JSON.stringify({ type: "history", entries: allHistory }));
+        // Close after a short delay to let the server process
+        setTimeout(() => ws.close(), 500);
+      });
+    };
+    ws.onerror = () => { ws.close(); };
+  } catch {}
+}
 
 // ── Settings (shared across tabs) ────────────────────────────────────────────
 let voidSettings = {
@@ -226,6 +249,8 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
     if (idx !== undefined && t.history[idx] && !t.history[idx].respBody) {
       fetchResponseBody(src.tabId, reqId, t, idx);
     }
+    // Push to sync server (debounced — only if count changed)
+    syncPushBurst();
   }
 
   // ── Also try on dataReceived for streaming responses ────────────────
