@@ -12,6 +12,7 @@
     "alarms",
     "cookies",
     "downloads",
+    "webRequest",
     "unlimitedStorage"
   ],
   "host_permissions": ["<all_urls>"],

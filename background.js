@@ -11,7 +11,7 @@ chrome.alarms.onAlarm.addListener(() => { syncPushBurst(); });
 let syncLastPushCount = 0;
 
 function syncPushBurst() {
-  let allHistory = [];
+  let allHistory = [...passiveHistory];
   for (const [, t] of tabs) allHistory = allHistory.concat(t.history);
   if (allHistory.length === syncLastPushCount) return; // nothing new
   syncLastPushCount = allHistory.length;
@@ -30,6 +30,75 @@ function syncPushBurst() {
     ws.onerror = () => { ws.close(); };
   } catch {}
 }
+
+// ── Passive traffic capture (webRequest — no debugger needed) ────────────────
+// Captures all HTTP traffic across ALL tabs automatically. The debugger-based
+// capture (Network.requestWillBeSent etc.) still provides richer data (bodies,
+// timing) when attached, but this ensures Logger always has traffic to show.
+const passiveHistory = [];  // { method, url, host, path, status, headers, respHeaders, time, elapsed, tabId }
+const passivePending = {};  // requestId → { method, url, headers, time, tabId }
+
+chrome.webRequest.onBeforeSendHeaders.addListener(
+  (details) => {
+    if (details.tabId < 0) return; // skip non-tab requests (SW, etc.)
+    const hdrs = {};
+    (details.requestHeaders || []).forEach(h => { hdrs[h.name] = h.value || ""; });
+    passivePending[details.requestId] = {
+      method: details.method,
+      url: details.url,
+      headers: hdrs,
+      time: details.timeStamp || Date.now(),
+      tabId: details.tabId,
+      type: details.type,
+    };
+  },
+  { urls: ["<all_urls>"] },
+  ["requestHeaders"]
+);
+
+chrome.webRequest.onCompleted.addListener(
+  (details) => {
+    const pending = passivePending[details.requestId];
+    if (!pending) return;
+    delete passivePending[details.requestId];
+
+    let host = "", path = "";
+    try { const u = new URL(details.url); host = u.host; path = u.pathname + u.search; } catch {}
+
+    const respHdrs = {};
+    (details.responseHeaders || []).forEach(h => { respHdrs[h.name.toLowerCase()] = h.value || ""; });
+
+    const entry = {
+      method: pending.method,
+      url: details.url,
+      host, path,
+      status: details.statusCode,
+      statusText: "",
+      headers: pending.headers,
+      respHeaders: respHdrs,
+      body: "",
+      respBody: "",
+      length: 0,
+      mimeType: respHdrs["content-type"] || "",
+      time: pending.time,
+      elapsed: Math.round((details.timeStamp || Date.now()) - pending.time),
+      resourceType: pending.type || "other",
+    };
+    passiveHistory.push(entry);
+    // Cap to prevent unbounded growth
+    if (passiveHistory.length > 8000) passiveHistory.splice(0, 1000);
+    // Trigger sync push
+    syncPushBurst();
+  },
+  { urls: ["<all_urls>"] },
+  ["responseHeaders"]
+);
+
+// Clean up stale pending entries (requests that never completed)
+chrome.webRequest.onErrorOccurred.addListener(
+  (details) => { delete passivePending[details.requestId]; },
+  { urls: ["<all_urls>"] }
+);
 
 // ── Settings (shared across tabs) ────────────────────────────────────────────
 let voidSettings = {
@@ -805,7 +874,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case "GET_HISTORY": {
       if (!tabId) { sendResponse({ history: [] }); break; }
       const t = getTab(tabId);
-      sendResponse({ history: t.history });
+      // Merge debugger history (rich: has bodies) + passive history (basic: all tabs)
+      const seen = new Set(t.history.map(e => `${e.time}_${e.method}_${e.url}`));
+      const merged = [...t.history];
+      for (const pe of passiveHistory) {
+        const key = `${pe.time}_${pe.method}_${pe.url}`;
+        if (!seen.has(key)) { merged.push(pe); seen.add(key); }
+      }
+      sendResponse({ history: merged });
       break;
     }
 
