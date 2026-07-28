@@ -21,6 +21,7 @@
     <button class="tab"        data-tab="containers">Containers</button>
     <button class="tab"        data-tab="headers"  >Headers</button>
     <button class="tab"        data-tab="decoder"  >Decoder</button>
+    <button class="tab"        data-tab="comparer" >Comparer</button>
     <button class="tab"        data-tab="sensitive">Sensitive <span class="bdg" id="bdg-sensitive">0</span></button>
     <button class="tab"        data-tab="settings" >Settings</button>
     <div class="tabbar-gap"></div>
@@ -106,6 +107,8 @@
             <span id="tgt-detail-title" class="hist-detail-title"></span>
             <button id="tgt-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
             <button id="tgt-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+            <button id="tgt-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
+            <button id="tgt-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
           </div>
           <div class="hist-detail-body">
             <div class="hist-detail-pane" id="tgt-req-side">
@@ -171,6 +174,8 @@
             <span id="ep-detail-title" class="hist-detail-title"></span>
             <button id="ep-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
             <button id="ep-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+            <button id="ep-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
+            <button id="ep-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
           </div>
           <div class="hist-detail-body">
             <div class="hist-detail-pane" id="ep-req-side">
@@ -354,6 +359,8 @@
           <span id="hist-detail-title" class="hist-detail-title"></span>
           <button id="hist-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
           <button id="hist-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+          <button id="hist-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
+          <button id="hist-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
           <button id="hist-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">↗ Open</button>
         </div>
         <div class="hist-detail-body">
@@ -826,6 +833,8 @@
           <span id="log-detail-title" class="hist-detail-title"></span>
           <button id="log-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
           <button id="log-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+          <button id="log-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
+          <button id="log-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
           <button id="log-detail-open" class="btn btn-sm btn-ghost">↗</button>
         </div>
         <div class="hist-detail-body">
@@ -972,6 +981,48 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════ COMPARER ═══════════════════════════════════ -->
+  <div id="tab-comparer" class="tab-panel hidden">
+    <div class="cmp-toolbar">
+      <button id="cmp-diff" class="btn btn-accent">Diff</button>
+      <button id="cmp-swap" class="btn btn-sm btn-ghost">⇄ Swap</button>
+      <button id="cmp-clear" class="btn btn-sm btn-ghost">Clear</button>
+      <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-headers" checked> Ignore header order</label>
+      <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-case"> Case-insensitive</label>
+      <span id="cmp-status" class="settings-status"></span>
+    </div>
+    <div class="cmp-layout">
+      <!-- LEFT side -->
+      <div class="cmp-side" id="cmp-left">
+        <div class="cmp-side-header">
+          <span class="cmp-side-label">LEFT</span>
+          <span id="cmp-left-title" class="cmp-side-title">(empty — send a request here with → Cmp L)</span>
+        </div>
+        <div class="cmp-sub-tabs">
+          <button class="sub-tab active" data-cmppane="left-req">Request</button>
+          <button class="sub-tab" data-cmppane="left-resp">Response</button>
+        </div>
+        <div id="cmp-left-req-pane" class="cmp-pane active"><pre id="cmp-left-req-pre" class="raw-pre cmp-pre"></pre></div>
+        <div id="cmp-left-resp-pane" class="cmp-pane hidden"><pre id="cmp-left-resp-pre" class="raw-pre cmp-pre"></pre></div>
+      </div>
+      <!-- Resize handle -->
+      <div class="cmp-resizer" id="cmp-resizer"></div>
+      <!-- RIGHT side -->
+      <div class="cmp-side" id="cmp-right">
+        <div class="cmp-side-header">
+          <span class="cmp-side-label">RIGHT</span>
+          <span id="cmp-right-title" class="cmp-side-title">(empty — send a request here with → Cmp R)</span>
+        </div>
+        <div class="cmp-sub-tabs">
+          <button class="sub-tab active" data-cmppane="right-req">Request</button>
+          <button class="sub-tab" data-cmppane="right-resp">Response</button>
+        </div>
+        <div id="cmp-right-req-pane" class="cmp-pane active"><pre id="cmp-right-req-pre" class="raw-pre cmp-pre"></pre></div>
+        <div id="cmp-right-resp-pane" class="cmp-pane hidden"><pre id="cmp-right-resp-pre" class="raw-pre cmp-pre"></pre></div>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════════════════ SENSITIVE ═══════════════════════════════════ -->
   <div id="tab-sensitive" class="tab-panel hidden">
     <div class="sens-toolbar">
@@ -984,6 +1035,11 @@
         <option value="General Secrets">General Secrets</option>
         <option value="Cloud & Webhooks">Cloud & Webhooks</option>
         <option value="Sensitive Files">Sensitive Files</option>
+        <option value="Error Disclosure">Error Disclosure</option>
+        <option value="Security Misconfiguration">Security Misconfig</option>
+        <option value="Information Disclosure">Information Disclosure</option>
+        <option value="Open Redirect">Open Redirect</option>
+        <option value="PII">PII</option>
         <option value="Custom">Custom Rules</option>
       </select>
       <select id="sens-flt-sev" class="filter-sel">
@@ -1050,6 +1106,8 @@
           <span id="sens-detail-title" class="hist-detail-title"></span>
           <button id="sens-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
           <button id="sens-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+          <button id="sens-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
+          <button id="sens-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
           <button id="sens-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">↗</button>
         </div>
         <div class="hist-detail-body">

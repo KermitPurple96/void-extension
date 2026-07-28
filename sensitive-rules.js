@@ -5,8 +5,8 @@ const SENSITIVE_RULES = [
   //  Tokens & Keys
   // ═══════════════════════════════════════════════════════════════
   { id: "aws-access-key", cat: "Tokens & Keys", desc: "AWS Access Key ID", regex: "A(BIA|CCA|GPA|I(DA|PA)|KIA|N(PA|VA)|PKA|ROA|S(CA|IA))[a-zA-Z0-9]{16,17}(?![a-zA-Z0-9+/=])", sections: ["resp_body", "resp_headers"], severity: "critical" },
-  { id: "aws-secret-key", cat: "Tokens & Keys", desc: "AWS Secret Access Key", regex: "(?i)aws([^;]{0,32}?)['\"][0-9a-zA-Z/+=]{40}['\"]", sections: ["resp_body", "resp_headers"], severity: "critical" },
-  { id: "amazon-mws-auth", cat: "Tokens & Keys", desc: "Amazon MWS Auth Token", regex: "(?i)amzn\\.mws\\.[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", sections: ["resp_body", "resp_headers"], severity: "critical" },
+  { id: "aws-secret-key", cat: "Tokens & Keys", desc: "AWS Secret Access Key", regex: "aws([^;]{0,32}?)['\"][0-9a-zA-Z/+=]{40}['\"]", sections: ["resp_body", "resp_headers"], severity: "critical" },
+  { id: "amazon-mws-auth", cat: "Tokens & Keys", desc: "Amazon MWS Auth Token", regex: "amzn\\.mws\\.[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", sections: ["resp_body", "resp_headers"], severity: "critical" },
   { id: "google-api-key", cat: "Tokens & Keys", desc: "Google API Key", regex: "AIza[0-9A-Za-z\\-_]{35}", sections: ["resp_body", "resp_headers"], severity: "critical" },
   { id: "google-oauth-token", cat: "Tokens & Keys", desc: "Google OAuth Access Token", regex: "ya29\\.[0-9A-Za-z\\-_]{32,48}", sections: ["resp_body", "resp_headers"], severity: "critical" },
   { id: "google-oauth-client-id", cat: "Tokens & Keys", desc: "Google OAuth Client ID", regex: "\\.apps\\.googleusercontent\\.com", refiner: "\\d{1,20}-\\w{32}$", sections: ["resp_body", "resp_headers"], severity: "critical" },
@@ -27,8 +27,8 @@ const SENSITIVE_RULES = [
   //  General Secrets
   // ═══════════════════════════════════════════════════════════════
   { id: "pem-certificate", cat: "General Secrets", desc: "PEM/Certificate", regex: "-----BEGIN", sections: ["resp_body", "resp_headers"], severity: "high" },
-  { id: "generic-api-key", cat: "General Secrets", desc: "Generic API Key", regex: "(?i)api.{0,5}key[^&|;?,]{0,32}?['\"][a-zA-Z0-9_\\-+=\\/\\\\]{10,}['\"]", sections: ["resp_body", "resp_headers"], severity: "high" },
-  { id: "generic-secret", cat: "General Secrets", desc: "Generic Secret", regex: "(?i)secret[^&|;?,]{0,32}?['\"][a-zA-Z0-9_\\-+=\\/\\\\]{10,}['\"]", sections: ["resp_body", "resp_headers"], severity: "high" },
+  { id: "generic-api-key", cat: "General Secrets", desc: "Generic API Key", regex: "api.{0,5}key[^&|;?,]{0,32}?['\"][a-zA-Z0-9_\\-+=\\/\\\\]{10,}['\"]", sections: ["resp_body", "resp_headers"], severity: "high" },
+  { id: "generic-secret", cat: "General Secrets", desc: "Generic Secret", regex: "secret[^&|;?,]{0,32}?['\"][a-zA-Z0-9_\\-+=\\/\\\\]{10,}['\"]", sections: ["resp_body", "resp_headers"], severity: "high" },
   { id: "env-file-ref", cat: "General Secrets", desc: ".env file reference", regex: "\\.env", sections: ["resp_body", "resp_headers"], severity: "medium" },
   { id: "private-ipv4", cat: "General Secrets", desc: "Private IPv4", regex: "1(0(\\.[0-2]\\d{0,2}){3}|27(\\.[0-2]\\d{0,2}){3}|92\\.168(\\.[0-2]\\d{0,2}){2}|72\\.(1[6-9]|2\\d|3[0-2])(\\.[0-2]\\d{0,2}){2})(?![\\d.])", sections: ["resp_body", "resp_headers"], severity: "medium" },
   { id: "email", cat: "General Secrets", desc: "Email", regex: "[a-zA-Z0-9]@[a-zA-Z0-9\\-\\.]{3,128}\\.[a-zA-Z0-9]{2,32}(?![\\w\\\\])", sections: ["resp_body", "resp_headers"], severity: "medium" },
@@ -112,4 +112,62 @@ const SENSITIVE_RULES = [
   { id: "file-tblk", cat: "Sensitive Files", desc: "Tunnelblick VPN (.tblk)", regex: "\\.tblk(?:[?#]|$)", sections: ["req_url"], severity: "high" },
   { id: "file-fve", cat: "Sensitive Files", desc: "BitLocker metadata (.fve)", regex: "\\.fve(?:[?#]|$)", sections: ["req_url"], severity: "critical" },
   { id: "file-xml", cat: "Sensitive Files", desc: "XML file (.xml)", regex: "\\.xml(?:[?#]|$)", sections: ["req_url"], severity: "low" },
+
+  // ═══════════════════════════════════════════════════════════════
+  //  Passive Scanner — Stack Traces & Errors
+  // ═══════════════════════════════════════════════════════════════
+  { id: "stacktrace-java", cat: "Error Disclosure", desc: "Java Stack Trace", regex: "at\\s+[a-zA-Z0-9$_.]+\\([A-Za-z0-9_]+\\.java:\\d+\\)", sections: ["resp_body"], severity: "high" },
+  { id: "stacktrace-python", cat: "Error Disclosure", desc: "Python Traceback", regex: "Traceback \\(most recent call last\\)", sections: ["resp_body"], severity: "high" },
+  { id: "stacktrace-python-file", cat: "Error Disclosure", desc: "Python File Reference", regex: "File \"[^\"]+\\.py\", line \\d+", sections: ["resp_body"], severity: "high" },
+  { id: "stacktrace-dotnet", cat: "Error Disclosure", desc: ".NET Stack Trace", regex: "at\\s+[A-Za-z0-9_.]+\\.[A-Za-z0-9_]+\\([^)]*\\)\\s+in\\s+[A-Za-z]:", sections: ["resp_body"], severity: "high" },
+  { id: "stacktrace-php", cat: "Error Disclosure", desc: "PHP Error/Stack Trace", regex: "(?:Fatal error|Warning|Notice|Parse error):.+in\\s+/[^\\s]+\\.php(?:\\s+on line\\s+\\d+)?", sections: ["resp_body"], severity: "high" },
+  { id: "stacktrace-ruby", cat: "Error Disclosure", desc: "Ruby Stack Trace", regex: "/[^\\s]+\\.rb:\\d+:in\\s+`", sections: ["resp_body"], severity: "high" },
+  { id: "stacktrace-node", cat: "Error Disclosure", desc: "Node.js Stack Trace", regex: "at\\s+(?:Object\\.|Module\\.|Function\\.)?[\\w.]+\\s+\\(/[^)]+\\.js:\\d+:\\d+\\)", sections: ["resp_body"], severity: "high" },
+  { id: "stacktrace-go", cat: "Error Disclosure", desc: "Go Panic/Stack", regex: "goroutine\\s+\\d+\\s+\\[", sections: ["resp_body"], severity: "high" },
+  { id: "sql-error", cat: "Error Disclosure", desc: "SQL Error Message", regex: "(?:ORA-\\d{4,5}|mysql_fetch|pg_query|SQLite3::|SQLSTATE\\[|Unclosed quotation mark|syntax error.{0,30}SQL|You have an error in your SQL syntax)", sections: ["resp_body"], severity: "high" },
+  { id: "asp-error", cat: "Error Disclosure", desc: "ASP.NET Error", regex: "(?:Server Error in|Description: An unhandled exception|Stack Trace:|\\[SqlException|\\[NullReferenceException)", sections: ["resp_body"], severity: "high" },
+  { id: "debug-page", cat: "Error Disclosure", desc: "Debug/Error Page", regex: "(?:DJANGO DEBUG|Debug Mode|Whoops!|Symfony\\s+Exception|Laravel)", sections: ["resp_body"], severity: "high" },
+  { id: "verbose-error-msg", cat: "Error Disclosure", desc: "Verbose Error Message", regex: "(?:Exception in thread|caused by:|root cause:|internal server error.{0,40}stack)", sections: ["resp_body"], severity: "medium" },
+
+  // ═══════════════════════════════════════════════════════════════
+  //  Passive Scanner — Security Headers & CORS
+  // ═══════════════════════════════════════════════════════════════
+  { id: "cors-wildcard", cat: "Security Misconfiguration", desc: "CORS Wildcard Origin", regex: "access-control-allow-origin:\\s*\\*", sections: ["resp_headers"], severity: "medium" },
+  { id: "cors-credentials-wild", cat: "Security Misconfiguration", desc: "CORS Credentials with Wildcard", regex: "access-control-allow-credentials:\\s*true", sections: ["resp_headers"], severity: "high" },
+  { id: "x-debug-header", cat: "Security Misconfiguration", desc: "Debug Header Exposed", regex: "x-debug(?:-token)?:", sections: ["resp_headers"], severity: "medium" },
+  { id: "x-powered-by", cat: "Information Disclosure", desc: "X-Powered-By Header", regex: "x-powered-by:", sections: ["resp_headers"], severity: "low" },
+  { id: "server-version", cat: "Information Disclosure", desc: "Server Version Disclosure", regex: "server:\\s*(?:apache|nginx|iis|tomcat|jetty|gunicorn|openresty)/[\\d.]+", sections: ["resp_headers"], severity: "low" },
+  { id: "x-aspnet-version", cat: "Information Disclosure", desc: "ASP.NET Version Header", regex: "x-aspnet-version:", sections: ["resp_headers"], severity: "medium" },
+  { id: "x-runtime", cat: "Information Disclosure", desc: "X-Runtime Header (timing)", regex: "x-runtime:", sections: ["resp_headers"], severity: "low" },
+
+  // ═══════════════════════════════════════════════════════════════
+  //  Passive Scanner — Open Redirect & Injection Indicators
+  // ═══════════════════════════════════════════════════════════════
+  { id: "open-redirect-param", cat: "Open Redirect", desc: "Redirect Parameter in URL", regex: "[?&](?:redirect|return|next|url|dest|destination|rurl|redir|forward|goto|target|link|continue|returnUrl|returnTo|redirect_uri|callback|out)=https?://", sections: ["req_url"], severity: "medium" },
+  { id: "location-redirect", cat: "Open Redirect", desc: "Location Header Redirect", regex: "location:\\s*https?://(?!(?:localhost|127\\.0\\.0\\.1))", sections: ["resp_headers"], severity: "low" },
+  { id: "html-form-action-ext", cat: "Open Redirect", desc: "Form Action to External URL", regex: "action\\s*=\\s*[\"']https?://", sections: ["resp_body"], severity: "low" },
+
+  // ═══════════════════════════════════════════════════════════════
+  //  Passive Scanner — Information Disclosure
+  // ═══════════════════════════════════════════════════════════════
+  { id: "dir-listing", cat: "Information Disclosure", desc: "Directory Listing", regex: "(?:Index of /|\\[To Parent Directory\\]|<title>Directory listing for)", sections: ["resp_body"], severity: "high" },
+  { id: "source-map-ref", cat: "Information Disclosure", desc: "Source Map Reference", regex: "//[#@]\\s*sourceMappingURL=", sections: ["resp_body"], severity: "low" },
+  { id: "html-comment-todo", cat: "Information Disclosure", desc: "HTML Comment (TODO/FIXME/HACK/BUG)", regex: "<!--[^>]*(?:TODO|FIXME|HACK|BUG|XXX|TEMP|DEBUG)[^>]*-->", sections: ["resp_body"], severity: "low" },
+  { id: "html-comment-creds", cat: "Information Disclosure", desc: "HTML Comment with Credentials Hint", regex: "<!--[^>]*(?:password|passwd|secret|credential|api.?key|token)[^>]*-->", sections: ["resp_body"], severity: "medium" },
+  { id: "phpinfo-page", cat: "Information Disclosure", desc: "phpinfo() Page", regex: "<title>phpinfo\\(\\)</title>", sections: ["resp_body"], severity: "critical" },
+  { id: "wp-config-exposed", cat: "Information Disclosure", desc: "WordPress Config Exposed", regex: "define\\s*\\(\\s*['\"]DB_PASSWORD['\"]", sections: ["resp_body"], severity: "critical" },
+  { id: "git-config-exposed", cat: "Information Disclosure", desc: ".git/config Exposed", regex: "\\[core\\]\\s*\\n\\s*repositoryformatversion", sections: ["resp_body"], severity: "critical" },
+  { id: "env-file-exposed", cat: "Information Disclosure", desc: ".env File Exposed", regex: "(?:DB_PASSWORD|APP_KEY|SECRET_KEY|API_SECRET)\\s*=\\s*\\S+", sections: ["resp_body"], severity: "critical" },
+
+  // ═══════════════════════════════════════════════════════════════
+  //  Passive Scanner — PII & Sensitive Data
+  // ═══════════════════════════════════════════════════════════════
+  { id: "ssn-us", cat: "PII", desc: "US Social Security Number", regex: "\\b\\d{3}-\\d{2}-\\d{4}\\b", sections: ["resp_body"], severity: "critical" },
+  { id: "credit-card-visa", cat: "PII", desc: "Credit Card (Visa)", regex: "\\b4\\d{3}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b", sections: ["resp_body"], severity: "critical" },
+  { id: "credit-card-mc", cat: "PII", desc: "Credit Card (Mastercard)", regex: "\\b5[1-5]\\d{2}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b", sections: ["resp_body"], severity: "critical" },
+  { id: "credit-card-amex", cat: "PII", desc: "Credit Card (Amex)", regex: "\\b3[47]\\d{2}[\\s-]?\\d{6}[\\s-]?\\d{5}\\b", sections: ["resp_body"], severity: "critical" },
+  { id: "phone-intl", cat: "PII", desc: "Phone Number (International)", regex: "\\+\\d{1,3}[\\s.-]?\\(?\\d{2,4}\\)?[\\s.-]?\\d{3,4}[\\s.-]?\\d{3,4}", sections: ["resp_body"], severity: "medium" },
+  { id: "jwt-in-response", cat: "PII", desc: "JWT Token in Response", regex: "eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}", sections: ["resp_body"], severity: "high" },
+  { id: "bcrypt-hash", cat: "PII", desc: "Bcrypt Hash", regex: "\\$2[aby]?\\$\\d{2}\\$[./A-Za-z0-9]{53}", sections: ["resp_body"], severity: "high" },
+  { id: "md5-hash-context", cat: "PII", desc: "MD5 Hash in Context", regex: "(?:password|hash|digest|md5)[\"':=\\s]+[a-f0-9]{32}(?![a-f0-9])", sections: ["resp_body"], severity: "medium" },
 ];

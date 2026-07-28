@@ -3686,6 +3686,251 @@ async function applySessionData(data) {
   sessionStatus(`Loaded — ${historyData.length} history, ${repTabs.length} repeater tabs`);
 }
 
+// ═══════════════════════════ COMPARER ════════════════════════════════════
+
+let cmpLeft = null;   // { method, url, host, path, headers, body, status, statusText, respHeaders, respBody }
+let cmpRight = null;
+
+function cmpEntryToText(entry, section) {
+  if (!entry) return "";
+  if (section === "req") {
+    let text = `${entry.method} ${entry.path || "/"} HTTP/1.1\nHost: ${entry.host}\n`;
+    text += Object.entries(entry.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+    if (entry.body) text += "\n\n" + entry.body;
+    return text;
+  } else {
+    let text = entry.status ? `HTTP/1.1 ${entry.status} ${entry.statusText || ""}\n` : "(no response)\n";
+    text += Object.entries(entry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+    const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
+    text += "\n\n" + tryPretty(entry.respBody || "(empty)", ct);
+    return text;
+  }
+}
+
+function cmpSendTo(side, entry) {
+  const data = {
+    method: entry.method || "GET",
+    url: entry.url || "",
+    host: entry.host || "",
+    path: entry.path || "",
+    headers: entry.headers || {},
+    body: entry.body || "",
+    status: entry.status || null,
+    statusText: entry.statusText || "",
+    respHeaders: entry.respHeaders || {},
+    respBody: entry.respBody || "",
+  };
+  if (!data.host || !data.path) {
+    try { const u = new URL(data.url); data.host = u.host; data.path = u.pathname + u.search; } catch {}
+  }
+  if (side === "left") cmpLeft = data; else cmpRight = data;
+  cmpRenderSide(side);
+  showTab("comparer");
+}
+
+function cmpRenderSide(side) {
+  const entry = side === "left" ? cmpLeft : cmpRight;
+  const titleEl = document.getElementById(`cmp-${side}-title`);
+  const reqPre = document.getElementById(`cmp-${side}-req-pre`);
+  const respPre = document.getElementById(`cmp-${side}-resp-pre`);
+
+  if (!entry) {
+    titleEl.textContent = `(empty — send a request here with → Cmp ${side === "left" ? "L" : "R"})`;
+    reqPre.textContent = "";
+    respPre.textContent = "";
+    return;
+  }
+
+  titleEl.textContent = `${entry.status || "…"} ${entry.method} ${entry.url}`;
+  reqPre.textContent = cmpEntryToText(entry, "req");
+  respPre.textContent = cmpEntryToText(entry, "resp");
+}
+
+function cmpDoDiff() {
+  if (!cmpLeft || !cmpRight) {
+    document.getElementById("cmp-status").textContent = "Need both Left and Right to diff";
+    setTimeout(() => { document.getElementById("cmp-status").textContent = ""; }, 2000);
+    return;
+  }
+
+  const ignoreCase = document.getElementById("cmp-ignore-case").checked;
+  const ignoreHdrOrder = document.getElementById("cmp-ignore-headers").checked;
+
+  // Diff both request and response
+  const activeLeft = document.querySelector("#cmp-left .cmp-sub-tabs .sub-tab.active");
+  const activeRight = document.querySelector("#cmp-right .cmp-sub-tabs .sub-tab.active");
+  const section = activeLeft?.dataset.cmppane?.includes("resp") ? "resp" : "req";
+
+  // Sync both sides to same view
+  cmpSwitchPane("left", section);
+  cmpSwitchPane("right", section);
+
+  let leftText = cmpEntryToText(cmpLeft, section);
+  let rightText = cmpEntryToText(cmpRight, section);
+
+  if (ignoreHdrOrder) {
+    leftText = cmpSortHeaders(leftText);
+    rightText = cmpSortHeaders(rightText);
+  }
+
+  const leftLines = leftText.split("\n");
+  const rightLines = rightText.split("\n");
+
+  const diff = cmpLineDiff(leftLines, rightLines, ignoreCase);
+
+  document.getElementById(`cmp-left-${section}-pre`).replaceChildren();
+  document.getElementById(`cmp-right-${section}-pre`).replaceChildren();
+
+  cmpRenderDiff(document.getElementById(`cmp-left-${section}-pre`), diff.left);
+  cmpRenderDiff(document.getElementById(`cmp-right-${section}-pre`), diff.right);
+
+  const changes = diff.left.filter(d => d.type !== "same").length + diff.right.filter(d => d.type !== "same").length;
+  document.getElementById("cmp-status").textContent = changes === 0 ? "Identical" : `${changes} differences`;
+  setTimeout(() => { document.getElementById("cmp-status").textContent = ""; }, 4000);
+}
+
+function cmpSortHeaders(text) {
+  const parts = text.split("\n\n");
+  if (parts.length < 2) {
+    // Sort all lines after the first (request/status line)
+    const lines = text.split("\n");
+    const first = lines.shift();
+    lines.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    return [first, ...lines].join("\n");
+  }
+  // Sort header block, keep body as-is
+  const headerBlock = parts[0].split("\n");
+  const first = headerBlock.shift();
+  headerBlock.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  return [first, ...headerBlock].join("\n") + "\n\n" + parts.slice(1).join("\n\n");
+}
+
+function cmpLineDiff(leftLines, rightLines, ignoreCase) {
+  // LCS-based diff
+  const norm = ignoreCase ? s => s.toLowerCase() : s => s;
+  const m = leftLines.length, n = rightLines.length;
+
+  // Build LCS table (optimize: limit to reasonable size)
+  const maxLines = 2000;
+  const lL = leftLines.slice(0, maxLines);
+  const rL = rightLines.slice(0, maxLines);
+  const ml = lL.length, nl = rL.length;
+
+  // Use simple O(mn) LCS for reasonable sizes, else fall back to line-by-line
+  if (ml * nl > 4000000) {
+    return cmpSimpleDiff(leftLines, rightLines, ignoreCase);
+  }
+
+  const dp = Array.from({ length: ml + 1 }, () => new Uint16Array(nl + 1));
+  for (let i = 1; i <= ml; i++) {
+    for (let j = 1; j <= nl; j++) {
+      dp[i][j] = norm(lL[i - 1]) === norm(rL[j - 1]) ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+
+  // Backtrack
+  const left = [], right = [];
+  let i = ml, j = nl;
+  const pairs = [];
+  while (i > 0 && j > 0) {
+    if (norm(lL[i - 1]) === norm(rL[j - 1])) {
+      pairs.unshift({ li: i - 1, ri: j - 1, type: "same" });
+      i--; j--;
+    } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+      pairs.unshift({ li: i - 1, ri: -1, type: "del" });
+      i--;
+    } else {
+      pairs.unshift({ li: -1, ri: j - 1, type: "add" });
+      j--;
+    }
+  }
+  while (i > 0) { pairs.unshift({ li: i - 1, ri: -1, type: "del" }); i--; }
+  while (j > 0) { pairs.unshift({ li: -1, ri: j - 1, type: "add" }); j--; }
+
+  for (const p of pairs) {
+    if (p.type === "same") {
+      left.push({ text: lL[p.li], type: "same", num: p.li + 1 });
+      right.push({ text: rL[p.ri], type: "same", num: p.ri + 1 });
+    } else if (p.type === "del") {
+      left.push({ text: lL[p.li], type: "del", num: p.li + 1 });
+      right.push({ text: "", type: "pad", num: "" });
+    } else {
+      left.push({ text: "", type: "pad", num: "" });
+      right.push({ text: rL[p.ri], type: "add", num: p.ri + 1 });
+    }
+  }
+
+  return { left, right };
+}
+
+function cmpSimpleDiff(leftLines, rightLines, ignoreCase) {
+  const norm = ignoreCase ? s => s.toLowerCase() : s => s;
+  const maxLen = Math.max(leftLines.length, rightLines.length);
+  const left = [], right = [];
+  for (let i = 0; i < maxLen; i++) {
+    const l = i < leftLines.length ? leftLines[i] : null;
+    const r = i < rightLines.length ? rightLines[i] : null;
+    if (l !== null && r !== null) {
+      const same = norm(l) === norm(r);
+      left.push({ text: l, type: same ? "same" : "chg", num: i + 1 });
+      right.push({ text: r, type: same ? "same" : "chg", num: i + 1 });
+    } else if (l !== null) {
+      left.push({ text: l, type: "del", num: i + 1 });
+      right.push({ text: "", type: "pad", num: "" });
+    } else {
+      left.push({ text: "", type: "pad", num: "" });
+      right.push({ text: r, type: "add", num: i + 1 });
+    }
+  }
+  return { left, right };
+}
+
+function cmpRenderDiff(pre, lines) {
+  const frag = document.createDocumentFragment();
+  for (const line of lines) {
+    const div = document.createElement("div");
+    if (line.type === "del") div.className = "cmp-line-del";
+    else if (line.type === "add") div.className = "cmp-line-add";
+    else if (line.type === "chg") div.className = "cmp-line-chg";
+    else if (line.type === "pad") { div.textContent = "\u00A0"; frag.appendChild(div); continue; }
+
+    const numSpan = document.createElement("span");
+    numSpan.className = "cmp-line-num";
+    numSpan.textContent = line.num || "";
+    div.appendChild(numSpan);
+    div.appendChild(document.createTextNode(line.text));
+    frag.appendChild(div);
+  }
+  pre.appendChild(frag);
+}
+
+function cmpSwitchPane(side, section) {
+  const container = document.getElementById(`cmp-${side}`);
+  container.querySelectorAll(".cmp-sub-tabs .sub-tab").forEach(t => {
+    const paneSection = t.dataset.cmppane.includes("resp") ? "resp" : "req";
+    t.classList.toggle("active", paneSection === section);
+  });
+  container.querySelectorAll(".cmp-pane").forEach(p => {
+    const isTarget = p.id === `cmp-${side}-${section}-pane`;
+    p.classList.toggle("active", isTarget);
+    p.classList.toggle("hidden", !isTarget);
+  });
+}
+
+function cmpSwap() {
+  const tmp = cmpLeft;
+  cmpLeft = cmpRight;
+  cmpRight = tmp;
+  cmpRenderSide("left");
+  cmpRenderSide("right");
+}
+
+function cmpClear() {
+  cmpLeft = null; cmpRight = null;
+  cmpRenderSide("left");
+  cmpRenderSide("right");
+}
+
 // ═══════════════════════════ INIT ════════════════════════════════════════════
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -4593,6 +4838,71 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   }); // end initBlock("probe")
+
+  // ── Comparer ──────────────────────────────────────────────────────────────
+  initBlock("comparer", () => {
+    document.getElementById("cmp-diff").addEventListener("click", cmpDoDiff);
+    document.getElementById("cmp-swap").addEventListener("click", cmpSwap);
+    document.getElementById("cmp-clear").addEventListener("click", cmpClear);
+
+    // Sub-tab switching (left/right × req/resp)
+    document.querySelectorAll(".cmp-sub-tabs .sub-tab[data-cmppane]").forEach(t => {
+      t.addEventListener("click", () => {
+        const pane = t.dataset.cmppane;
+        const side = pane.startsWith("left") ? "left" : "right";
+        const section = pane.includes("resp") ? "resp" : "req";
+        cmpSwitchPane(side, section);
+      });
+    });
+
+    // Resizer
+    (function() {
+      const handle = document.getElementById("cmp-resizer");
+      const left = document.getElementById("cmp-left");
+      let dragging = false, startX = 0, startW = 0;
+      handle.addEventListener("mousedown", e => {
+        dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width;
+        document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
+      });
+      document.addEventListener("mousemove", e => {
+        if (!dragging) return;
+        left.style.flex = "none";
+        left.style.width = Math.max(200, startW + e.clientX - startX) + "px";
+      });
+      document.addEventListener("mouseup", () => {
+        if (!dragging) return;
+        dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
+      });
+    })();
+
+    // "→ Cmp L/R" buttons from History detail
+    document.getElementById("hist-detail-cmp-l").addEventListener("click", () => { if (histDetailEntry) cmpSendTo("left", histDetailEntry); });
+    document.getElementById("hist-detail-cmp-r").addEventListener("click", () => { if (histDetailEntry) cmpSendTo("right", histDetailEntry); });
+
+    // "→ Cmp L/R" from Logger detail
+    document.getElementById("log-detail-cmp-l").addEventListener("click", () => { if (logDetailEntry) cmpSendTo("left", logDetailEntry); });
+    document.getElementById("log-detail-cmp-r").addEventListener("click", () => { if (logDetailEntry) cmpSendTo("right", logDetailEntry); });
+
+    // "→ Cmp L/R" from Sensitive detail
+    document.getElementById("sens-detail-cmp-l").addEventListener("click", () => { if (sensDetailEntry) cmpSendTo("left", sensDetailEntry); });
+    document.getElementById("sens-detail-cmp-r").addEventListener("click", () => { if (sensDetailEntry) cmpSendTo("right", sensDetailEntry); });
+
+    // "→ Cmp L/R" from Target detail
+    document.getElementById("tgt-detail-cmp-l").addEventListener("click", () => { if (tgtDetailEntry) cmpSendTo("left", tgtDetailEntry); });
+    document.getElementById("tgt-detail-cmp-r").addEventListener("click", () => { if (tgtDetailEntry) cmpSendTo("right", tgtDetailEntry); });
+
+    // "→ Cmp L/R" from Endpoint detail
+    document.getElementById("ep-detail-cmp-l").addEventListener("click", () => {
+      if (!epDetailEntry) return;
+      const h = historyData.find(he => he.url === epDetailEntry.url) || epDetailEntry;
+      cmpSendTo("left", h);
+    });
+    document.getElementById("ep-detail-cmp-r").addEventListener("click", () => {
+      if (!epDetailEntry) return;
+      const h = historyData.find(he => he.url === epDetailEntry.url) || epDetailEntry;
+      cmpSendTo("right", h);
+    });
+  });
 
   // Boot
   loadSettings().then(() => {
