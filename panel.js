@@ -94,6 +94,7 @@ function stopAllTimers() {
   clearInterval(histTimer);   histTimer = null;
   clearInterval(bgSyncTimer); bgSyncTimer = null;
   clearInterval(logSyncTimer); logSyncTimer = null;
+  if (logSyncWs) { logSyncWs.close(); logSyncWs = null; }
 }
 
 async function bg(msg, retries = 3) {
@@ -132,7 +133,7 @@ function showTab(name) {
   });
   if (name === "intercept") startPoll(); else stopPoll();
   if (name === "history") startHistPoll(); else stopHistPoll();
-  if (name === "logger") { logSyncLocal(); logSyncRemote(); logRender(); startLogSync(); } else stopLogSync();
+  if (name === "logger") { logSyncLocal(); logRender(); startLogSync(); } else stopLogSync();
   if (name === "target") { pollHistory().then(() => renderSiteMap()); renderEndpoints(); }
   if (name === "probe" && probeInjected) probeStartPoll(); else probeStopPoll();
 }
@@ -444,15 +445,17 @@ function logImportFile(file) {
     const imported = data.history || [];
     if (!imported.length) return;
     const name = data.name || file.name.replace(/\.json$/, "");
+    // Dedup against existing entries
+    const existing = new Set(logEntries.map(e => e._logStableKey).filter(Boolean));
+    let added = 0;
     for (const e of imported) {
-      logEntries.push({ ...e, _logId: logNextId++, _logSource: "container", _logLabel: name });
+      const key = `${e.time || 0}_${e.method}_${e.url}_${name}`;
+      if (existing.has(key)) continue;
+      logEntries.push({ ...e, _logId: logNextId++, _logSource: "container", _logLabel: name, _logStableKey: key });
+      existing.add(key);
+      added++;
     }
-    // Also add this source to the filter dropdown
-    const sel = document.getElementById("log-flt-source");
-    if (![...sel.options].some(o => o.value === name)) {
-      const o = el("option"); o.value = name; o.textContent = name;
-      sel.appendChild(o);
-    }
+    logAddSourceOption(name);
   });
 }
 
@@ -612,24 +615,86 @@ function logCloseDetail() {
 
 function startLogSync() {
   if (logSyncTimer) return;
-  logSyncTimer = setInterval(() => { logSyncLocal(); logSyncRemote(); logRender(); }, 3000);
+  logSyncTimer = setInterval(() => { logSyncLocal(); logPushToSync(); logRender(); }, 3000);
 }
 function stopLogSync() { clearInterval(logSyncTimer); logSyncTimer = null; }
 
-async function logSyncRemote() {
-  const res = await sendMsg({ type: "SYNC_GET_REMOTE" });
-  if (!res?.entries?.length) return;
+// ── WebSocket sync client (runs in panel — stays alive while DevTools is open) ──
+let logSyncWs = null;
+let logSyncName = "main";
+let logSyncLastPush = 0;
+
+function logSyncConnect() {
+  if (logSyncWs && logSyncWs.readyState <= 1) return; // already connected/connecting
+  try {
+    logSyncWs = new WebSocket("ws://localhost:17580");
+    logSyncWs.onopen = () => {
+      chrome.storage.local.get("voidContainerName", r => {
+        logSyncName = r.voidContainerName || "main";
+        logSyncWs.send(JSON.stringify({ type: "register", name: logSyncName }));
+        logPushToSync(); // push our history immediately
+      });
+      logSyncUpdateUI(true);
+    };
+    logSyncWs.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "init" || msg.type === "update") {
+          logMergeRemoteEntries(msg.entries || [], msg.from);
+          logRender();
+        }
+      } catch {}
+    };
+    logSyncWs.onclose = () => { logSyncWs = null; logSyncUpdateUI(false); };
+    logSyncWs.onerror = () => { logSyncWs = null; logSyncUpdateUI(false); };
+  } catch { logSyncWs = null; logSyncUpdateUI(false); }
+}
+
+function logSyncDisconnect() {
+  if (logSyncWs) { logSyncWs.close(); logSyncWs = null; }
+  logSyncUpdateUI(false);
+}
+
+function logSyncUpdateUI(connected) {
+  const dot = document.getElementById("log-sync-dot");
+  const label = document.getElementById("log-sync-label");
+  const btn = document.getElementById("log-sync");
+  if (!dot || !label) return;
+  dot.className = connected ? "dot dot-intercepting" : "dot dot-off";
+  label.textContent = connected ? "Connected" : "Disconnected";
+  if (btn) btn.textContent = connected ? "Disconnect" : "Sync";
+}
+
+function logPushToSync() {
+  if (!logSyncWs || logSyncWs.readyState !== 1) return;
+  // Push local history (proxy + repeater) to sync server
+  const localEntries = logEntries.filter(e => e._logSource === "local" || e._logSource === "repeater");
+  if (localEntries.length === logSyncLastPush) return; // no change
+  logSyncLastPush = localEntries.length;
+  logSyncWs.send(JSON.stringify({ type: "history", entries: localEntries }));
+}
+
+function logMergeRemoteEntries(entries, fromLabel) {
   const existing = new Set(logEntries.filter(e => e._logSource === "container").map(e => e._logStableKey));
-  for (const e of res.entries) {
-    const key = `${e.time || 0}_${e.method}_${e.url}_${e._logLabel}`;
+  for (const e of entries) {
+    const key = `${e.time || 0}_${e.method}_${e.url}_${e._logLabel || fromLabel || ""}`;
     if (existing.has(key)) continue;
-    logEntries.push({ ...e, _logId: logNextId++, _logStableKey: key });
+    // Ensure container source metadata
+    const entry = { ...e, _logId: logNextId++, _logSource: e._logSource || "container", _logLabel: e._logLabel || fromLabel || "container", _logStableKey: key };
+    logEntries.push(entry);
     existing.add(key);
-    const sel = document.getElementById("log-flt-source");
-    const label = e._logLabel || "container";
-    if (![...sel.options].some(o => o.value === label)) {
-      const o = el("option"); o.value = label; o.textContent = label; sel.appendChild(o);
-    }
+    // Add source label to filter dropdown
+    logAddSourceOption(entry._logLabel);
+  }
+}
+
+function logAddSourceOption(label) {
+  if (!label) return;
+  const sel = document.getElementById("log-flt-source");
+  if (!sel) return;
+  if (![...sel.options].some(o => o.value === label)) {
+    const o = el("option"); o.value = label; o.textContent = label;
+    sel.appendChild(o);
   }
 }
 
@@ -4568,33 +4633,13 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("log-flt-status").addEventListener("change", e => { logFilterStat = e.target.value; logRender(); });
     document.getElementById("log-flt-source").addEventListener("change", e => { logFilterSource = e.target.value; logRender(); });
     document.getElementById("log-scope-only").addEventListener("change", e => { logScopeOnly = e.target.checked; logRender(); });
-    // Sync Containers: pull remote entries from WebSocket sync server
-    document.getElementById("log-sync").addEventListener("click", async () => {
-      const res = await bg({ type: "SYNC_GET_REMOTE" });
-      if (!res) return;
-      if (!res.connected) {
-        alert("Sync server not running.\n\nStart it with:\n  node void-sync-server.js\n\nThen register each container in Containers → Container ID → Register");
-        return;
+    // Sync toggle: connect/disconnect WebSocket to sync server
+    document.getElementById("log-sync").addEventListener("click", () => {
+      if (logSyncWs && logSyncWs.readyState <= 1) {
+        logSyncDisconnect();
+      } else {
+        logSyncConnect();
       }
-      // Merge remote entries into logger
-      const existing = new Set(logEntries.filter(e => e._logSource === "container").map(e => e._logStableKey));
-      let added = 0;
-      for (const e of (res.entries || [])) {
-        const key = `${e.time || 0}_${e.method}_${e.url}_${e._logLabel}`;
-        if (existing.has(key)) continue;
-        logEntries.push({ ...e, _logId: logNextId++, _logStableKey: key });
-        existing.add(key);
-        added++;
-        // Add source to filter dropdown
-        const sel = document.getElementById("log-flt-source");
-        const label = e._logLabel || "container";
-        if (![...sel.options].some(o => o.value === label)) {
-          const o = el("option"); o.value = label; o.textContent = label;
-          sel.appendChild(o);
-        }
-      }
-      logRender();
-      setBadge("bdg-logger", logEntries.length);
     });
     document.getElementById("log-merge").addEventListener("click", () => document.getElementById("log-merge-file").click());
     document.getElementById("log-merge-file").addEventListener("change", async e => {

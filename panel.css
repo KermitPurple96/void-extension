@@ -1980,6 +1980,13 @@ body {
 .probe-color-accent { color: var(--accent); }
 .probe-nearby-row { padding: 2px 0; }
 
+/* ── Logger sync status ─────────────────────────────────────────────────── */
+.log-sync-status {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; color: var(--dim); padding: 0 4px;
+}
+.log-sync-status .dot { width: 7px; height: 7px; }
+
 /* ═══════════════════════════ COMPARER ════════════════════════════════════ */
 .cmp-toolbar {
   display: flex; align-items: center; gap: 8px;

@@ -795,7 +795,8 @@
         <option value="repeater">Repeater</option>
       </select>
       <label class="rep-autocookie"><input type="checkbox" id="log-scope-only"> In-scope</label>
-      <button id="log-sync" class="btn btn-sm btn-accent" title="Sync history from container windows (reads ~/Downloads/void-sync/)">Sync Containers</button>
+      <span class="log-sync-status" id="log-sync-status"><span class="dot dot-off" id="log-sync-dot"></span> <span id="log-sync-label">Disconnected</span></span>
+      <button id="log-sync" class="btn btn-sm btn-accent" title="Connect to sync server (node void-sync-server.js)">Sync</button>
       <button id="log-merge" class="btn btn-sm btn-ghost">+ Import</button>
       <input type="file" id="log-merge-file" accept=".json" hidden multiple>
       <button id="log-export" class="btn btn-sm btn-ghost">Export</button>

@@ -11,6 +11,7 @@
     "scripting",
     "alarms",
     "cookies",
+    "downloads",
     "unlimitedStorage"
   ],
   "host_permissions": ["<all_urls>"],

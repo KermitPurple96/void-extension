@@ -5,55 +5,8 @@
 chrome.alarms.create("keepAlive", { periodInMinutes: 0.4 });
 chrome.alarms.onAlarm.addListener(() => {}); // keepAlive
 
-// ── WebSocket sync with other Void instances (containers) ────────────────────
-let syncWs = null;
-let syncName = "main";
-let syncRemoteEntries = []; // entries received from other instances
-let syncLastSentCount = 0;
-
-function syncConnect() {
-  if (syncWs && syncWs.readyState <= 1) return; // already connected/connecting
-  try {
-    syncWs = new WebSocket("ws://localhost:17580");
-    syncWs.onopen = () => {
-      chrome.storage.local.get("voidContainerName", r => {
-        syncName = r.voidContainerName || "main";
-        syncWs.send(JSON.stringify({ type: "register", name: syncName }));
-        syncPushHistory(); // send our history immediately
-      });
-    };
-    syncWs.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === "init" || msg.type === "update") {
-          // Received entries from other instances
-          const entries = msg.entries || [];
-          if (msg.type === "init") syncRemoteEntries = entries;
-          else {
-            // Merge — remove old entries from this sender, add new
-            syncRemoteEntries = syncRemoteEntries.filter(e => e._logLabel !== msg.from);
-            syncRemoteEntries = syncRemoteEntries.concat(entries);
-          }
-        }
-      } catch {}
-    };
-    syncWs.onclose = () => { syncWs = null; };
-    syncWs.onerror = () => { syncWs = null; };
-  } catch { syncWs = null; }
-}
-
-function syncPushHistory() {
-  if (!syncWs || syncWs.readyState !== 1) return;
-  let allHistory = [];
-  for (const [, t] of tabs) allHistory = allHistory.concat(t.history);
-  if (allHistory.length === syncLastSentCount) return; // no change
-  syncLastSentCount = allHistory.length;
-  syncWs.send(JSON.stringify({ type: "history", entries: allHistory }));
-}
-
-// Try to connect on startup, retry periodically
-syncConnect();
-setInterval(() => { syncConnect(); syncPushHistory(); }, 5000);
+// ── WebSocket sync moved to panel.js (panel stays alive while DevTools is open) ─
+// The service worker is too short-lived for WebSocket connections in MV3.
 
 // ── Settings (shared across tabs) ────────────────────────────────────────────
 let voidSettings = {
@@ -485,7 +438,7 @@ const ALLOWED = new Set([
   "FORWARD","DROP","SEND_REQUEST",
   "GET_DATA","GET_INTERCEPTED","GET_HISTORY","CLEAR_HISTORY","REPORT","CLEAR",
   "RESTORE_HISTORY","RESTORE_ENDPOINTS",
-  "CNT_LAUNCH","CNT_AUTO_EXPORT","GET_EXT_PATH","SYNC_GET_REMOTE",
+  "CNT_LAUNCH","CNT_AUTO_EXPORT","GET_EXT_PATH",
   "LOOKUP","CRAWL_START","CRAWL_STOP","UPDATE_SETTINGS","GET_COOKIES",
   "PROBE_INJECT","PROBE_CMD","PROBE_STATUS","PROBE_FINDINGS",
 ]);
@@ -769,11 +722,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     // ── Containers (launch isolated Chrome instance) ────────────────────
-    case "SYNC_GET_REMOTE": {
-      sendResponse({ entries: syncRemoteEntries, connected: !!(syncWs && syncWs.readyState === 1) });
-      break;
-    }
-
     case "CNT_LAUNCH": {
       sendResponse({ ok: false, reason: "no-native" });
       break;
