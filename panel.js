@@ -133,7 +133,7 @@ function showTab(name) {
   });
   if (name === "intercept") startPoll(); else stopPoll();
   if (name === "history") startHistPoll(); else stopHistPoll();
-  if (name === "logger") { logSyncLocal(); logRender(); startLogSync(); } else stopLogSync();
+  if (name === "logger") { logSyncLocal(); logRender(); startLogSync(); logSyncConnect(); } else stopLogSync();
   if (name === "target") { pollHistory().then(() => renderSiteMap()); renderEndpoints(); }
   if (name === "probe" && probeInjected) probeStartPoll(); else probeStopPoll();
 }
@@ -615,7 +615,13 @@ function logCloseDetail() {
 
 function startLogSync() {
   if (logSyncTimer) return;
-  logSyncTimer = setInterval(() => { logSyncLocal(); logPushToSync(); logRender(); }, 3000);
+  logSyncTimer = setInterval(() => {
+    logSyncLocal();
+    logPushToSync();
+    logRender();
+    // Auto-reconnect if WS dropped while Logger is active
+    if (!logSyncWs || logSyncWs.readyState > 1) logSyncConnect();
+  }, 3000);
 }
 function stopLogSync() { clearInterval(logSyncTimer); logSyncTimer = null; }
 
@@ -3000,12 +3006,20 @@ function renderContainers() {
     launchBtn.title = "Open isolated Chrome instance";
     launchBtn.addEventListener("click", () => cntLaunch(cnt));
 
-    const copyBtn = txt("button", "btn btn-xs btn-ghost", "Copy Cmd");
-    copyBtn.title = "Copy launch command to clipboard";
-    copyBtn.addEventListener("click", () => {
-      navigator.clipboard.writeText(cntBuildCmd(cnt)).then(() => {
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => { copyBtn.textContent = "Copy Cmd"; }, 1500);
+    const copyWinBtn = txt("button", "btn btn-xs btn-ghost", "Win");
+    copyWinBtn.title = "Copy PowerShell launch command";
+    copyWinBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(cntBuildCmd(cnt, "win")).then(() => {
+        copyWinBtn.textContent = "Copied!";
+        setTimeout(() => { copyWinBtn.textContent = "Win"; }, 1500);
+      });
+    });
+    const copyLinBtn = txt("button", "btn btn-xs btn-ghost", "Linux");
+    copyLinBtn.title = "Copy Bash launch command";
+    copyLinBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(cntBuildCmd(cnt, "linux")).then(() => {
+        copyLinBtn.textContent = "Copied!";
+        setTimeout(() => { copyLinBtn.textContent = "Linux"; }, 1500);
       });
     });
 
@@ -3019,7 +3033,7 @@ function renderContainers() {
       renderContainers();
     });
 
-    ap(actions, launchBtn, copyBtn, editBtn, delBtn);
+    ap(actions, launchBtn, copyWinBtn, copyLinBtn, editBtn, delBtn);
     ap(card, icon, info, actions);
     list.appendChild(card);
   });
@@ -3045,12 +3059,12 @@ function cntDetectOS() {
   return "linux";
 }
 
-function cntBuildCmd(cnt) {
+function cntBuildCmd(cnt, os) {
   const safeName = (cnt.name || "container").replace(/[^a-zA-Z0-9_-]/g, "_");
   const url = cnt.startUrl || "about:blank";
   const rgb = CNT_THEME_RGB[cnt.color] || CNT_THEME_RGB.blue;
   const extPath = cntExtPath || "";
-  const os = cntDetectOS();
+  if (!os) os = cntDetectOS();
 
   if (os === "win") {
     // PowerShell command for Windows
@@ -3100,13 +3114,15 @@ function cntBuildCmd(cnt) {
 }
 
 async function cntLaunch(cnt) {
-  const cmd = cntBuildCmd(cnt);
+  const os = cntDetectOS();
+  const cmd = cntBuildCmd(cnt, os);
   navigator.clipboard.writeText(cmd);
 
   const st = document.querySelector(".cnt-info");
+  const shell = os === "win" ? "PowerShell" : "terminal";
   if (st) {
-    st.textContent = `Command copied! Paste in terminal to launch "${cnt.name}"`;
-    setTimeout(() => { st.textContent = "Each container launches an isolated Chrome instance with its own cookies, storage, and cache."; }, 4000);
+    st.textContent = `Command copied! Paste in ${shell} to launch "${cnt.name}"`;
+    setTimeout(() => { st.textContent = "Each container launches an isolated Chrome with its own cookies. Set the extension path once below."; }, 4000);
   }
 }
 

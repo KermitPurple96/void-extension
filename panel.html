@@ -874,9 +874,42 @@
       <button id="cnt-add" class="btn btn-accent">+ New Container</button>
       <span class="cnt-info">Each container launches an isolated Chrome with its own cookies. Set the extension path once below.</span>
     </div>
+
+    <!-- Sync Bridge setup guide -->
+    <div class="cnt-sync-guide">
+      <div class="cnt-sync-guide-title">Sync Bridge — share traffic between containers</div>
+      <div class="cnt-sync-guide-desc">
+        The sync bridge relays HTTP history between all Void instances in real-time.
+        Start it once, then open the <b>Logger</b> tab in each instance — sync connects automatically.
+      </div>
+      <div class="cnt-sync-guide-steps">
+        <div class="cnt-sync-step">
+          <span class="cnt-sync-step-num">1</span>
+          <div>
+            <div class="cnt-sync-step-label">Install dependency (once)</div>
+            <code class="cnt-sync-code">cd <span id="cnt-sync-extpath-hint">C:\tmp\void-extension</span> &amp;&amp; npm install ws</code>
+          </div>
+        </div>
+        <div class="cnt-sync-step">
+          <span class="cnt-sync-step-num">2</span>
+          <div>
+            <div class="cnt-sync-step-label">Start the sync bridge</div>
+            <code class="cnt-sync-code">node void-sync-server.js</code>
+          </div>
+        </div>
+        <div class="cnt-sync-step">
+          <span class="cnt-sync-step-num">3</span>
+          <div>
+            <div class="cnt-sync-step-label">Open Logger tab</div>
+            Sync connects automatically. Green dot = connected. All containers share traffic.
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="cnt-extpath-bar">
       <label class="settings-label-sm">Extension path</label>
-      <input id="cnt-ext-path" type="text" class="settings-inp" placeholder="/home/user/void-extension" spellcheck="false">
+      <input id="cnt-ext-path" type="text" class="settings-inp" placeholder="C:\tmp\void-extension or /home/user/void-extension" spellcheck="false">
       <button id="cnt-ext-path-save" class="btn btn-xs btn-ghost">Save</button>
       <span class="cnt-sep">|</span>
       <label class="settings-label-sm">Container ID</label>
