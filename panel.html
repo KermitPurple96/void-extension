@@ -236,7 +236,16 @@
         <button id="btn-attach" class="btn">Attach Debugger</button>
         <button id="btn-intercept" class="btn" disabled>Intercept: OFF</button>
         <button id="btn-fwd-all"   class="btn btn-ghost" disabled>Forward All</button>
+        <button id="btn-proxy"     class="btn btn-ghost" title="Local proxy for clients outside Chrome (curl, Postman, phone). Click cycles: connect → logging → intercepting → disconnect.">Proxy: connect</button>
       </div>
+    </div>
+
+    <!-- Proxy status / setup hint -->
+    <div id="proxy-bar" class="proxy-bar hidden">
+      <span class="dot" id="proxy-dot"></span>
+      <span id="proxy-label">Proxy disconnected</span>
+      <code id="proxy-hint" class="proxy-hint"></code>
+      <button id="proxy-copy" class="btn btn-xs btn-ghost" title="Copy the curl command">Copy</button>
     </div>
 
     <div id="warn-bar" class="warn-bar hidden">

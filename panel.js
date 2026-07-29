@@ -285,10 +285,11 @@ function renderInterceptList() {
 
   list.replaceChildren();
 
-  if (!intercepted.length) { empty.classList.remove("hidden"); return; }
+  const queue = [...intercepted, ...proxyPending];
+  if (!queue.length) { empty.classList.remove("hidden"); return; }
   empty.classList.add("hidden");
 
-  intercepted.forEach(req => {
+  queue.forEach(req => {
     const row = el("div", "req-row");
     if (editingReq && editingReq.requestId === req.requestId) row.classList.add("hist-selected");
     ap(row,
@@ -296,6 +297,8 @@ function renderInterceptList() {
       txt("span", "req-type",  req.resourceType || "other"),
       txt("span", "req-url",   req.url),
     );
+    // Say which side held it — the actions differ underneath
+    if (req._via === "proxy") row.appendChild(txt("span", "req-via", "PROXY"));
     const acts = el("div", "req-actions");
     const btnRep  = txt("button", "btn btn-xs btn-ghost",   "→ Rep");
     const btnIntr = txt("button", "btn btn-xs btn-ghost",   "→ Intr");
@@ -362,13 +365,159 @@ function rawToHeaders(raw) {
   return h;
 }
 
+// ── External proxy (void-proxy-server.js) ───────────────────────────────────
+// An MV3 extension cannot listen on a port, so requests from clients outside
+// Chrome (curl, Postman, a phone) are held by the Node proxy and mirrored into
+// this same Intercept queue over a control WebSocket.
+const PROXY_CTRL_URL = "ws://localhost:8082";
+let proxyWs = null;
+let proxyPending = [];          // paused proxy requests, shaped like `intercepted`
+let proxyIntercepting = false;
+let proxyInfo = null;           // { proxyPort, caPath }
+// "unreachable" (server not running) reads very differently from "disconnected"
+// (server up, Void just not watching), so they are tracked apart.
+let proxyStatus = "disconnected"; // disconnected | connecting | connected | unreachable
+
+function proxySend(msg) {
+  if (proxyWs && proxyWs.readyState === 1) proxyWs.send(JSON.stringify(msg));
+}
+
+function proxyConnect() {
+  if (proxyWs && proxyWs.readyState <= 1) return;
+  try {
+    proxyStatus = "connecting";
+    proxyUpdateUI();
+    proxyWs = new WebSocket(PROXY_CTRL_URL);
+    proxyWs.onopen = () => { proxyStatus = "connected"; proxyUpdateUI(); };
+    proxyWs.onmessage = (ev) => {
+      let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+
+      if (msg.type === "hello") {
+        proxyInfo = { proxyPort: msg.proxyPort, caPath: msg.caPath };
+        proxyIntercepting = !!msg.intercepting;
+        proxyPending = (msg.pending || []).map(proxyReqShape);
+        renderInterceptList();
+      } else if (msg.type === "state") {
+        proxyIntercepting = !!msg.intercepting;
+        if (!proxyIntercepting) proxyPending = [];
+        renderInterceptList();
+      } else if (msg.type === "paused") {
+        proxyPending.push(proxyReqShape(msg.req));
+        renderInterceptList();
+      } else if (msg.type === "resolved") {
+        proxyPending = proxyPending.filter(r => r.requestId !== msg.id);
+        renderInterceptList();
+      } else if (msg.type === "txn") {
+        // Park it in the SW so it survives the panel's history polling
+        bg({ type: "PROXY_TXN", entry: msg.entry });
+      }
+      proxyUpdateUI();
+    };
+    // A socket that closes without ever opening means nothing is listening.
+    proxyWs.onclose = () => {
+      if (proxyStatus !== "disconnected") proxyStatus = proxyStatus === "connected" ? "disconnected" : "unreachable";
+      proxyWs = null; proxyReset();
+    };
+    proxyWs.onerror = () => { proxyStatus = "unreachable"; proxyWs = null; proxyReset(); };
+  } catch { proxyStatus = "unreachable"; proxyWs = null; proxyReset(); }
+}
+
+function proxyReset() {
+  proxyIntercepting = false;
+  proxyPending = [];
+  proxyUpdateUI();
+  renderInterceptList();
+}
+
+function proxyDisconnect() {
+  if (proxyWs) { proxySend({ type: "intercept", on: false }); proxyWs.close(); }
+  proxyStatus = "disconnected";
+  proxyWs = null;
+  proxyReset();
+}
+
+// The proxy sends headers as raw text; the editor and the send-to helpers all
+// expect a header object, so normalise once here.
+function proxyReqShape(req) {
+  return {
+    requestId:    req.id,
+    method:       req.method,
+    url:          req.url,
+    headers:      rawToHeaders(req.headers || ""),
+    body:         req.body || "",
+    resourceType: "proxy",
+    _via:         "proxy",
+  };
+}
+
+function proxyUpdateUI() {
+  const bar   = document.getElementById("proxy-bar");
+  const dot   = document.getElementById("proxy-dot");
+  const label = document.getElementById("proxy-label");
+  const hint  = document.getElementById("proxy-hint");
+  const btn   = document.getElementById("btn-proxy");
+
+  const copyBtn = document.getElementById("proxy-copy");
+  const connected = !!(proxyWs && proxyWs.readyState === 1);
+  bar.classList.toggle("hidden", !connected && proxyStatus === "disconnected" && !proxyInfo);
+  // The hint is a runnable command in every state except plain "not connected",
+  // where it is an explanatory sentence — nothing to copy.
+  copyBtn.classList.toggle("hidden", !connected && proxyStatus === "disconnected");
+  dot.className = "dot " + (connected ? (proxyIntercepting ? "dot-intercepting" : "dot-attached") : "dot-off");
+
+  if (!connected) {
+    btn.textContent = "Proxy: connect";
+    btn.classList.remove("btn-success");
+    if (proxyStatus === "connecting") {
+      label.textContent = "Connecting…";
+      hint.textContent = "";
+    } else if (proxyStatus === "unreachable") {
+      label.textContent = "Proxy not running";
+      hint.textContent = "node void-proxy-server.js";
+    } else {
+      // Disconnecting Void does NOT stop the proxy — say so, or "off" reads as
+      // "traffic is no longer being proxied", which is wrong.
+      label.textContent = "Not connected";
+      hint.textContent = "Proxy keeps passing traffic if the server is up — it just isn't recorded here";
+    }
+    return;
+  }
+  label.textContent = proxyIntercepting
+    ? "Intercepting — requests are held until you Forward or Drop"
+    : "Logging — traffic passes through and is recorded in History";
+  hint.textContent = proxyInfo
+    ? `curl -x http://127.0.0.1:${proxyInfo.proxyPort} --cacert ${proxyInfo.caPath} https://target/`
+    : "";
+  btn.textContent = proxyIntercepting ? "Proxy: intercepting" : "Proxy: logging";
+  btn.classList.toggle("btn-success", proxyIntercepting);
+}
+
 async function doForward(requestId, overrides) {
+  const px = proxyPending.find(r => r.requestId === requestId);
+  if (px) {
+    proxyPending = proxyPending.filter(r => r.requestId !== requestId);
+    proxySend({
+      type: "forward", id: requestId,
+      method:  overrides?.method  ?? px.method,
+      url:     overrides?.url     ?? px.url,
+      headers: overrides?.headers != null ? headersToRaw(overrides.headers) : headersToRaw(px.headers),
+      body:    overrides?.body    ?? px.body,
+    });
+    renderInterceptList();
+    return;
+  }
   intercepted = intercepted.filter(r => r.requestId !== requestId);
   await bg({ type: "FORWARD", requestId, overrides: overrides || {} });
   renderInterceptList();
 }
 
 async function doDrop(requestId) {
+  if (proxyPending.some(r => r.requestId === requestId)) {
+    proxyPending = proxyPending.filter(r => r.requestId !== requestId);
+    proxySend({ type: "drop", id: requestId });
+    renderInterceptList();
+    return;
+  }
   intercepted = intercepted.filter(r => r.requestId !== requestId);
   await bg({ type: "DROP", requestId });
   renderInterceptList();
@@ -4546,6 +4695,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Forward all
   document.getElementById("btn-fwd-all").addEventListener("click", async () => {
+    if (proxyPending.length) { proxySend({ type: "forwardAll" }); proxyPending = []; }
     const ids = intercepted.map(r => r.requestId);
     intercepted = [];
     await Promise.all(ids.map(id => bg({ type: "FORWARD", requestId: id, overrides: {} })));
@@ -4554,6 +4704,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Editor buttons
   document.getElementById("ed-back").addEventListener("click",    closeEditor);
+  // ── External proxy toggle ─────────────────────────────────────────────────
+  document.getElementById("btn-proxy").addEventListener("click", () => {
+    const connected = proxyWs && proxyWs.readyState === 1;
+    if (!connected) {
+      document.getElementById("proxy-bar").classList.remove("hidden");
+      proxyConnect();
+    } else if (!proxyIntercepting) {
+      proxySend({ type: "intercept", on: true });
+    } else {
+      proxySend({ type: "intercept", on: false });
+      proxyDisconnect();
+    }
+    proxyUpdateUI();
+  });
+  document.getElementById("proxy-copy").addEventListener("click", () => {
+    const hint = document.getElementById("proxy-hint").textContent;
+    if (hint) navigator.clipboard.writeText(hint).catch(() => {});
+  });
+
   document.getElementById("ed-forward").addEventListener("click", forwardFromEditor);
   document.getElementById("ed-drop").addEventListener("click",    dropFromEditor);
   document.getElementById("ed-to-rep").addEventListener("click",  () => {

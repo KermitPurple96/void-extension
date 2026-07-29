@@ -163,6 +163,12 @@ function addHostHeader(entry) {
   entry.headers = { Host: host, ...hdrs }; // first line, as on the wire
 }
 
+// ── Proxy traffic (from void-proxy-server.js, relayed by the panel) ─────────
+// The external proxy captures clients Chrome never sees — curl, Postman, a
+// phone. The panel holds the control WebSocket and forwards completed
+// transactions here so they land in History/Logger like anything else.
+const proxyHistory = [];
+
 // ── Settings (shared across tabs) ────────────────────────────────────────────
 let voidSettings = {
   matchReplace: [],
@@ -620,7 +626,7 @@ const ALLOWED = new Set([
   "FORWARD","DROP","SEND_REQUEST",
   "GET_DATA","GET_INTERCEPTED","GET_HISTORY","CLEAR_HISTORY","REPORT","CLEAR",
   "RESTORE_HISTORY","RESTORE_ENDPOINTS",
-  "CNT_LAUNCH","CNT_AUTO_EXPORT","GET_EXT_PATH",
+  "CNT_LAUNCH","CNT_AUTO_EXPORT","GET_EXT_PATH","PROXY_TXN",
   "LOOKUP","CRAWL_START","CRAWL_STOP","UPDATE_SETTINGS","GET_COOKIES",
   "PROBE_INJECT","PROBE_CMD","PROBE_STATUS","PROBE_FINDINGS",
 ]);
@@ -938,6 +944,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
     }
 
+    // ── Proxy transaction relayed from the panel ───────────────────────────
+    case "PROXY_TXN": {
+      if (msg.entry) {
+        proxyHistory.push(msg.entry);
+        if (proxyHistory.length > 5000) proxyHistory.splice(0, 500);
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+
     // ── Panel reads ─────────────────────────────────────────────────────────
     case "GET_DATA": {
       if (!tabId) { sendResponse(null); break; }
@@ -979,7 +995,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!dbgTimes.has(key)) dbgTimes.set(key, []);
         dbgTimes.get(key).push(e.time);
       }
-      const merged = [...t.history];
+      const merged = [...t.history, ...proxyHistory];
       for (const pe of passiveHistory) {
         const times = dbgTimes.get(`${pe.tabId}|${pe.method}|${pe.url}`);
         if (times) {
@@ -997,6 +1013,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!tabId) { sendResponse({ ok: false }); break; }
       const t = getTab(tabId);
       t.history = []; t.historyMap = {};
+      proxyHistory.length = 0;
       sendResponse({ ok: true });
       break;
     }
