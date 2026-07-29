@@ -3245,10 +3245,6 @@ async function cryptoHash(algo, input) {
 const DEFAULT_SETTINGS = {
   matchReplace: [],
   autoHeaders: "",
-  proxyEnabled: false,
-  proxyHost: "127.0.0.1",
-  proxyPort: "8080",
-  proxyType: "http",
   scopeInclude: "",
   scopeExclude: "",
   followRedirects: true,
@@ -3269,10 +3265,6 @@ function loadSettings() {
 function saveSettings() {
   // Read current UI state into settings
   settings.autoHeaders    = document.getElementById("cfg-auto-headers").value;
-  settings.proxyEnabled   = document.getElementById("cfg-proxy-enabled").checked;
-  settings.proxyHost      = document.getElementById("cfg-proxy-host").value;
-  settings.proxyPort      = document.getElementById("cfg-proxy-port").value;
-  settings.proxyType      = document.getElementById("cfg-proxy-type").value;
   settings.scopeInclude   = document.getElementById("cfg-scope-include").value;
   settings.scopeExclude   = document.getElementById("cfg-scope-exclude").value;
   settings.followRedirects = document.getElementById("cfg-follow-redirects").checked;
@@ -3291,10 +3283,6 @@ function saveSettings() {
 
 function loadSettingsUI() {
   document.getElementById("cfg-auto-headers").value    = settings.autoHeaders;
-  document.getElementById("cfg-proxy-enabled").checked  = settings.proxyEnabled;
-  document.getElementById("cfg-proxy-host").value       = settings.proxyHost;
-  document.getElementById("cfg-proxy-port").value       = settings.proxyPort;
-  document.getElementById("cfg-proxy-type").value       = settings.proxyType;
   document.getElementById("cfg-scope-include").value    = settings.scopeInclude;
   document.getElementById("cfg-scope-exclude").value    = settings.scopeExclude;
   document.getElementById("cfg-follow-redirects").checked = settings.followRedirects;

@@ -173,7 +173,6 @@ const proxyHistory = [];
 let voidSettings = {
   matchReplace: [],
   autoHeaders: "",
-  proxyEnabled: false, proxyHost: "127.0.0.1", proxyPort: "8080", proxyType: "http",
   scopeInclude: "", scopeExclude: "",
   followRedirects: true, timeout: "30000",
 };
