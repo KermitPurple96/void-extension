@@ -15,7 +15,7 @@
     <button class="tab active" data-tab="intercept">Intercept <span class="bdg hidden" id="bdg-intercept">0</span></button>
     <button class="tab"        data-tab="history"  >History <span class="bdg" id="bdg-history">0</span></button>
     <button class="tab"        data-tab="repeater" >Repeater <span class="bdg hidden" id="bdg-repeater">0</span></button>
-    <button class="tab"        data-tab="intruder" >Intruder</button>
+    <button class="tab"        data-tab="intruder" >Intruder <span class="bdg hidden" id="bdg-intruder">0</span></button>
     <button class="tab"        data-tab="probe"    >Probe <span class="bdg" id="bdg-probe">0</span></button>
     <button class="tab"        data-tab="logger"    >Logger <span class="bdg" id="bdg-logger">0</span></button>
     <button class="tab"        data-tab="containers">Containers</button>
@@ -113,11 +113,9 @@
           <div class="hist-detail-body">
             <div class="hist-detail-pane" id="tgt-req-side">
               <div class="hist-detail-sub-tabs">
-                <button class="sub-tab active" data-tgtpane="req-headers">Headers</button>
-                <button class="sub-tab" data-tgtpane="req-body">Body</button>
+                <span class="pane-heading">REQUEST</span>
               </div>
-              <div id="tgt-req-headers-pane" class="hist-sub-pane active"><pre id="tgt-req-headers-pre" class="raw-pre"></pre></div>
-              <div id="tgt-req-body-pane" class="hist-sub-pane hidden"><pre id="tgt-req-body-pre" class="raw-pre"></pre></div>
+              <div id="tgt-req-pane" class="hist-sub-pane"><pre id="tgt-req-pre" class="raw-pre"></pre></div>
               <div class="detail-search-bar">
                 <input id="tgt-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
                 <span id="tgt-req-search-count" class="detail-search-count"></span>
@@ -125,11 +123,9 @@
             </div>
             <div class="hist-detail-pane" id="tgt-resp-side">
               <div class="hist-detail-sub-tabs">
-                <button class="sub-tab active" data-tgtpane="resp-headers">Headers</button>
-                <button class="sub-tab" data-tgtpane="resp-body">Body</button>
+                <span class="pane-heading">RESPONSE</span>
               </div>
-              <div id="tgt-resp-headers-pane" class="hist-sub-pane active"><pre id="tgt-resp-headers-pre" class="raw-pre"></pre></div>
-              <div id="tgt-resp-body-pane" class="hist-sub-pane hidden"><pre id="tgt-resp-body-pre" class="raw-pre"></pre></div>
+              <div id="tgt-resp-pane" class="hist-sub-pane"><pre id="tgt-resp-pre" class="raw-pre"></pre></div>
               <div class="detail-search-bar">
                 <input id="tgt-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
                 <span id="tgt-resp-search-count" class="detail-search-count"></span>
@@ -180,11 +176,9 @@
           <div class="hist-detail-body">
             <div class="hist-detail-pane" id="ep-req-side">
               <div class="hist-detail-sub-tabs">
-                <button class="sub-tab active" data-eppane="req-headers">Headers</button>
-                <button class="sub-tab" data-eppane="req-body">Body</button>
+                <span class="pane-heading">REQUEST</span>
               </div>
-              <div id="ep-req-headers-pane" class="hist-sub-pane active"><pre id="ep-req-headers-pre" class="raw-pre"></pre></div>
-              <div id="ep-req-body-pane" class="hist-sub-pane hidden"><pre id="ep-req-body-pre" class="raw-pre"></pre></div>
+              <div id="ep-req-pane" class="hist-sub-pane"><pre id="ep-req-pre" class="raw-pre"></pre></div>
               <div class="detail-search-bar">
                 <input id="ep-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
                 <span id="ep-req-search-count" class="detail-search-count"></span>
@@ -192,11 +186,9 @@
             </div>
             <div class="hist-detail-pane" id="ep-resp-side">
               <div class="hist-detail-sub-tabs">
-                <button class="sub-tab active" data-eppane="resp-headers">Headers</button>
-                <button class="sub-tab" data-eppane="resp-body">Body</button>
+                <span class="pane-heading">RESPONSE</span>
               </div>
-              <div id="ep-resp-headers-pane" class="hist-sub-pane active"><pre id="ep-resp-headers-pre" class="raw-pre"></pre></div>
-              <div id="ep-resp-body-pane" class="hist-sub-pane hidden"><pre id="ep-resp-body-pre" class="raw-pre"></pre></div>
+              <div id="ep-resp-pane" class="hist-sub-pane"><pre id="ep-resp-pre" class="raw-pre"></pre></div>
               <div class="detail-search-bar">
                 <input id="ep-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
                 <span id="ep-resp-search-count" class="detail-search-count"></span>
@@ -363,15 +355,19 @@
           <button id="hist-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
           <button id="hist-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">↗ Open</button>
         </div>
+        <div class="reflect-bar" id="hist-reflect-bar">
+          <label class="reflect-bar-toggle" title="Highlight values reflected from the request into the response — one colour per distinct value">
+            <input type="checkbox" id="hist-reflect-hl"> Highlight reflections
+          </label>
+          <span class="reflect-chips hidden" id="hist-reflect-chips"></span>
+        </div>
         <div class="hist-detail-body">
           <!-- Request side -->
           <div class="hist-detail-pane" id="hist-req-side">
             <div class="hist-detail-sub-tabs">
-              <button class="sub-tab active" data-histpane="req-headers">Headers</button>
-              <button class="sub-tab" data-histpane="req-body">Body</button>
-            </div>
-            <div id="hist-req-headers-pane" class="hist-sub-pane active"><pre id="hist-req-headers-pre" class="raw-pre"></pre></div>
-            <div id="hist-req-body-pane" class="hist-sub-pane hidden"><pre id="hist-req-body-pre" class="raw-pre"></pre></div>
+                <span class="pane-heading">REQUEST</span>
+              </div>
+              <div id="hist-req-pane" class="hist-sub-pane"><pre id="hist-req-pre" class="raw-pre"></pre></div>
             <div class="detail-search-bar">
               <input id="hist-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
               <span id="hist-req-search-count" class="detail-search-count"></span>
@@ -380,12 +376,10 @@
           <!-- Response side -->
           <div class="hist-detail-pane" id="hist-resp-side">
             <div class="hist-detail-sub-tabs">
-              <button class="sub-tab active" data-histpane="resp-headers">Headers</button>
-              <button class="sub-tab" data-histpane="resp-body">Body</button>
-              <span id="hist-reflect-badge" class="reflect-badge hidden">Reflections</span>
-            </div>
-            <div id="hist-resp-headers-pane" class="hist-sub-pane active"><pre id="hist-resp-headers-pre" class="raw-pre"></pre></div>
-            <div id="hist-resp-body-pane" class="hist-sub-pane hidden"><pre id="hist-resp-body-pre" class="raw-pre"></pre></div>
+                <span class="pane-heading">RESPONSE</span>
+                <span id="hist-reflect-badge" class="reflect-badge hidden">Reflections</span>
+              </div>
+              <div id="hist-resp-pane" class="hist-sub-pane"><pre id="hist-resp-pre" class="raw-pre"></pre></div>
             <div class="detail-search-bar">
               <input id="hist-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
               <span id="hist-resp-search-count" class="detail-search-count"></span>
@@ -413,6 +407,7 @@
               placeholder="https://target.com/api/…" spellcheck="false" autocomplete="off">
       <button id="rep-target-toggle" class="btn btn-xs btn-ghost rep-target-btn" title="Edit target (connect to different host/IP)">✎ Target</button>
       <button id="rep-send"   class="btn btn-send">Send</button>
+      <button id="rep-to-intr" class="btn btn-xs btn-ghost" title="Send this request to Intruder">→ Intruder</button>
       <label class="rep-autocookie" title="Auto-sync cookies from browser tab"><input type="checkbox" id="rep-autocookie"> Cookie sync</label>
     </div>
     <!-- Target override bar (hidden by default) -->
@@ -435,6 +430,12 @@
         <div class="pane-label pane-label-body">BODY</div>
         <textarea id="rep-body-ta" class="raw-ta body-ta" spellcheck="false"
                   placeholder='{"key": "value"}'></textarea>
+        <div class="reflect-bar" id="rep-reflect-bar">
+          <label class="reflect-bar-toggle" title="Highlight request values reflected in the response — one colour per distinct value">
+            <input type="checkbox" id="rep-reflect-hl"> Highlight reflections
+          </label>
+          <span class="reflect-chips hidden" id="rep-reflect-chips"></span>
+        </div>
       </div>
 
       <!-- Drag handle (vertical) -->
@@ -443,14 +444,7 @@
       <!-- Response pane (RIGHT) -->
       <div class="rep-resp rep-resp-side" id="rep-resp-pane">
         <div class="pane-label" id="resp-label">RESPONSE</div>
-        <div class="resp-sub-tabs hidden" id="resp-sub-tabs">
-          <button class="sub-tab active" data-resp="body">Body</button>
-          <button class="sub-tab"        data-resp="hdrs">Headers</button>
-          <button class="sub-tab"        data-resp="raw" >Raw</button>
-        </div>
-        <div id="resp-pane-body" class="resp-pane active"><pre id="resp-body-pre"></pre></div>
-        <div id="resp-pane-hdrs" class="resp-pane hidden"><pre id="resp-hdrs-pre"></pre></div>
-        <div id="resp-pane-raw"  class="resp-pane hidden"><pre id="resp-raw-pre"></pre></div>
+        <div id="resp-pane-body" class="resp-pane active"><pre id="resp-body-pre" class="raw-pre"></pre></div>
         <div id="resp-empty" class="empty">Hit Send to see response</div>
         <div id="resp-loading" class="loading hidden">Sending…</div>
         <div class="detail-search-bar">
@@ -473,6 +467,7 @@
           <select id="intr-method" class="method-sel"></select>
           <input  id="intr-url" class="url-inp flex1" type="text"
                   placeholder="https://target.com/api/…" spellcheck="false" autocomplete="off">
+          <button id="intr-to-rep" class="btn btn-xs btn-ghost" title="Send this request to Repeater (§ markers are stripped)">→ Repeater</button>
         </div>
         <div class="pane-label">REQUEST — mark positions with <code>§value§</code></div>
         <textarea id="intr-request" class="raw-ta intr-ta" spellcheck="false"
@@ -511,6 +506,7 @@
 
           <div class="intr-toolbar">
             <label class="rep-autocookie"><input type="checkbox" id="intr-autocookie"> Cookie sync</label>
+            <label class="rep-autocookie" title="Only show results whose response reflects a request value"><input type="checkbox" id="intr-reflect-only"> Reflections</label>
             <div class="tabbar-gap"></div>
             <button id="intr-start" class="btn btn-accent">Start Attack</button>
             <button id="intr-stop"  class="btn btn-sm btn-danger" disabled>Stop</button>
@@ -533,6 +529,45 @@
             </thead>
             <tbody id="intr-results"></tbody>
           </table>
+        </div>
+
+        <!-- Result detail (opens on row click) -->
+        <div id="intr-detail" class="intr-detail hidden">
+          <div class="hist-detail-topbar">
+            <button id="intr-detail-close" class="btn btn-sm btn-ghost">✕</button>
+            <span id="intr-detail-title" class="hist-detail-title"></span>
+            <button id="intr-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
+          </div>
+          <div class="reflect-bar" id="intr-reflect-bar">
+            <label class="reflect-bar-toggle" title="Highlight request values reflected in the response — one colour per distinct value">
+              <input type="checkbox" id="intr-reflect-hl"> Highlight reflections
+            </label>
+            <span class="reflect-chips hidden" id="intr-reflect-chips"></span>
+          </div>
+          <div class="hist-detail-body">
+            <!-- Request side -->
+            <div class="hist-detail-pane" id="intr-req-side">
+              <div class="hist-detail-sub-tabs">
+                <span class="pane-heading">REQUEST</span>
+              </div>
+              <div id="intr-req-pane" class="intr-sub-pane"><pre id="intr-req-pre" class="raw-pre"></pre></div>
+              <div class="detail-search-bar">
+                <input id="intr-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
+                <span id="intr-req-search-count" class="detail-search-count"></span>
+              </div>
+            </div>
+            <!-- Response side -->
+            <div class="hist-detail-pane" id="intr-resp-side">
+              <div class="hist-detail-sub-tabs">
+                <span class="pane-heading">RESPONSE</span>
+              </div>
+              <div id="intr-resp-pane" class="intr-sub-pane"><pre id="intr-resp-pre" class="raw-pre"></pre></div>
+              <div class="detail-search-bar">
+                <input id="intr-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
+                <span id="intr-resp-search-count" class="detail-search-count"></span>
+              </div>
+            </div>
+          </div>
         </div>
 
       </div>
@@ -841,11 +876,9 @@
         <div class="hist-detail-body">
           <div class="hist-detail-pane" id="log-req-side">
             <div class="hist-detail-sub-tabs">
-              <button class="sub-tab active" data-logpane="req-headers">Headers</button>
-              <button class="sub-tab" data-logpane="req-body">Body</button>
-            </div>
-            <div id="log-req-headers-pane" class="hist-sub-pane active"><pre id="log-req-headers-pre" class="raw-pre"></pre></div>
-            <div id="log-req-body-pane" class="hist-sub-pane hidden"><pre id="log-req-body-pre" class="raw-pre"></pre></div>
+                <span class="pane-heading">REQUEST</span>
+              </div>
+              <div id="log-req-pane" class="hist-sub-pane"><pre id="log-req-pre" class="raw-pre"></pre></div>
             <div class="detail-search-bar">
               <input id="log-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
               <span id="log-req-search-count" class="detail-search-count"></span>
@@ -853,11 +886,9 @@
           </div>
           <div class="hist-detail-pane" id="log-resp-side">
             <div class="hist-detail-sub-tabs">
-              <button class="sub-tab active" data-logpane="resp-headers">Headers</button>
-              <button class="sub-tab" data-logpane="resp-body">Body</button>
-            </div>
-            <div id="log-resp-headers-pane" class="hist-sub-pane active"><pre id="log-resp-headers-pre" class="raw-pre"></pre></div>
-            <div id="log-resp-body-pane" class="hist-sub-pane hidden"><pre id="log-resp-body-pre" class="raw-pre"></pre></div>
+                <span class="pane-heading">RESPONSE</span>
+              </div>
+              <div id="log-resp-pane" class="hist-sub-pane"><pre id="log-resp-pre" class="raw-pre"></pre></div>
             <div class="detail-search-bar">
               <input id="log-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
               <span id="log-resp-search-count" class="detail-search-count"></span>
@@ -955,15 +986,33 @@
 
   <!-- ═══════════════════════════ HEADERS ════════════════════════════════════ -->
   <div id="tab-headers" class="tab-panel hidden">
-    <div class="hdr-sub-bar">
-      <button class="sub-tab active" data-hdrsub="security">Security Analysis</button>
-      <button class="sub-tab" data-hdrsub="all">All Headers</button>
+    <!-- What the analysis below is actually describing -->
+    <div class="hdr-ref-bar" id="hdr-ref-bar">
+      <span class="hdr-ref-label">Reference</span>
+      <span class="hdr-ref-url" id="hdr-ref-url">—</span>
+      <span class="hdr-ref-status" id="hdr-ref-status"></span>
+      <span class="hdr-ref-warn hidden" id="hdr-ref-warn"></span>
     </div>
-    <div id="hdr-security" class="hdr-sub-panel active">
-      <div id="hdr-sec-grid" class="hdr-sec-grid"></div>
-    </div>
-    <div id="hdr-all" class="hdr-sub-panel hidden">
-      <div id="hdr-all-list" class="req-list"></div>
+    <div class="hdr-split">
+      <!-- LEFT: security analysis of the main document -->
+      <div class="hdr-split-pane" id="hdr-security">
+        <div class="pane-label">SECURITY ANALYSIS</div>
+        <div class="hdr-pane-scroll">
+          <div id="hdr-sec-grid" class="hdr-sec-grid"></div>
+        </div>
+      </div>
+      <!-- RIGHT: every captured header, with the response it came from -->
+      <div class="hdr-split-pane" id="hdr-all">
+        <div class="pane-label">
+          ALL HEADERS
+          <label class="hdr-scope-toggle" title="Off: only headers from the main document response. On: every response seen in this tab, including sub-frames and third-party assets.">
+            <input type="checkbox" id="hdr-show-all"> include sub-resources
+          </label>
+        </div>
+        <div class="hdr-pane-scroll">
+          <div id="hdr-all-list" class="req-list"></div>
+        </div>
+      </div>
     </div>
     <div id="hdr-empty" class="empty hidden">
       No headers captured.<br>
@@ -1147,11 +1196,9 @@
         <div class="hist-detail-body">
           <div class="hist-detail-pane" id="sens-req-side">
             <div class="hist-detail-sub-tabs">
-              <button class="sub-tab active" data-senspane="req-headers">Headers</button>
-              <button class="sub-tab" data-senspane="req-body">Body</button>
-            </div>
-            <div id="sens-req-headers-pane" class="hist-sub-pane active"><pre id="sens-req-headers-pre" class="raw-pre"></pre></div>
-            <div id="sens-req-body-pane" class="hist-sub-pane hidden"><pre id="sens-req-body-pre" class="raw-pre"></pre></div>
+                <span class="pane-heading">REQUEST</span>
+              </div>
+              <div id="sens-req-pane" class="hist-sub-pane"><pre id="sens-req-pre" class="raw-pre"></pre></div>
             <div class="detail-search-bar">
               <input id="sens-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
               <span id="sens-req-search-count" class="detail-search-count"></span>
@@ -1159,11 +1206,9 @@
           </div>
           <div class="hist-detail-pane" id="sens-resp-side">
             <div class="hist-detail-sub-tabs">
-              <button class="sub-tab active" data-senspane="resp-headers">Headers</button>
-              <button class="sub-tab" data-senspane="resp-body">Body</button>
-            </div>
-            <div id="sens-resp-headers-pane" class="hist-sub-pane active"><pre id="sens-resp-headers-pre" class="raw-pre"></pre></div>
-            <div id="sens-resp-body-pane" class="hist-sub-pane hidden"><pre id="sens-resp-body-pre" class="raw-pre"></pre></div>
+                <span class="pane-heading">RESPONSE</span>
+              </div>
+              <div id="sens-resp-pane" class="hist-sub-pane"><pre id="sens-resp-pre" class="raw-pre"></pre></div>
             <div class="detail-search-bar">
               <input id="sens-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
               <span id="sens-resp-search-count" class="detail-search-count"></span>

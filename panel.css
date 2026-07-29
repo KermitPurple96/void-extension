@@ -919,7 +919,8 @@ body {
 }
 .hdr-row {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 4px 16px;
   padding: 6px 14px;
   border-bottom: 1px solid var(--border);
   font-family: var(--mono);
@@ -928,10 +929,79 @@ body {
 .hdr-key { color: var(--accent); min-width: 200px; flex-shrink: 0; }
 .hdr-val { color: var(--text); word-break: break-all; }
 
-.hdr-sub-bar { display: flex; gap: 0; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.hdr-sub-bar .sub-tab { padding: 6px 14px; }
-.hdr-sub-panel { display: none; flex: 1; overflow: auto; }
-.hdr-sub-panel.active { display: flex; flex-direction: column; }
+/* Headers tab: reference bar + side-by-side panes (no sub-tabs) */
+.hdr-ref-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  font-size: 11px;
+  min-width: 0;
+}
+.hdr-ref-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.hdr-ref-url {
+  font-family: var(--mono);
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.hdr-ref-status { color: var(--muted); flex-shrink: 0; }
+.hdr-ref-warn {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(227,179,65,.15);
+  color: var(--yellow);
+  font-size: 10px;
+}
+.hdr-ref-warn.hidden { display: none; }
+.hdr-split { display: flex; flex: 1; overflow: hidden; }
+.hdr-split-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+.hdr-split-pane:last-child { border-right: none; }
+.hdr-pane-scroll { flex: 1; overflow: auto; }
+#hdr-all > .pane-label { display: flex; align-items: center; }
+.hdr-scope-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.hdr-scope-toggle input { margin: 0; cursor: pointer; }
+/* Provenance line under a header value in the All Headers pane */
+.hdr-src {
+  flex-basis: 100%;
+  display: block;
+  font-size: 9px;
+  color: var(--muted);
+  margin-top: 1px;
+  word-break: break-all;
+}
+.hdr-src-foreign { color: var(--yellow); }
 
 /* Security tiles */
 .hdr-sec-grid { padding: 12px 16px; }
@@ -1151,8 +1221,72 @@ body {
 .search-hl { background: var(--yellow); color: #000; border-radius: 1px; }
 .search-hl-current { background: var(--accent); color: #000; }
 
-/* Reflection highlights */
-.reflect-hl { background: rgba(248,81,73,.25); border-bottom: 1px solid var(--red); }
+/* Reflection highlights — one palette slot per distinct reflected value */
+.reflect-hl {
+  border-radius: 2px;
+  border-bottom: 1px solid currentColor;
+  color: inherit;
+}
+.reflect-c0 { background: rgba(248, 81,  73, .30); border-bottom-color: #f85149; }
+.reflect-c1 { background: rgba( 88,166, 255, .30); border-bottom-color: #58a6ff; }
+.reflect-c2 { background: rgba( 63,185,  80, .30); border-bottom-color: #3fb950; }
+.reflect-c3 { background: rgba(227,179,  65, .32); border-bottom-color: #e3b341; }
+.reflect-c4 { background: rgba(188,140, 255, .32); border-bottom-color: #bc8cff; }
+.reflect-c5 { background: rgba( 57,197, 207, .30); border-bottom-color: #39c5cf; }
+.reflect-c6 { background: rgba(255,123, 156, .30); border-bottom-color: #ff7b9c; }
+.reflect-c7 { background: rgba(255,159,  69, .30); border-bottom-color: #ff9f45; }
+
+/* Reflection legend bar (checkbox + colour chips) */
+.reflect-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+}
+.reflect-bar.hidden { display: none; }
+.reflect-bar { flex-shrink: 0; }
+/* Repeater's bar sits at the BOTTOM of the request pane, so flip the rule */
+#rep-reflect-bar { border-bottom: none; border-top: 1px solid var(--border); }
+/* Adding .raw-pre to the repeater response <pre>s (so search + reflections can
+   find them) must not change their box behaviour — .resp-pane is display:block */
+.resp-pane > .raw-pre { flex: none; overflow: visible; }
+.reflect-bar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.reflect-bar-toggle input { margin: 0; cursor: pointer; }
+.reflect-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.reflect-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 190px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reflect-chip-dot {
+  flex: none;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+.reflect-chip-n { color: var(--muted); }
+.reflect-bar-none { color: var(--muted); font-style: italic; }
 .reflect-badge {
   font-size: 9px;
   font-weight: 700;
@@ -1548,6 +1682,24 @@ body {
   flex: 1;
   overflow: auto;
 }
+.intr-results-table tbody tr { cursor: pointer; }
+.intr-results-table tbody tr.intr-selected td { background: var(--bg4); }
+
+/* Intruder result detail — split request/response, mirrors the history detail */
+.intr-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 45%;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.intr-detail.hidden { display: none; }
+.intr-sub-pane {
+  flex: 1;
+  overflow: auto;
+}
+.intr-sub-pane.hidden { display: none; }
 .intr-results-table tr.intr-match td { background: rgba(63,185,80,.08); }
 .intr-status {
   font-size: 11px;
@@ -2058,3 +2210,13 @@ body {
 .tgt-url-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tgt-act-cell { white-space: nowrap; }
 .tgt-clickable { cursor: pointer; }
+
+/* Merged request/response panes: one raw view per side, no Headers/Body split */
+.pane-heading {
+  padding: 6px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: var(--muted);
+  text-transform: uppercase;
+}

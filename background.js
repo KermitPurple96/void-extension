@@ -36,17 +36,60 @@ function syncPushBurst() {
 // capture (Network.requestWillBeSent etc.) still provides richer data (bodies,
 // timing) when attached, but this ensures Logger always has traffic to show.
 const passiveHistory = [];  // { method, url, host, path, status, headers, respHeaders, time, elapsed, tabId }
-const passivePending = {};  // requestId → { method, url, headers, time, tabId }
+const passivePending = {};  // requestId → { method, url, headers, body, time, tabId }
+const passiveBodies  = {};  // requestId → decoded request body (onBeforeRequest fires first)
+
+const PASSIVE_BODY_CAP = 100000; // chars — avoid holding whole file uploads in memory
+
+// webRequest can read the REQUEST body (onBeforeRequest + "requestBody"), but never
+// the response body — that needs the debugger. Entries are tagged with `capture` so
+// the panel can say which limitation applies.
+function decodeRequestBody(rb) {
+  if (!rb || rb.error) return "";
+  if (rb.formData) {
+    return Object.entries(rb.formData)
+      .map(([k, vs]) => (vs || []).map(v => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&"))
+      .join("&")
+      .slice(0, PASSIVE_BODY_CAP);
+  }
+  if (Array.isArray(rb.raw)) {
+    try {
+      const dec = new TextDecoder("utf-8", { fatal: false });
+      let out = "";
+      for (const part of rb.raw) {
+        if (part.file) { out += `(file: ${part.file})`; continue; }
+        if (part.bytes) out += dec.decode(new Uint8Array(part.bytes));
+        if (out.length > PASSIVE_BODY_CAP) break;
+      }
+      return out.slice(0, PASSIVE_BODY_CAP);
+    } catch { return ""; }
+  }
+  return "";
+}
+
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    if (details.tabId < 0) return;
+    if (!details.requestBody) return;
+    const body = decodeRequestBody(details.requestBody);
+    if (body) passiveBodies[details.requestId] = body;
+  },
+  { urls: ["<all_urls>"] },
+  ["requestBody"]
+);
 
 chrome.webRequest.onBeforeSendHeaders.addListener(
   (details) => {
     if (details.tabId < 0) return; // skip non-tab requests (SW, etc.)
     const hdrs = {};
     (details.requestHeaders || []).forEach(h => { hdrs[h.name] = h.value || ""; });
+    const body = passiveBodies[details.requestId] || "";
+    delete passiveBodies[details.requestId];
     passivePending[details.requestId] = {
       method: details.method,
       url: details.url,
       headers: hdrs,
+      body,
       time: details.timeStamp || Date.now(),
       tabId: details.tabId,
       type: details.type,
@@ -59,8 +102,9 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
 chrome.webRequest.onCompleted.addListener(
   (details) => {
     const pending = passivePending[details.requestId];
-    if (!pending) return;
     delete passivePending[details.requestId];
+    delete passiveBodies[details.requestId]; // cached responses skip onBeforeSendHeaders
+    if (!pending) return;
 
     let host = "", path = "";
     try { const u = new URL(details.url); host = u.host; path = u.pathname + u.search; } catch {}
@@ -76,14 +120,17 @@ chrome.webRequest.onCompleted.addListener(
       statusText: "",
       headers: pending.headers,
       respHeaders: respHdrs,
-      body: "",
-      respBody: "",
+      body: pending.body || "",
+      respBody: "",           // webRequest cannot read response bodies — debugger only
       length: 0,
       mimeType: respHdrs["content-type"] || "",
       time: pending.time,
       elapsed: Math.round((details.timeStamp || Date.now()) - pending.time),
       resourceType: pending.type || "other",
+      tabId: pending.tabId,
+      capture: "passive",
     };
+    addHostHeader(entry);
     passiveHistory.push(entry);
     // Cap to prevent unbounded growth
     if (passiveHistory.length > 8000) passiveHistory.splice(0, 1000);
@@ -96,9 +143,25 @@ chrome.webRequest.onCompleted.addListener(
 
 // Clean up stale pending entries (requests that never completed)
 chrome.webRequest.onErrorOccurred.addListener(
-  (details) => { delete passivePending[details.requestId]; },
+  (details) => {
+    delete passivePending[details.requestId];
+    delete passiveBodies[details.requestId];
+  },
   { urls: ["<all_urls>"] }
 );
+
+// Neither capture path reports Host: Chrome's network stack appends it below the
+// webRequest/CDP surface, and over HTTP/2 the wire carries :authority instead.
+// Without it a request sent on to Repeater or Intruder loses which vhost it was
+// aimed at, so put it back from the URL.
+function addHostHeader(entry) {
+  const hdrs = entry.headers || (entry.headers = {});
+  if (Object.keys(hdrs).some(k => k.toLowerCase() === "host")) return;
+  let host = entry.host;
+  if (!host) { try { host = new URL(entry.url).host; } catch { return; } }
+  if (!host) return;
+  entry.headers = { Host: host, ...hdrs }; // first line, as on the wire
+}
 
 // ── Settings (shared across tabs) ────────────────────────────────────────────
 let voidSettings = {
@@ -229,7 +292,11 @@ function getTab(id) {
       pending:      {},   // requestId → request object
       endpoints:    [],
       technologies: [],
-      headers:      {},   // security response headers
+      headers:      {},   // merged security response headers (all responses in tab)
+      headerSrc:    {},   // header name → URL of the response it came from
+      docHeaders:   null, // main-document response headers only (authoritative)
+      docUrl:       "",   // URL those main-document headers came from
+      docStatus:    null,
       history:      [],   // HTTP history entries
       historyMap:   {},   // Network.requestId → history index (for matching responses)
     });
@@ -269,12 +336,15 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
       time:         Date.now(),
       elapsed:      0,
       resourceType: params.type || "other",
+      tabId:        src.tabId,
+      capture:      "debugger",
     };
     try {
       const u = new URL(entry.url);
       entry.host = u.host;
       entry.path = u.pathname + u.search;
     } catch {}
+    addHostHeader(entry);
     t.history.push(entry);
     // Cap history to prevent unbounded memory growth
     if (t.history.length > 10000) {
@@ -382,9 +452,26 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
       "x-amz-request-id","x-robots-tag","link",
     ]);
     const raw = params.response?.headers || {};
+    const respUrl = params.response?.url || "";
+
+    // For a navigation's main resource CDP reuses the loaderId as the requestId.
+    // That distinguishes the top-level document from sub-frames, XHRs and assets
+    // — which matters because CSP/HSTS/X-Frame-Options are only meaningful for
+    // the top document, and the merged map below happily lets a third-party
+    // iframe's headers overwrite the real ones.
+    if (params.type === "Document" && params.requestId === params.loaderId) {
+      t.docHeaders = {};
+      Object.keys(raw).forEach(k => { t.docHeaders[k.toLowerCase()] = raw[k]; });
+      t.docUrl    = respUrl;
+      t.docStatus = params.response?.status ?? null;
+    }
+
     Object.keys(raw).forEach(k => {
       const lk = k.toLowerCase();
-      if (SAFE_HDRS.has(lk)) t.headers[lk] = raw[k];
+      if (SAFE_HDRS.has(lk)) {
+        t.headers[lk] = raw[k];
+        t.headerSrc[lk] = respUrl;
+      }
     });
 
     // Header-based tech detection (only for main document)
@@ -516,7 +603,8 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === "loading") {
     const t = tabs.get(tabId);
     if (t) {
-      t.endpoints = []; t.technologies = []; t.headers = {};
+      t.endpoints = []; t.technologies = []; t.headers = {}; t.headerSrc = {};
+      t.docHeaders = null; t.docUrl = ""; t.docStatus = null;
       t.pending = {}; t._epSeen = null;
     }
     probeInjectedTabs.delete(tabId);
@@ -860,6 +948,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         endpoints:    t.endpoints,
         technologies: t.technologies,
         headers:      t.headers,
+        headerSrc:    t.headerSrc,
+        docHeaders:   t.docHeaders,
+        docUrl:       t.docUrl,
+        docStatus:    t.docStatus,
       });
       break;
     }
@@ -874,13 +966,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case "GET_HISTORY": {
       if (!tabId) { sendResponse({ history: [] }); break; }
       const t = getTab(tabId);
-      // Merge debugger history (rich: has bodies) + passive history (basic: all tabs)
-      const seen = new Set(t.history.map(e => `${e.time}_${e.method}_${e.url}`));
+      // Merge debugger history (rich: has bodies) + passive history (basic: all tabs).
+      // The two sources timestamp the same request at different moments — Date.now()
+      // on Network.requestWillBeSent vs details.timeStamp on onBeforeSendHeaders — so
+      // an exact-time key never matches and every request showed up twice, once with
+      // an empty body. Pair them by tab+method+url within a window instead, one-to-one
+      // so genuinely repeated requests (polling) aren't collapsed into a single row.
+      const DEDUP_WINDOW = 3000; // ms
+      const dbgTimes = new Map(); // "tabId|METHOD|url" → [time, ...]
+      for (const e of t.history) {
+        const key = `${e.tabId ?? tabId}|${e.method}|${e.url}`;
+        if (!dbgTimes.has(key)) dbgTimes.set(key, []);
+        dbgTimes.get(key).push(e.time);
+      }
       const merged = [...t.history];
       for (const pe of passiveHistory) {
-        const key = `${pe.time}_${pe.method}_${pe.url}`;
-        if (!seen.has(key)) { merged.push(pe); seen.add(key); }
+        const times = dbgTimes.get(`${pe.tabId}|${pe.method}|${pe.url}`);
+        if (times) {
+          const i = times.findIndex(ts => Math.abs(ts - pe.time) < DEDUP_WINDOW);
+          if (i !== -1) { times.splice(i, 1); continue; } // debugger already has it, richer
+        }
+        merged.push(pe);
       }
+      merged.sort((a, b) => (a.time || 0) - (b.time || 0));
       sendResponse({ history: merged });
       break;
     }
@@ -913,6 +1021,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!tabId) { sendResponse({ ok: false }); break; }
       const t = getTab(tabId);
       t.endpoints = []; t.technologies = []; t.headers = {}; t._epSeen = null;
+      t.headerSrc = {}; t.docHeaders = null; t.docUrl = ""; t.docStatus = null;
       sendResponse({ ok: true });
       break;
     }

@@ -33,10 +33,7 @@ let filterHistMime = "";
 let filterHistScope = false;
 let filterHistExt = "";
 let filterHistReflect = false;
-let activeSubResp = "body";
 // Remember which sub-tab is active per side across request clicks
-let detailActiveReqPane = "req-headers";
-let detailActiveRespPane = "resp-headers";
 let historyData = [];
 let histDetailEntry = null;
 let histSortKey = "id";
@@ -135,6 +132,7 @@ function showTab(name) {
   if (name === "history") startHistPoll(); else stopHistPoll();
   if (name === "logger") { logSyncLocal(); logRender(); startLogSync(); logSyncConnect(); } else stopLogSync();
   if (name === "target") { pollHistory().then(() => renderSiteMap()); renderEndpoints(); }
+  if (name === "headers") pollHistory().then(renderHeaders);
   if (name === "probe" && probeInjected) probeStartPoll(); else probeStopPoll();
 }
 
@@ -181,6 +179,9 @@ function startBgSync() {
       setBadge("bdg-history", historyData.length);
     }
     setBadge("bdg-endpoints", (state.endpoints || []).length);
+    // renderHeaders used to run only at load, so a tab opened before any traffic
+    // stayed empty forever. Repaint while the tab is actually on screen.
+    if (!document.getElementById("tab-headers").classList.contains("hidden")) renderHeaders();
   }, 2000);
 }
 
@@ -583,23 +584,8 @@ function logOpenDetail(entry) {
   logDetailEntry = entry;
   const detail = document.getElementById("log-detail");
   document.getElementById("log-detail-title").textContent = `[${entry._logLabel}] ${entry.status||"\u2026"} ${entry.method} ${entry.url}`;
-  let reqHdrs = `${entry.method} ${entry.path||"/"} HTTP/1.1\nHost: ${entry.host}\n`;
-  reqHdrs += Object.entries(entry.headers||{}).map(([k,v])=>`${k}: ${v}`).join("\n");
-  document.getElementById("log-req-headers-pre").textContent = reqHdrs;
-  document.getElementById("log-req-body-pre").textContent = entry.body || "(empty)";
-  let resHdrs = entry.status ? `HTTP/1.1 ${entry.status} ${entry.statusText||""}\n` : "(no response)\n";
-  resHdrs += Object.entries(entry.respHeaders||{}).map(([k,v])=>`${k}: ${v}`).join("\n");
-  document.getElementById("log-resp-headers-pre").textContent = resHdrs;
-  const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
-  document.getElementById("log-resp-body-pre").textContent = tryPretty(entry.respBody || "(body not captured)", ct);
-  // Restore sub-tabs
-  detail.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
-  detail.querySelectorAll(".hist-detail-sub-tabs .sub-tab").forEach(t => t.classList.remove("active"));
-  const rp = detailActiveReqPane.replace("req-",""), sp = detailActiveRespPane.replace("resp-","");
-  document.getElementById(`log-req-${rp}-pane`).classList.remove("hidden");
-  document.getElementById(`log-resp-${sp}-pane`).classList.remove("hidden");
-  detail.querySelectorAll(`.sub-tab[data-logpane="req-${rp}"]`).forEach(t => t.classList.add("active"));
-  detail.querySelectorAll(`.sub-tab[data-logpane="resp-${sp}"]`).forEach(t => t.classList.add("active"));
+  document.getElementById("log-req-pre").textContent  = rawRequestText(entry);
+  document.getElementById("log-resp-pre").textContent = rawResponseText(entry);
   detail.classList.remove("hidden"); detail.classList.add("visible");
   document.getElementById("log-resizer").classList.add("visible");
   document.querySelectorAll("#log-tbody tr").forEach(r => r.classList.remove("hist-selected"));
@@ -871,6 +857,51 @@ function renderHistory() {
   }
 }
 
+// Response bodies only exist on debugger-captured entries — the webRequest passive
+// capture cannot read them at all, so say that instead of implying one is coming.
+function respBodyOr(entry) {
+  if (entry?.respBody) return entry.respBody;
+  return entry?.capture === "passive"
+    ? "(no body — passive capture; click Attach to capture response bodies)"
+    : "(body not captured)";
+}
+
+// ── Raw request/response text ───────────────────────────────────────────────
+// Every detail pane shows one merged view per side (request line + headers +
+// blank line + body) instead of separate Headers/Body sub-tabs.
+function entryHost(entry) {
+  if (entry.host) return entry.host;
+  try { return new URL(entry.url).host; } catch { return ""; }
+}
+
+function rawRequestText(entry) {
+  let path = entry.path || "";
+  if (!path) {
+    try { const u = new URL(entry.url); path = u.pathname + u.search; }
+    catch { path = entry.url || "/"; }
+  }
+  const hdrs = entry.headers || {};
+  let out = `${entry.method || "GET"} ${path} HTTP/1.1\n`;
+  // background.js normally injects Host at capture time; synthesise it here too
+  // so restored sessions and hand-built entries still show it.
+  if (!Object.keys(hdrs).some(k => k.toLowerCase() === "host")) {
+    const host = entryHost(entry);
+    if (host) out += `Host: ${host}\n`;
+  }
+  out += Object.entries(hdrs).map(([k, v]) => `${k}: ${v}`).join("\n");
+  if (entry.body) out += `\n\n${entry.body}`;
+  return out;
+}
+
+function rawResponseText(entry) {
+  let out = entry.status
+    ? `HTTP/1.1 ${entry.status} ${entry.statusText || ""}\n`
+    : "(no response)\n";
+  out += Object.entries(entry.respHeaders || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+  const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
+  return `${out}\n\n${tryPretty(respBodyOr(entry), ct)}`;
+}
+
 function esc(s) { return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function shortMime(m) {
   if (!m) return "";
@@ -889,31 +920,8 @@ function openHistDetail(entry) {
 
   title.textContent = `${entry.status || "…"} ${entry.method} ${entry.url}`;
 
-  // Request headers
-  let reqHdrs = `${entry.method} ${entry.path} HTTP/1.1\nHost: ${entry.host}\n`;
-  reqHdrs += Object.entries(entry.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-  document.getElementById("hist-req-headers-pre").textContent = reqHdrs;
-
-  // Request body
-  document.getElementById("hist-req-body-pre").textContent = entry.body || "(empty)";
-
-  // Response headers
-  let resHdrs = entry.status ? `HTTP/1.1 ${entry.status} ${entry.statusText}\n` : "(no response yet)\n";
-  resHdrs += Object.entries(entry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-  document.getElementById("hist-resp-headers-pre").textContent = resHdrs;
-
-  // Response body
-  const respBody = entry.respBody || "(body not captured yet)";
-  const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
-  document.getElementById("hist-resp-body-pre").textContent = tryPretty(respBody, ct);
-
-  // Restore remembered sub-tab selection
-  detail.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
-  detail.querySelectorAll(".hist-detail-sub-tabs .sub-tab").forEach(t => t.classList.remove("active"));
-  document.getElementById(`hist-${detailActiveReqPane}-pane`).classList.remove("hidden");
-  document.getElementById(`hist-${detailActiveRespPane}-pane`).classList.remove("hidden");
-  detail.querySelectorAll(`.sub-tab[data-histpane="${detailActiveReqPane}"]`).forEach(t => t.classList.add("active"));
-  detail.querySelectorAll(`.sub-tab[data-histpane="${detailActiveRespPane}"]`).forEach(t => t.classList.add("active"));
+  document.getElementById("hist-req-pre").textContent  = rawRequestText(entry);
+  document.getElementById("hist-resp-pre").textContent = rawResponseText(entry);
 
   detail.classList.remove("hidden");
   detail.classList.add("visible");
@@ -926,10 +934,15 @@ function openHistDetail(entry) {
     if (r._histEntry === entry) { r.classList.add("hist-selected"); break; }
   }
 
-  // Highlight reflections + clear search
-  highlightReflections(entry);
+  // Clear search first, then lay down the reflection highlight underneath it
   if (histReqSearch) histReqSearch.clear();
   if (histRespSearch) histRespSearch.clear();
+  histReflectBar?.update(entry);
+
+  const nRefl = histReflectBar?.count() ?? 0;
+  const badge = document.getElementById("hist-reflect-badge");
+  badge.classList.toggle("hidden", nRefl === 0);
+  if (nRefl) badge.textContent = `${nRefl} reflection${nRefl > 1 ? "s" : ""}`;
 }
 
 function closeHistDetail() {
@@ -1017,36 +1030,37 @@ function loadRepTabFast(tab) {
   autoSizeUrlInput(document.getElementById("rep-url"));
 
   clearRespPanes();
-  const subTabs = document.getElementById("resp-sub-tabs");
   const empty   = document.getElementById("resp-empty");
   const label   = document.getElementById("resp-label");
 
   if (tab.response) {
     const r = tab.response;
     label.textContent = `RESPONSE — ${r.status} ${r.statusText}${r.size ? ` ${(r.size/1024).toFixed(1)} KB` : ""}${r.elapsed ? ` ${r.elapsed}ms` : ""}`;
-    document.getElementById("resp-body-pre").textContent = tryPretty(r.body || "(empty body)", r.headers?.["content-type"] || "");
-    const hdrsText = Object.entries(r.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-    document.getElementById("resp-hdrs-pre").textContent = hdrsText || "(no headers)";
-    document.getElementById("resp-raw-pre").textContent  = `HTTP/1.1 ${r.status} ${r.statusText}\n${hdrsText}\n\n${r.body || ""}`;
-    subTabs.classList.remove("hidden");
+    document.getElementById("resp-body-pre").textContent = repRawResponse(r);
     empty.classList.add("hidden");
-    switchRespPane(activeSubResp);
+    repReflectBar?.update(repReflectEntry(r));
   } else {
     label.textContent = "RESPONSE";
-    subTabs.classList.add("hidden");
     empty.classList.remove("hidden");
+    repReflectBar?.update(null);
   }
   updateRepHistButtons();
 }
 
-// Set input/textarea value preserving undo history
+// Set input/textarea value preserving undo history.
+// Assigning .value directly wipes the browser's native undo stack, so Ctrl+Z
+// does nothing afterwards. execCommand keeps it — deprecated, but it is still
+// the only way to script an edit the undo stack knows about.
 function setFieldValue(field, val) {
+  if (field.value === val) return;
+  const active = document.activeElement;
   field.focus();
   field.select();
-  // execCommand('insertText') preserves native undo stack
-  if (!document.execCommand("insertText", false, val)) {
-    field.value = val; // fallback
-  }
+  const ok = val
+    ? document.execCommand("insertText", false, val)
+    : document.execCommand("delete"); // insertText("") is a no-op, so clear explicitly
+  if (!ok) field.value = val; // fallback: content is right, undo stack is lost
+  if (active && active !== field && typeof active.focus === "function") active.focus();
 }
 
 function loadRepTab(tab) {
@@ -1069,24 +1083,19 @@ function loadRepTab(tab) {
 
   // Restore response if saved
   clearRespPanes();
-  const subTabs = document.getElementById("resp-sub-tabs");
   const empty   = document.getElementById("resp-empty");
   const label   = document.getElementById("resp-label");
 
   if (tab.response) {
     const r = tab.response;
     label.textContent = `RESPONSE — ${r.status} ${r.statusText}${r.size ? ` ${(r.size/1024).toFixed(1)} KB` : ""}${r.elapsed ? ` ${r.elapsed}ms` : ""}`;
-    document.getElementById("resp-body-pre").textContent = tryPretty(r.body || "(empty body)", r.headers?.["content-type"] || "");
-    const hdrsText = Object.entries(r.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-    document.getElementById("resp-hdrs-pre").textContent = hdrsText || "(no headers)";
-    document.getElementById("resp-raw-pre").textContent  = `HTTP/1.1 ${r.status} ${r.statusText}\n${hdrsText}\n\n${r.body || ""}`;
-    subTabs.classList.remove("hidden");
+    document.getElementById("resp-body-pre").textContent = repRawResponse(r);
     empty.classList.add("hidden");
-    switchRespPane(activeSubResp);
+    repReflectBar?.update(repReflectEntry(r));
   } else {
     label.textContent = "RESPONSE";
-    subTabs.classList.add("hidden");
     empty.classList.remove("hidden");
+    repReflectBar?.update(null);
   }
   updateRepHistButtons();
 }
@@ -1263,13 +1272,11 @@ async function doSend() {
   const respLabel = document.getElementById("resp-label");
   const loading   = document.getElementById("resp-loading");
   const empty     = document.getElementById("resp-empty");
-  const subTabs   = document.getElementById("resp-sub-tabs");
 
   sendBtn.disabled   = true;
   sendBtn.textContent = "Sending…";
   loading.classList.remove("hidden");
   empty.classList.add("hidden");
-  subTabs.classList.add("hidden");
   respLabel.textContent = "RESPONSE — waiting…";
   clearRespPanes();
 
@@ -1290,8 +1297,7 @@ async function doSend() {
   if (!res || !res.ok) {
     respLabel.textContent = "RESPONSE — error";
     document.getElementById("resp-body-pre").textContent = res?.error || "No response from background service worker.";
-    switchRespPane("body");
-    subTabs.classList.remove("hidden");
+    repReflectBar?.update(null);
     return;
   }
 
@@ -1299,20 +1305,8 @@ async function doSend() {
   const ms   = res.elapsed ? ` ${res.elapsed}ms` : "";
   respLabel.textContent = `RESPONSE — ${res.status} ${res.statusText}${kb}${ms}`;
 
-  // Body pane
-  const bodyText = tryPretty(res.body || "(empty body)", res.headers?.["content-type"] || "");
-  document.getElementById("resp-body-pre").textContent = bodyText;
-
-  // Headers pane
-  const hdrsText = Object.entries(res.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-  document.getElementById("resp-hdrs-pre").textContent = hdrsText || "(no headers)";
-
-  // Raw pane
-  const rawText = `HTTP/1.1 ${res.status} ${res.statusText}\n${hdrsText}\n\n${res.body || ""}`;
-  document.getElementById("resp-raw-pre").textContent = rawText;
-
-  subTabs.classList.remove("hidden");
-  switchRespPane(activeSubResp);
+  document.getElementById("resp-body-pre").textContent = repRawResponse(res);
+  repReflectBar?.update(repReflectEntry(res));
 
   // Save response to current repeater tab + push to history
   const curTab = repTabs.find(t => t.id === repActiveTab);
@@ -1331,18 +1325,38 @@ function tryPretty(body, contentType) {
 }
 
 function clearRespPanes() {
-  ["resp-body-pre","resp-hdrs-pre","resp-raw-pre"].forEach(id => {
-    document.getElementById(id).textContent = "";
+  ["resp-body-pre"].forEach(id => {
+    const pre = document.getElementById(id);
+    pre.textContent = "";
+    delete pre._reflectOrig; // drop the stale reflection baseline with the text
+    delete pre._origText;
   });
 }
 
-function switchRespPane(name) {
-  activeSubResp = name;
-  document.querySelectorAll("#resp-sub-tabs .sub-tab").forEach(t => t.classList.toggle("active", t.dataset.resp === name));
-  document.querySelectorAll("#rep-resp-pane .resp-pane").forEach(p => {
-    p.classList.toggle("active", p.id === `resp-pane-${name}`);
-    p.classList.toggle("hidden", p.id !== `resp-pane-${name}`);
+// Repeater has no history entry to hand the reflection engine, so synthesise the
+// shape detectReflections() expects from the live editors + last response.
+function repReflectEntry(res) {
+  if (!res) return null;
+  const headers = {};
+  document.getElementById("rep-headers").value.split("\n").forEach(line => {
+    const i = line.indexOf(":");
+    if (i > 0) headers[line.slice(0, i).trim()] = line.slice(i + 1).trim();
   });
+  return {
+    url:         document.getElementById("rep-url").value.trim(),
+    headers,
+    body:        document.getElementById("rep-body-ta").value,
+    respBody:    res.body || "",
+    respHeaders: res.headers || {},
+  };
+}
+
+// Repeater shows one merged response view (status line + headers + body)
+// instead of Body/Headers/Raw sub-tabs.
+function repRawResponse(r) {
+  const hdrsText = Object.entries(r.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+  const body = tryPretty(r.body || "(empty body)", r.headers?.["content-type"] || "");
+  return `HTTP/1.1 ${r.status} ${r.statusText || ""}\n${hdrsText}\n\n${body}`;
 }
 
 // Resizable split pane (horizontal)
@@ -1518,6 +1532,7 @@ function createPaneSearch(container, inputEl, countEl) {
       if (pre._origText !== undefined) { pre.textContent = pre._origText; delete pre._origText; }
     });
     state.matches = []; state.idx = -1;
+    reflectReapply.get(container)?.(); // put the reflection layer back underneath
   }
 
   function doSearch(query) {
@@ -1571,44 +1586,141 @@ function createPaneSearch(container, inputEl, countEl) {
 
 let histReqSearch, histRespSearch;
 
-function highlightReflections(entry) {
-  const reflections = detectReflections(entry);
-  const badge = document.getElementById("hist-reflect-badge");
-  if (!reflections.length) { badge.classList.add("hidden"); return; }
+// ── Reflection highlighting ─────────────────────────────────────────────────
+// Each distinct reflected value gets its own palette slot, so you can tell at a
+// glance which request value landed where. Slot N ↔ CSS class .reflect-cN.
+const REFLECT_HEX = ["#f85149", "#58a6ff", "#3fb950", "#e3b341",
+                     "#bc8cff", "#39c5cf", "#ff7b9c", "#ff9f45"];
+const REFLECT_MAX_SPANS = 5000; // guard against pathological responses
 
-  badge.classList.remove("hidden");
-  badge.textContent = `${reflections.length} reflection${reflections.length > 1 ? "s" : ""}`;
+function computeReflections(entry) {
+  // Longest first: a short value nested inside a longer one must not steal its
+  // span (e.g. "admin" inside "administrator"). The overlap pass below relies
+  // on this ordering for priority.
+  const uniq = [...new Set(detectReflections(entry))]
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  return uniq.map((value, i) => ({
+    value,
+    cls:   `reflect-c${i % REFLECT_HEX.length}`,
+    color: REFLECT_HEX[i % REFLECT_HEX.length],
+  }));
+}
 
-  // Highlight reflected values in response panes
-  document.querySelectorAll("#hist-detail .hist-detail-pane:last-child .raw-pre").forEach(pre => {
-    const text = pre.textContent;
-    pre._origText = text;
-    let result = text;
-    for (const val of reflections) {
-      result = result.split(val).join(`\x00RSTART\x00${val}\x00REND\x00`);
+function reflectMarkPre(pre, reflections) {
+  const text = pre._reflectOrig !== undefined ? pre._reflectOrig : pre.textContent;
+  if (!text) return 0;
+
+  const spans = [];
+  for (const r of reflections) {
+    let pos = 0;
+    while ((pos = text.indexOf(r.value, pos)) !== -1) {
+      spans.push({ start: pos, end: pos + r.value.length, r });
+      pos += r.value.length;
+      if (spans.length >= REFLECT_MAX_SPANS) break;
     }
-    if (result === text) return;
+    if (spans.length >= REFLECT_MAX_SPANS) break;
+  }
+  if (!spans.length) return 0;
 
-    const frag = document.createDocumentFragment();
-    const parts = result.split("\x00");
-    let inReflect = false;
-    for (const part of parts) {
-      if (part === "RSTART") { inReflect = true; continue; }
-      if (part === "REND") { inReflect = false; continue; }
-      if (inReflect) {
-        const mark = document.createElement("mark");
-        mark.className = "reflect-hl";
-        mark.textContent = part;
-        mark.title = "Reflected from request";
-        frag.appendChild(mark);
-      } else {
-        frag.appendChild(document.createTextNode(part));
-      }
+  // spans arrive longest-value-first; keep that priority, drop anything overlapping
+  const kept = [];
+  for (const s of spans) {
+    if (kept.some(k => s.start < k.end && k.start < s.end)) continue;
+    kept.push(s);
+  }
+  kept.sort((a, b) => a.start - b.start);
+
+  const frag = document.createDocumentFragment();
+  let last = 0;
+  for (const s of kept) {
+    if (s.start > last) frag.appendChild(document.createTextNode(text.slice(last, s.start)));
+    const mark = document.createElement("mark");
+    mark.className = `reflect-hl ${s.r.cls}`;
+    mark.textContent = text.slice(s.start, s.end);
+    mark.title = `Reflected from request: ${s.r.value}`;
+    frag.appendChild(mark);
+    last = s.end;
+  }
+  if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+
+  pre._reflectOrig = text;
+  pre.textContent = "";
+  pre.appendChild(frag);
+  return kept.length;
+}
+
+// container element → re-apply fn, so a search clearing its own highlights can
+// put the reflection layer back underneath instead of wiping it.
+const reflectReapply = new WeakMap();
+
+function reflectClear(container) {
+  container.querySelectorAll(".raw-pre").forEach(pre => {
+    if (pre._reflectOrig !== undefined) {
+      pre.textContent = pre._reflectOrig;
+      delete pre._reflectOrig;
     }
-    pre.textContent = "";
-    pre.appendChild(frag);
   });
 }
+
+function reflectApply(container, reflections) {
+  reflectClear(container);
+  let n = 0;
+  if (reflections.length) {
+    container.querySelectorAll(".raw-pre").forEach(pre => { n += reflectMarkPre(pre, reflections); });
+  }
+  return n;
+}
+
+// Wires one checkbox + chip legend to a set of panes. getContainers() is a thunk
+// because some panes (intruder detail) only exist once a row is opened.
+function createReflectBar(toggleId, chipsId, getContainers) {
+  const toggle = document.getElementById(toggleId);
+  const chips  = document.getElementById(chipsId);
+  let current = [];
+
+  function paint() {
+    const on = toggle.checked;
+    for (const c of getContainers()) {
+      if (!c) continue;
+      if (on) reflectApply(c, current); else reflectClear(c);
+      reflectReapply.set(c, on ? () => reflectApply(c, current) : null);
+    }
+    chips.classList.toggle("hidden", !on);
+  }
+
+  function update(entry) {
+    current = entry ? computeReflections(entry) : [];
+    chips.replaceChildren();
+    if (!current.length) {
+      const none = document.createElement("span");
+      none.className = "reflect-bar-none";
+      none.textContent = "no reflections";
+      chips.appendChild(none);
+    } else {
+      for (const r of current) {
+        const chip = document.createElement("span");
+        chip.className = "reflect-chip";
+        chip.title = r.value;
+        const dot = document.createElement("span");
+        dot.className = "reflect-chip-dot";
+        dot.style.background = r.color;
+        chip.appendChild(dot);
+        chip.appendChild(document.createTextNode(
+          r.value.length > 28 ? `${r.value.slice(0, 28)}…` : r.value));
+        chips.appendChild(chip);
+      }
+    }
+    paint();
+  }
+
+  toggle.addEventListener("change", paint);
+  return { update, repaint: paint, count: () => current.length };
+}
+
+// Built in setup() once the DOM exists; call sites use ?. because repeater tab
+// restore can fire during session load, before setup has run.
+let histReflectBar = null, repReflectBar = null, intrReflectBar = null;
 
 
 // ═══════════════════════════ HEADERS ═════════════════════════════════════════
@@ -1667,14 +1779,112 @@ const SEC_CHECKS = [
     }},
 ];
 
-function renderHeaders() {
-  const hdrs  = state.headers || {};
-  const keys  = Object.keys(hdrs);
-  const empty = document.getElementById("hdr-empty");
+function lowerKeys(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj || {})) out[k.toLowerCase()] = v;
+  return out;
+}
 
-  // Security grid
-  const grid = document.getElementById("hdr-sec-grid");
+// Where the Headers tab gets its data.
+//
+// state.docHeaders / state.headers are filled only by the debugger's
+// Network.responseReceived. Since passive webRequest capture became the default
+// that leaves this tab blank unless you press Attach — even though historyData
+// is full of entries carrying respHeaders. So fall back to history: pick the
+// most recent main-document response and use its headers.
+function headerSources() {
+  const stateDoc = state.docHeaders && Object.keys(state.docHeaders).length
+    ? state.docHeaders : null;
+  if (stateDoc) {
+    return {
+      docHdrs: stateDoc, docUrl: state.docUrl || "", docStatus: state.docStatus,
+      merged: state.headers || {}, headerSrc: state.headerSrc || {}, from: "debugger",
+    };
+  }
+
+  // Passive capture is cross-tab, so historyData can hold another tab's
+  // navigation. This tab is the one being described. Entries with no tabId
+  // (restored sessions) are kept rather than silently dropped.
+  const mine = historyData.filter(e => e.tabId === undefined || e.tabId === TAB_ID);
+
+  // "Document" is the CDP resource type, "main_frame" the webRequest one.
+  // History is time-sorted, so the last match is the current page.
+  const docs = mine.filter(e =>
+    (e.resourceType === "Document" || e.resourceType === "main_frame") &&
+    e.respHeaders && Object.keys(e.respHeaders).length);
+  const doc = docs.length ? docs[docs.length - 1] : null;
+
+  // All headers seen anywhere in this tab, newest wins, each tagged with its URL.
+  const merged = {}, headerSrc = {};
+  for (const e of mine) {
+    for (const [k, v] of Object.entries(e.respHeaders || {})) {
+      const lk = k.toLowerCase();
+      merged[lk] = v;
+      headerSrc[lk] = e.url || "";
+    }
+  }
+
+  return {
+    docHdrs:   doc ? lowerKeys(doc.respHeaders) : null,
+    docUrl:    doc ? doc.url : "",
+    docStatus: doc ? doc.status : null,
+    merged, headerSrc, from: "history",
+  };
+}
+
+function renderHeaders() {
+  // Which header set is authoritative?
+  //
+  // The merged map is every response seen in the tab, so a third-party iframe or
+  // a CDN asset can overwrite the values the top-level page actually sent.
+  // Judging CSP / HSTS / X-Frame-Options off that is misleading — those headers
+  // only mean anything for the main document. So the analysis runs on the
+  // navigation response whenever we have one, and the UI says which URL it is
+  // describing.
+  const src       = headerSources();
+  const docHdrs   = src.docHdrs;
+  const merged    = src.merged;
+  const usingDoc  = !!docHdrs && Object.keys(docHdrs).length > 0;
+  const hdrs      = usingDoc ? docHdrs : merged;
+  const keys      = Object.keys(hdrs);
+  const empty     = document.getElementById("hdr-empty");
+  const grid      = document.getElementById("hdr-sec-grid");
+  const allList   = document.getElementById("hdr-all-list");
+
+  // ── Reference bar ─────────────────────────────────────────────────────────
+  const refUrl  = document.getElementById("hdr-ref-url");
+  const refStat = document.getElementById("hdr-ref-status");
+  const refWarn = document.getElementById("hdr-ref-warn");
+
+  if (usingDoc) {
+    refUrl.textContent  = src.docUrl || "(unknown URL)";
+    refUrl.title        = src.docUrl || "";
+    refStat.textContent = src.docStatus ? `HTTP ${src.docStatus}` : "";
+    refWarn.classList.add("hidden");
+  } else if (keys.length) {
+    // Happens when the debugger attached after the page had already navigated,
+    // so we never saw the top-level response.
+    refUrl.textContent  = "no main-document response seen — reload the page to capture it";
+    refUrl.title        = "";
+    refStat.textContent = "";
+    refWarn.textContent = "merged from all responses — values may come from sub-frames or third-party assets";
+    refWarn.classList.remove("hidden");
+  } else {
+    refUrl.textContent  = "—";
+    refUrl.title        = "";
+    refStat.textContent = "";
+    refWarn.classList.add("hidden");
+  }
+
+  // Nothing captured at all: don't render a wall of "Missing" tiles, which reads
+  // as "this site ships no security headers" when the truth is "we saw nothing".
   grid.replaceChildren();
+  allList.replaceChildren();
+  if (!keys.length) {
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
 
   const results = SEC_CHECKS.map(h => ({ ...h, value: hdrs[h.name] || null, ...h.check(hdrs[h.name] || null, hdrs) }));
   const fails = results.filter(r => r.st === "fail").length;
@@ -1697,18 +1907,39 @@ function renderHeaders() {
   });
   grid.appendChild(tilesWrap);
 
-  // All headers list
-  const allList = document.getElementById("hdr-all-list");
-  allList.replaceChildren();
+  // ── All headers ───────────────────────────────────────────────────────────
+  // Default: just the main document's headers, so what you read is what the page
+  // sent. Toggle on to fold in every other response, each labelled with the URL
+  // it came from — a value from another origin is flagged, since that is exactly
+  // the case that used to silently corrupt this view.
+  const showAll = document.getElementById("hdr-show-all").checked;
+  let docHost = "";
+  try { docHost = new URL(src.docUrl).host; } catch {}
 
-  const sorted = keys.sort();
-  sorted.forEach(k => {
+  const rows = new Map(); // name → { value, from }
+  for (const k of Object.keys(hdrs)) rows.set(k, { value: hdrs[k], from: src.docUrl || "" });
+  if (showAll) {
+    for (const k of Object.keys(merged)) {
+      if (rows.has(k)) continue;
+      rows.set(k, { value: merged[k], from: src.headerSrc?.[k] || "" });
+    }
+  }
+
+  for (const k of [...rows.keys()].sort()) {
+    const { value, from } = rows.get(k);
     const row = el("div", "hdr-row");
-    ap(row, txt("span", "hdr-key", k), txt("span", "hdr-val", hdrs[k]));
+    ap(row, txt("span", "hdr-key", k), txt("span", "hdr-val", value));
+    if (showAll && from) {
+      let srcHost = "";
+      try { srcHost = new URL(from).host; } catch {}
+      const foreign = docHost && srcHost && srcHost !== docHost;
+      const s = txt("span", `hdr-src${foreign ? " hdr-src-foreign" : ""}`,
+        `${foreign ? "⚠ " : ""}from ${from}`);
+      s.title = from;
+      row.appendChild(s);
+    }
     allList.appendChild(row);
-  });
-
-  empty.classList.toggle("hidden", keys.length > 0 || results.length > 0);
+  }
 }
 
 // ═══════════════════════════ TARGET / SITE MAP ════════════════════════════════
@@ -1970,26 +2201,8 @@ function openTgtDetail(entry) {
   const detail = document.getElementById("tgt-detail");
   document.getElementById("tgt-detail-title").textContent = `${entry.status || "…"} ${entry.method} ${entry.url}`;
 
-  let reqHdrs = `${entry.method} ${entry.path || "/"} HTTP/1.1\nHost: ${entry.host}\n`;
-  reqHdrs += Object.entries(entry.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-  document.getElementById("tgt-req-headers-pre").textContent = reqHdrs;
-  document.getElementById("tgt-req-body-pre").textContent = entry.body || "(empty)";
-
-  let resHdrs = entry.status ? `HTTP/1.1 ${entry.status} ${entry.statusText || ""}\n` : "(no response)\n";
-  resHdrs += Object.entries(entry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-  document.getElementById("tgt-resp-headers-pre").textContent = resHdrs;
-  const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
-  document.getElementById("tgt-resp-body-pre").textContent = tryPretty(entry.respBody || "(body not captured)", ct);
-
-  // Restore remembered sub-tab selection
-  detail.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
-  detail.querySelectorAll(".hist-detail-sub-tabs .sub-tab").forEach(t => t.classList.remove("active"));
-  const tgtReqP = detailActiveReqPane.replace("req-","");
-  const tgtRespP = detailActiveRespPane.replace("resp-","");
-  document.getElementById(`tgt-req-${tgtReqP}-pane`).classList.remove("hidden");
-  document.getElementById(`tgt-resp-${tgtRespP}-pane`).classList.remove("hidden");
-  detail.querySelectorAll(`.sub-tab[data-tgtpane="req-${tgtReqP}"]`).forEach(t => t.classList.add("active"));
-  detail.querySelectorAll(`.sub-tab[data-tgtpane="resp-${tgtRespP}"]`).forEach(t => t.classList.add("active"));
+  document.getElementById("tgt-req-pre").textContent  = rawRequestText(entry);
+  document.getElementById("tgt-resp-pre").textContent = rawResponseText(entry);
 
   detail.classList.remove("hidden");
   detail.classList.add("visible");
@@ -2019,26 +2232,8 @@ function openEpDetail(entry) {
   const detail = document.getElementById("ep-detail");
   document.getElementById("ep-detail-title").textContent = `${histEntry.status || "…"} ${histEntry.method || entry.method || "GET"} ${entry.url}`;
 
-  let reqHdrs = `${histEntry.method || "GET"} ${histEntry.path || "/"} HTTP/1.1\nHost: ${histEntry.host || ""}\n`;
-  reqHdrs += Object.entries(histEntry.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-  document.getElementById("ep-req-headers-pre").textContent = reqHdrs;
-  document.getElementById("ep-req-body-pre").textContent = histEntry.body || "(empty)";
-
-  let resHdrs = histEntry.status ? `HTTP/1.1 ${histEntry.status} ${histEntry.statusText || ""}\n` : "(no response)\n";
-  resHdrs += Object.entries(histEntry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-  document.getElementById("ep-resp-headers-pre").textContent = resHdrs;
-  const ct = histEntry.respHeaders?.["content-type"] || histEntry.respHeaders?.["Content-Type"] || "";
-  document.getElementById("ep-resp-body-pre").textContent = tryPretty(histEntry.respBody || "(body not captured)", ct);
-
-  // Restore remembered sub-tab selection
-  detail.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
-  detail.querySelectorAll(".hist-detail-sub-tabs .sub-tab").forEach(t => t.classList.remove("active"));
-  const epReqP = detailActiveReqPane.replace("req-","");
-  const epRespP = detailActiveRespPane.replace("resp-","");
-  document.getElementById(`ep-req-${epReqP}-pane`).classList.remove("hidden");
-  document.getElementById(`ep-resp-${epRespP}-pane`).classList.remove("hidden");
-  detail.querySelectorAll(`.sub-tab[data-eppane="req-${epReqP}"]`).forEach(t => t.classList.add("active"));
-  detail.querySelectorAll(`.sub-tab[data-eppane="resp-${epRespP}"]`).forEach(t => t.classList.add("active"));
+  document.getElementById("ep-req-pre").textContent  = rawRequestText(histEntry);
+  document.getElementById("ep-resp-pre").textContent = rawResponseText(histEntry);
 
   detail.classList.remove("hidden");
   detail.classList.add("visible");
@@ -2055,10 +2250,69 @@ function closeEpDetail() {
 
 // ═══════════════════════════ INTRUDER ═════════════════════════════════════════
 
+let intrDetailEntry = null;
+let intrReflectOnly = false;
+let intrReqSearch, intrRespSearch;
+
+// The intruder builds requests from a raw template rather than history entries,
+// so reshape a result into what detectReflections() expects.
+function intrReflectEntry(e) {
+  const headers = {};
+  (e.reqHeaders || "").split("\n").forEach(line => {
+    const i = line.indexOf(":");
+    if (i > 0) headers[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  });
+  return {
+    url:         e.reqUrl || "",
+    headers,
+    body:        e.reqBody || "",
+    respBody:    e.body || "",
+    respHeaders: e.respHeaders || {},
+  };
+}
+
+function intrOpenDetail(entry) {
+  intrDetailEntry = entry;
+  const detail = document.getElementById("intr-detail");
+
+  document.getElementById("intr-detail-title").textContent =
+    `${entry.status} ${entry.reqMethod || "GET"} — ${entry.payload}`;
+
+  // The intruder keeps its request as raw header text, so build the view from
+  // that rather than from a header map.
+  let host = "", path = entry.reqUrl || "/";
+  try { const u = new URL(entry.reqUrl); host = u.host; path = u.pathname + u.search; } catch {}
+  let req = `${entry.reqMethod || "GET"} ${path} HTTP/1.1\n`;
+  if (host && !/^host\s*:/im.test(entry.reqHeaders || "")) req += `Host: ${host}\n`;
+  req += entry.reqHeaders || "";
+  if (entry.reqBody) req += `\n\n${entry.reqBody}`;
+  document.getElementById("intr-req-pre").textContent = req;
+
+  document.getElementById("intr-resp-pre").textContent = rawResponseText({
+    status: entry.status, statusText: entry.statusText,
+    respHeaders: entry.respHeaders, respBody: entry.body,
+  });
+
+  detail.classList.remove("hidden");
+  document.querySelectorAll("#intr-results tr").forEach(r =>
+    r.classList.toggle("intr-selected", r._intrEntry === entry));
+
+  if (intrReqSearch)  intrReqSearch.clear();
+  if (intrRespSearch) intrRespSearch.clear();
+  intrReflectBar?.update(intrReflectEntry(entry));
+}
+
+function intrCloseDetail() {
+  intrDetailEntry = null;
+  document.getElementById("intr-detail").classList.add("hidden");
+  document.querySelectorAll("#intr-results tr").forEach(r => r.classList.remove("intr-selected"));
+}
+
 function intrRenderResults() {
   const tbody = document.getElementById("intr-results");
   tbody.replaceChildren();
   let filtered = intrResults;
+  if (intrReflectOnly) filtered = filtered.filter(e => e.reflected);
   for (const [field, allowed] of Object.entries(intrColFilters)) {
     if (allowed) filtered = filtered.filter(e => allowed.has(String(e[field] ?? "")));
   }
@@ -2100,6 +2354,15 @@ function intrRenderResults() {
       <td class="hist-td-elapsed">${Number(entry.elapsed) || 0}</td>
       <td class="hist-td-mime" title="${esc(preview)}">${esc(preview)}</td>
     `;
+    if (entry.reflected) {
+      const dot = document.createElement("span");
+      dot.className = "hist-reflect-dot";
+      dot.title = `${entry.reflected} reflection${entry.reflected > 1 ? "s" : ""} in response`;
+      tr.querySelector("td:nth-child(2)").appendChild(dot);
+    }
+    tr._intrEntry = entry;
+    if (entry === intrDetailEntry) tr.classList.add("intr-selected");
+    tr.addEventListener("click", () => intrOpenDetail(entry));
     tbody.appendChild(tr);
   }
 }
@@ -2255,6 +2518,7 @@ async function intrStart() {
   intrAbort = new AbortController();
   const tbody = document.getElementById("intr-results");
   tbody.replaceChildren();
+  intrCloseDetail(); // previous run's rows are gone
 
   document.getElementById("intr-start").disabled = true;
   document.getElementById("intr-stop").disabled  = false;
@@ -2306,7 +2570,16 @@ async function intrStart() {
         length: res?.size || 0,
         elapsed: res?.elapsed || 0,
         body: res?.body || res?.error || "",
+        // kept so the detail pane can rebuild the exact request that was sent
+        reqUrl:      parsed.url || url,
+        reqMethod:   parsed.method || method,
+        reqHeaders:  rawHdrs,
+        reqBody:     parsed.body || "",
+        respHeaders: res?.headers || {},
       };
+      // Computed once here rather than per render — the row indicator and the
+      // Reflections filter both read it.
+      entry.reflected = detectReflections(intrReflectEntry(entry)).length;
       intrResults.push(entry);
 
       // Add row to table
@@ -2324,6 +2597,14 @@ async function intrStart() {
         <td class="hist-td-elapsed">${Number(entry.elapsed) || 0}</td>
         <td class="hist-td-mime" title="${esc(preview)}">${esc(preview)}</td>
       `;
+      if (entry.reflected) {
+        const dot = document.createElement("span");
+        dot.className = "hist-reflect-dot";
+        dot.title = `${entry.reflected} reflection${entry.reflected > 1 ? "s" : ""} in response`;
+        tr.querySelector("td:nth-child(2)").appendChild(dot);
+      }
+      tr._intrEntry = entry;
+      tr.addEventListener("click", () => intrOpenDetail(entry));
       tbody.appendChild(tr);
     });
 
@@ -2358,17 +2639,27 @@ function intrSendToIntruder(req) {
   ensureMethod(mSel, method);
   mSel.value = method;
   const intrUrlInp = document.getElementById("intr-url");
-  intrUrlInp.value = url;
+  setFieldValue(intrUrlInp, url);
   autoSizeUrlInput(intrUrlInp);
 
   // Build raw request template
   let raw = "";
   if (rawHdrs) raw += rawHdrs;
   if (body) raw += "\n\n" + body;
-  document.getElementById("intr-request").value = raw;
+  setFieldValue(document.getElementById("intr-request"), raw); // keeps Ctrl+Z working
   intrCountPositions();
-  showTab("intruder");
+
+  // Flash the Intruder badge rather than switching tabs — same as sendToRepeater.
+  // Jumping tabs mid-triage loses your place in whatever list you were working.
+  const bdg = document.getElementById("bdg-intruder");
+  bdg.textContent = "+1";
+  bdg.className = "bdg has-data";
+  clearTimeout(bdg._timer);
+  bdg._timer = setTimeout(() => { bdg.className = "bdg hidden"; }, 3000);
 }
+
+// Strip § position markers — the repeater has no concept of them
+function intrStripPositions(raw) { return (raw || "").replace(/§/g, ""); }
 
 // ═══════════════════════════ PROBE (DOM XSS Hunter) ══════════════════════════
 
@@ -3488,26 +3779,8 @@ function sensOpenDetail(finding) {
   document.getElementById("sens-detail-title").textContent =
     `[${finding.severity.toUpperCase()}] ${finding.desc} — ${finding.match.slice(0, 60)}`;
 
-  let reqHdrs = `${entry.method} ${entry.path || "/"} HTTP/1.1\nHost: ${entry.host}\n`;
-  reqHdrs += Object.entries(entry.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-  document.getElementById("sens-req-headers-pre").textContent = reqHdrs;
-  document.getElementById("sens-req-body-pre").textContent = entry.body || "(empty)";
-
-  let resHdrs = entry.status ? `HTTP/1.1 ${entry.status} ${entry.statusText || ""}\n` : "(no response)\n";
-  resHdrs += Object.entries(entry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-  document.getElementById("sens-resp-headers-pre").textContent = resHdrs;
-  const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
-  document.getElementById("sens-resp-body-pre").textContent = tryPretty(entry.respBody || "(body not captured)", ct);
-
-  // Restore remembered sub-tab selection
-  detail.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
-  detail.querySelectorAll(".hist-detail-sub-tabs .sub-tab").forEach(t => t.classList.remove("active"));
-  const rp = detailActiveReqPane.replace("req-","");
-  const sp = detailActiveRespPane.replace("resp-","");
-  document.getElementById(`sens-req-${rp}-pane`).classList.remove("hidden");
-  document.getElementById(`sens-resp-${sp}-pane`).classList.remove("hidden");
-  detail.querySelectorAll(`.sub-tab[data-senspane="req-${rp}"]`).forEach(t => t.classList.add("active"));
-  detail.querySelectorAll(`.sub-tab[data-senspane="resp-${sp}"]`).forEach(t => t.classList.add("active"));
+  document.getElementById("sens-req-pre").textContent  = rawRequestText(entry);
+  document.getElementById("sens-resp-pre").textContent = rawResponseText(entry);
 
   detail.classList.remove("hidden");
   detail.classList.add("visible");
@@ -3522,25 +3795,9 @@ function sensOpenDetail(finding) {
   // Auto-search: put the finding match in the correct search box and trigger
   const matchText = finding.match || "";
   const sec = finding.section || "";
+  // Headers and body now share one pane per side, so only the side matters —
+  // the search below scrolls to the match wherever it sits.
   const isReqSide = sec.startsWith("req_");
-
-  // Switch to the right sub-tab (body for body findings, headers for header findings)
-  const showBody = sec.endsWith("_body");
-  if (isReqSide) {
-    const pane = showBody ? "body" : "headers";
-    detail.querySelectorAll("#sens-req-side .hist-sub-pane").forEach(p => p.classList.add("hidden"));
-    detail.querySelectorAll("#sens-req-side .sub-tab").forEach(t => t.classList.remove("active"));
-    document.getElementById(`sens-req-${pane}-pane`).classList.remove("hidden");
-    detail.querySelectorAll(`.sub-tab[data-senspane="req-${pane}"]`).forEach(t => t.classList.add("active"));
-    detailActiveReqPane = `req-${pane}`;
-  } else {
-    const pane = showBody ? "body" : "headers";
-    detail.querySelectorAll("#sens-resp-side .hist-sub-pane").forEach(p => p.classList.add("hidden"));
-    detail.querySelectorAll("#sens-resp-side .sub-tab").forEach(t => t.classList.remove("active"));
-    document.getElementById(`sens-resp-${pane}-pane`).classList.remove("hidden");
-    detail.querySelectorAll(`.sub-tab[data-senspane="resp-${pane}"]`).forEach(t => t.classList.add("active"));
-    detailActiveRespPane = `resp-${pane}`;
-  }
 
   // Trigger search with the match text in the correct pane
   setTimeout(() => {
@@ -4059,7 +4316,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // ── Scoped Ctrl+A: select only the pane under the mouse ────────────────────
   let _hoveredPane = null;
   document.addEventListener("mouseover", e => {
-    _hoveredPane = e.target.closest(".raw-pre, .raw-ta, .hist-sub-pane, .resp-pane");
+    _hoveredPane = e.target.closest(".raw-pre, .raw-ta, .resp-pane");
   });
   document.addEventListener("keydown", e => {
     if (!e.ctrlKey && !e.metaKey) return;
@@ -4122,9 +4379,6 @@ document.addEventListener("DOMContentLoaded", () => {
   renderRepTabs();
 
   // Response sub-tabs
-  document.querySelectorAll(".sub-tab[data-resp]").forEach(t =>
-    t.addEventListener("click", () => switchRespPane(t.dataset.resp))
-  );
 
   // History sortable columns + column filters
   document.querySelectorAll("#hist-table .hist-th-sortable").forEach(th =>
@@ -4142,17 +4396,9 @@ document.addEventListener("DOMContentLoaded", () => {
     return String(e[f] ?? "");
   }, histColFilters, renderHistory);
 
-  // Headers sub-tabs
-  document.querySelectorAll(".hdr-sub-bar .sub-tab[data-hdrsub]").forEach(t =>
-    t.addEventListener("click", () => {
-      document.querySelectorAll(".hdr-sub-bar .sub-tab").forEach(b => b.classList.remove("active"));
-      t.classList.add("active");
-      document.querySelectorAll(".hdr-sub-panel").forEach(p => {
-        p.classList.toggle("active", p.id === `hdr-${t.dataset.hdrsub}`);
-        p.classList.toggle("hidden", p.id !== `hdr-${t.dataset.hdrsub}`);
-      });
-    })
-  );
+  // Headers: the two panes are now side by side, so the only control left is
+  // whether the All Headers list folds in sub-resource responses.
+  document.getElementById("hdr-show-all").addEventListener("change", renderHeaders);
 
   // History filter + dropdowns + clear + detail
   document.getElementById("hist-filter").addEventListener("input", e => {
@@ -4227,6 +4473,39 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("rep-resp-search"),
     document.getElementById("rep-resp-search-count")
   );
+  // Per-pane search (intruder result detail)
+  intrReqSearch = createPaneSearch(
+    document.getElementById("intr-req-side"),
+    document.getElementById("intr-req-search"),
+    document.getElementById("intr-req-search-count")
+  );
+  intrRespSearch = createPaneSearch(
+    document.getElementById("intr-resp-side"),
+    document.getElementById("intr-resp-search"),
+    document.getElementById("intr-resp-search-count")
+  );
+
+  // ── Reflection highlight bars ──────────────────────────────────────────────
+  histReflectBar = createReflectBar("hist-reflect-hl", "hist-reflect-chips",
+    () => [document.getElementById("hist-req-side"), document.getElementById("hist-resp-side")]);
+  // Repeater's request side is a pair of editable <textarea>s, which cannot hold
+  // <mark> nodes — the chip legend covers that side, the response is marked inline.
+  repReflectBar = createReflectBar("rep-reflect-hl", "rep-reflect-chips",
+    () => [document.getElementById("rep-resp-pane")]);
+  intrReflectBar = createReflectBar("intr-reflect-hl", "intr-reflect-chips",
+    () => [document.getElementById("intr-req-side"), document.getElementById("intr-resp-side")]);
+
+  // ── Intruder result detail ─────────────────────────────────────────────────
+  document.getElementById("intr-detail-close").addEventListener("click", intrCloseDetail);
+  document.getElementById("intr-detail-to-rep").addEventListener("click", () => {
+    if (!intrDetailEntry) return;
+    sendToRepeater({
+      method:     intrDetailEntry.reqMethod || "GET",
+      url:        intrDetailEntry.reqUrl || "",
+      rawHeaders: intrDetailEntry.reqHeaders || "",
+      body:       intrDetailEntry.reqBody || "",
+    });
+  });
 
   document.getElementById("hist-detail-to-intr").addEventListener("click", () => {
     if (!histDetailEntry) return;
@@ -4239,20 +4518,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("hist-detail-open").addEventListener("click", () => {
     if (histDetailEntry?.url) chrome.tabs.create({ url: histDetailEntry.url });
-  });
-
-  // History detail sub-tab switching (request and response sides)
-  document.getElementById("hist-detail").addEventListener("click", e => {
-    const btn = e.target.closest(".sub-tab[data-histpane]");
-    if (!btn) return;
-    const paneId = btn.dataset.histpane;
-    if (paneId.startsWith("req-")) detailActiveReqPane = paneId;
-    else detailActiveRespPane = paneId;
-    const side = btn.closest(".hist-detail-pane");
-    side.querySelectorAll(".sub-tab").forEach(t => t.classList.remove("active"));
-    btn.classList.add("active");
-    side.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
-    side.querySelector(`#hist-${paneId}-pane`).classList.remove("hidden");
   });
 
   // Attach / detach
@@ -4444,18 +4709,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!tgtDetailEntry) return;
     intrSendToIntruder({ method: tgtDetailEntry.method, url: tgtDetailEntry.url, headers: tgtDetailEntry.headers || {}, body: tgtDetailEntry.body || "" });
   });
-  document.getElementById("tgt-detail").addEventListener("click", e => {
-    const btn = e.target.closest(".sub-tab[data-tgtpane]");
-    if (!btn) return;
-    const paneId = btn.dataset.tgtpane;
-    if (paneId.startsWith("req-")) detailActiveReqPane = paneId;
-    else detailActiveRespPane = paneId;
-    const side = btn.closest(".hist-detail-pane");
-    side.querySelectorAll(".sub-tab").forEach(t => t.classList.remove("active"));
-    btn.classList.add("active");
-    side.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
-    side.querySelector(`#tgt-${paneId}-pane`).classList.remove("hidden");
-  });
 
   // Endpoint detail pane handlers
   document.getElementById("ep-detail-close").addEventListener("click", closeEpDetail);
@@ -4468,18 +4721,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!epDetailEntry) return;
     const h = historyData.find(he => he.url === epDetailEntry.url) || epDetailEntry;
     intrSendToIntruder({ method: h.method || epDetailEntry.method || "GET", url: epDetailEntry.url, headers: h.headers || {}, body: h.body || "" });
-  });
-  document.getElementById("ep-detail").addEventListener("click", e => {
-    const btn = e.target.closest(".sub-tab[data-eppane]");
-    if (!btn) return;
-    const paneId = btn.dataset.eppane;
-    if (paneId.startsWith("req-")) detailActiveReqPane = paneId;
-    else detailActiveRespPane = paneId;
-    const side = btn.closest(".hist-detail-pane");
-    side.querySelectorAll(".sub-tab").forEach(t => t.classList.remove("active"));
-    btn.classList.add("active");
-    side.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
-    side.querySelector(`#ep-${paneId}-pane`).classList.remove("hidden");
   });
 
   // Target detail resizer
@@ -4600,8 +4841,35 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("intr-clear-pos").addEventListener("click", () => {
     const ta = document.getElementById("intr-request");
-    ta.value = ta.value.replace(/§/g, "");
+    setFieldValue(ta, intrStripPositions(ta.value)); // undoable
     intrCountPositions();
+  });
+
+  // ── Cross-send between Repeater and Intruder ───────────────────────────────
+  document.getElementById("rep-to-intr").addEventListener("click", () => {
+    intrSendToIntruder({
+      method:     document.getElementById("rep-method").value,
+      url:        document.getElementById("rep-url").value.trim(),
+      rawHeaders: document.getElementById("rep-headers").value,
+      body:       document.getElementById("rep-body-ta").value,
+    });
+  });
+  document.getElementById("intr-to-rep").addEventListener("click", () => {
+    const parsed = intrParseRaw(
+      intrStripPositions(document.getElementById("intr-request").value),
+      document.getElementById("intr-method").value,
+      document.getElementById("intr-url").value.trim()
+    );
+    sendToRepeater({
+      method:     parsed.method,
+      url:        parsed.url,
+      rawHeaders: parsed.headers,
+      body:       parsed.body,
+    });
+  });
+  document.getElementById("intr-reflect-only").addEventListener("change", e => {
+    intrReflectOnly = e.target.checked;
+    intrRenderResults();
   });
   document.getElementById("intr-start").addEventListener("click", intrStart);
   document.getElementById("intr-stop").addEventListener("click", intrStop);
@@ -4712,17 +4980,6 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("log-detail-open").addEventListener("click", () => {
       if (logDetailEntry?.url) chrome.tabs.create({ url: logDetailEntry.url });
     });
-    document.getElementById("log-detail").addEventListener("click", e => {
-      const btn = e.target.closest(".sub-tab[data-logpane]");
-      if (!btn) return;
-      const paneId = btn.dataset.logpane;
-      if (paneId.startsWith("req-")) detailActiveReqPane = paneId; else detailActiveRespPane = paneId;
-      const side = btn.closest(".hist-detail-pane");
-      side.querySelectorAll(".sub-tab").forEach(t => t.classList.remove("active"));
-      btn.classList.add("active");
-      side.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
-      side.querySelector(`#log-${paneId}-pane`).classList.remove("hidden");
-    });
     document.querySelectorAll("#log-table .hist-th-sortable").forEach(th => {
       th.addEventListener("click", e => {
         if (e.target.closest(".colfilter-ico") || e.target.closest(".colfilter-drop")) return;
@@ -4798,19 +5055,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.getElementById("sens-detail-open").addEventListener("click", () => {
       if (sensDetailEntry?.url) chrome.tabs.create({ url: sensDetailEntry.url });
-    });
-    // Sub-tab switching
-    document.getElementById("sens-detail").addEventListener("click", e => {
-      const btn = e.target.closest(".sub-tab[data-senspane]");
-      if (!btn) return;
-      const paneId = btn.dataset.senspane;
-      if (paneId.startsWith("req-")) detailActiveReqPane = paneId;
-      else detailActiveRespPane = paneId;
-      const side = btn.closest(".hist-detail-pane");
-      side.querySelectorAll(".sub-tab").forEach(t => t.classList.remove("active"));
-      btn.classList.add("active");
-      side.querySelectorAll(".hist-sub-pane").forEach(p => p.classList.add("hidden"));
-      side.querySelector(`#sens-${paneId}-pane`).classList.remove("hidden");
     });
     // Search bars (store refs for auto-search on finding click)
     sensReqSearch = createPaneSearch(
