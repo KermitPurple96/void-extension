@@ -1,6 +1,6 @@
 # Void Extension
 
-A professional Chrome DevTools extension built for bug bounty hunters and security researchers. Packed into your browser's DevTools panel — no external proxy required.
+A Chrome DevTools extension for bug bounty hunters and security researchers — an in-browser testing toolkit in the shape of a DevTools panel. Works standalone; two optional Node helpers add an intercepting proxy and cross-container sync.
 
 ![Chrome MV3](https://img.shields.io/badge/Chrome-MV3-4285F4?logo=googlechrome&logoColor=white)
 ![Version](https://img.shields.io/badge/version-1.0.0-green)
@@ -8,163 +8,272 @@ A professional Chrome DevTools extension built for bug bounty hunters and securi
 
 ---
 
+## Contents
+
+- [Features](#features)
+- [Traffic capture](#traffic-capture)
+- [Installation](#installation)
+- [The intercepting proxy](#the-intercepting-proxy)
+- [Cross-container sync](#cross-container-sync)
+- [Usage guide](#usage-guide)
+- [Permissions](#permissions)
+- [Project structure](#project-structure)
+- [Legal & ethics](#legal--ethics)
+
+---
+
 ## Features
 
 | Tab | What it does |
 |-----|-------------|
-| **Intercept** | Attach Chrome Debugger, pause live requests, edit headers/body, forward or drop |
-| **Repeater** | Craft and replay HTTP requests with full header and body control |
-| **Endpoints** | Auto-discover API routes, forms, scripts, and links on any page |
-| **Tech** | Detect the full technology stack — server, framework, CMS, CDN, WAF, analytics, and more |
-| **Headers** | Capture and inspect every response header for security misconfigurations |
+| **Project** | Session save/restore, site map tree, endpoint list, scope rules, WHOIS/DNS recon |
+| **Intercept** | Pause live requests, edit headers/body, forward or drop — from Chrome *and* from the external proxy |
+| **History** | Every request the tab made, with field search, column filters and reflection detection |
+| **Repeater** | Craft and replay requests across multiple tabs, with target override and cookie sync |
+| **Intruder** | Sniper / Battering Ram / Pitchfork attacks with payload sets and a per-result detail pane |
+| **Probe** | DOM XSS hunter injected into the page — sources, sinks, flows, CSTI/SSTI/prototype pollution |
+| **Logger** | Cross-container traffic aggregator |
+| **Containers** | Launch isolated Chrome profiles with their own cookie jars |
+| **Headers** | Security-header analysis of the main document, beside every captured header |
+| **Decoder** | Encode/decode chains |
+| **Comparer** | Diff two requests or responses |
+| **Sensitive** | 169 passive rules — secrets, PII, tech/version disclosure, source maps |
+| **Settings** | Match & replace, auto headers, scope, timeouts |
 
-### Recon Engine (Tech tab)
-- WHOIS via RDAP — registrar, registrant, contacts, DNSSEC, abuse info
-- DNS — A, AAAA, MX (with priority), NS, TXT (SPF / DMARC / DKIM detection), CNAME, SOA, CAA, PTR
-- IP Geolocation — ASN, ISP, org, country, region, city, timezone, coordinates
-- Technology fingerprinting — 40+ categories with SVG icons and brand colours
+### Recon engine
+
+- **WHOIS** via RDAP — registrar, registrant, contacts, DNSSEC, abuse info
+- **DNS** — A, AAAA, MX (with priority), NS, TXT (SPF / DMARC / DKIM), CNAME, SOA, CAA, PTR
+- **IP geolocation** — ASN, ISP, org, country, region, city, timezone, coordinates
+- **Technology fingerprinting** — 40+ categories, from response headers and page content
+
+---
+
+## Traffic capture
+
+Void records from three independent sources, merged into one History:
+
+| Source | Covers | Request body | Response body | Needs |
+|---|---|---|---|---|
+| **Passive** (`webRequest`) | every tab in this Chrome | yes | **no** — the API cannot read them | nothing |
+| **Debugger** (CDP) | the tab you attached to | yes | yes | click **Attach** |
+| **Proxy** (Node helper) | anything outside Chrome — curl, Postman, a phone | yes | yes | run the proxy server |
+
+Passive capture is always on, which is why History fills up without attaching anything. Response bodies only exist on debugger- and proxy-captured rows; passive rows say so plainly instead of implying one is on the way.
 
 ---
 
 ## Installation
 
-> No build step. No npm. Just load the folder directly into Chrome.
+> No build step. No bundler. Load the folder straight into Chrome.
 
-### Step 1 — Download the extension
+### 1. Get the extension
 
-**Option A — Clone with Git**
 ```bash
-git clone https://github.com/0x4161/void-extension.git
+git clone https://github.com/KermitPurple96/void-extension.git
 ```
 
-**Option B — Download ZIP**
-1. Click the green **Code** button at the top of this page
-2. Choose **Download ZIP**
-3. Extract the ZIP anywhere on your computer (e.g. `Desktop/void-extension`)
+Or use **Code → Download ZIP** and extract it anywhere.
 
----
+### 2. Load it into Chrome
 
-### Step 2 — Open Chrome Extensions page
+1. Go to `chrome://extensions`
+2. Toggle **Developer mode** ON (top-right)
+3. Click **Load unpacked**
+4. Select the folder containing `manifest.json`
 
-Open a new tab and go to:
-```
-chrome://extensions
-```
+### 3. Open the panel
 
-Or navigate via the Chrome menu:
-> ⋮ → Extensions → Manage Extensions
+1. Open any site you are authorised to test
+2. Press `F12` (or `Ctrl+Shift+I` / `Cmd+Option+I`)
+3. Click the **»** arrow in the DevTools tab bar
+4. Choose **Void**
 
----
+### 4. Optional — the Node helpers
 
-### Step 3 — Enable Developer Mode
+Both need the `ws` module:
 
-In the top-right corner of the Extensions page, toggle **Developer mode** ON.
-
-```
-┌─────────────────────────────────┐
-│  Extensions          [Developer mode ●] │
-└─────────────────────────────────┘
+```bash
+npm install ws               # or: apt install node-ws
+node void-proxy-server.js    # intercepting proxy   :8081  + control ws :8082
+node void-sync-server.js     # cross-container sync ws :17580
 ```
 
 ---
 
-### Step 4 — Load the extension
+## The intercepting proxy
 
-1. Click **Load unpacked**
-2. Browse to the folder you cloned/extracted (the folder that contains `manifest.json`)
-3. Click **Select Folder**
+A Chrome MV3 extension **cannot open a listening socket** — `chrome.sockets.tcpServer` is Chrome-Apps only. So intercepting clients outside the browser needs a helper process, driven by the panel over a WebSocket control channel.
 
-The extension will appear in your list with the name **Void Extension**.
+```bash
+node void-proxy-server.js
+```
 
----
+```
+proxy    http://127.0.0.1:8081     ← point curl / Postman / your phone here
+control  ws://127.0.0.1:8082       ← the Void panel connects here
+CA       ~/.void/void-ca.pem       ← generated on first run
+```
 
-### Step 5 — Open DevTools on any page
+HTTPS is MITM'd with a CA generated by `openssl` on first run; per-host leaf certificates are signed on demand and cached. Clients must trust it:
 
-1. Go to any website you have permission to test
-2. Press `F12` (or `Ctrl+Shift+I` / `Cmd+Option+I` on Mac) to open DevTools
-3. Click the **»** arrow at the right of the DevTools tab bar
-4. Select **Void** from the dropdown
+```bash
+curl -x http://127.0.0.1:8081 --cacert ~/.void/void-ca.pem https://target/
+```
 
-The panel will open with all five tabs ready to use.
+### The three states
 
----
+In the **Intercept** tab, the `Proxy` button cycles:
 
-## Usage Guide
+| Button | Control channel | Traffic | Recorded in History | Held for editing |
+|---|---|---|---|---|
+| `Proxy: connect` | disconnected | passes | no | no |
+| `Proxy: logging` | connected | passes | **yes** | no |
+| `Proxy: intercepting` | connected | passes | yes | **yes** |
 
-### Intercept Tab
+`logging` is the everyday mode — the equivalent of Burp with *Intercept is off*. Requests held by the proxy land in the same queue as debugger-held ones, tagged `PROXY`, and reuse the same editor, Forward / Drop and → Repeater / → Intruder buttons.
 
-1. Click **Attach Debugger** — Chrome will show a banner on the target tab (normal behaviour)
-2. Click **Intercept: OFF** to toggle interception ON
-3. Interact with the page — any network request will pause and appear in the list
-4. Click a paused request to open the editor
-5. Edit method, URL, headers, or body freely
-6. Click **Forward →** to send the (possibly modified) request, or **Drop ✕** to cancel it
-7. Use **→ Repeater** to send the request to the Repeater tab for further testing
+> **Disconnecting Void does not stop the proxy.** If the Node process is running it keeps passing traffic — it just stops being recorded. Kill the process to actually stop it.
 
-### Repeater Tab
+### Limitations
 
-- Set the HTTP method, full URL, custom headers, and body
-- Click **Send** — the response appears split into Body / Headers / Raw views
-- Drag the divider between request and response panes to resize
-
-### Endpoints Tab
-
-- Endpoints are collected automatically while you browse the page
-- Use the **filter box** to search by URL and the **type dropdown** to narrow by API / Form / Script / Link
-- Click **Copy All** to copy every discovered URL to the clipboard
-- Click any endpoint row to send it straight to the Repeater
-
-### Tech Tab
-
-1. Click **⚡ Scan WHOIS + DNS** to run the full recon scan
-2. Left sidebar shows IP / Geo, DNS records, and WHOIS details
-3. Right side shows the detected technology stack grouped by category
-
-### Headers Tab
-
-- Response headers are captured automatically once the debugger is attached
-- Each row shows the header name, value, and the URL it came from
+- **No streaming.** Bodies are buffered (5 MB cap) so they can be edited, and `Accept-Encoding: identity` is forced. SSE and large downloads will not work through the proxy.
+- **Chrome is not routed through it.** The browser keeps using the debugger path; the proxy is for external clients.
+- **Upstream certificates are not verified** (`rejectUnauthorized: false`) — you are the interception point, so validating upstream is your call, not the tool's.
 
 ---
 
-## Permissions Explained
+## Cross-container sync
+
+```bash
+node void-sync-server.js     # ws://localhost:17580
+```
+
+Containers launch separate Chrome profiles with their own `--user-data-dir`, so cookies are genuinely isolated. Each instance pushes its history to the sync server and the **Logger** tab shows the merged view across all of them.
+
+History is local to its window; Logger is the aggregator.
+
+---
+
+## Usage guide
+
+### Intercept
+
+1. **Chrome traffic** — click **Attach Debugger** (Chrome shows a banner on the tab; that is expected), then toggle **Intercept: OFF** → ON
+2. **External traffic** — start the proxy, then click **Proxy: connect** → **logging** → **intercepting**
+3. Click a paused request to open the editor; change method, URL, headers or body
+4. **Forward →** sends the modified request, **Drop ✕** kills it
+5. **→ Repeater** / **→ Intr** hand it off without leaving the tab
+
+### Repeater
+
+- Multiple tabs, each with its own request, response and back/forward history
+- **✎ Target** overrides the TCP destination while keeping the `Host` header — for vhost fuzzing
+- **Cookie sync** pulls live cookies from the browser tab
+- **Highlight reflections** colours every request value that comes back in the response, one colour per distinct value
+- **→ Intruder** hands the current request over
+
+### Intruder
+
+- Mark positions with `§value§`, pick Sniper / Battering Ram / Pitchfork, load payload sets
+- A dot on a result row means the payload reflected in the response; the **Reflections** checkbox filters to just those
+- Click any result for the full request/response detail
+- **→ Repeater** sends the template back, with `§` markers stripped
+
+### History
+
+- Fills automatically from passive capture — no attach needed
+- `field:value` search (`host:`, `path:`, `status:`, `body:`, `header:`) alongside per-column filters
+- A dot marks rows where a request value was reflected in the response
+
+### Headers
+
+- **Security Analysis** (left) runs against the **main document response only** — CSP, HSTS and X-Frame-Options are meaningless for sub-resources, and a third-party iframe must not be allowed to overwrite them
+- The bar at the top names the exact URL being analysed
+- **All Headers** (right) defaults to that same response; tick *include sub-resources* to fold in every other response, each labelled with its origin and flagged when it came from another host
+
+### Sensitive
+
+169 passive rules across everything in History:
+
+| Category | Examples |
+|---|---|
+| Tokens & keys | AWS, Google, Stripe, GitHub, Slack, OpenAI |
+| General secrets | PEM blocks, generic API keys, private IPv4 |
+| Cloud & webhooks | S3, Azure Blob, GCS, Slack/Teams webhooks |
+| Sensitive files | `.bak`, `.keychain`, `.cscfg`, `.env` |
+| Information disclosure | stack traces, `phpinfo()`, exposed `.git/config` |
+| PII | SSN, card numbers, JWTs, bcrypt hashes |
+| **Tech & version disclosure** | `Server`, `X-Powered-By`, ASP.NET/PHP versions, internal hostnames |
+| **Source maps** | `.js.map` requests, `sourceMappingURL`, inline maps, served map bodies |
+
+Custom rules can be added from the tab.
+
+### Project
+
+- **Session** — save and restore the whole workspace (history, repeater tabs, scope)
+- **Site Map** — hierarchical tree of everything seen
+- **Scope** — include/exclude patterns other tabs can filter by
+
+---
+
+## Permissions
 
 | Permission | Why it's needed |
 |-----------|----------------|
-| `debugger` | Attach to tabs to intercept and modify network requests |
-| `tabs` | Open social links and read the active tab's URL |
+| `debugger` | Attach to tabs to intercept and modify requests, and read response bodies |
+| `webRequest` | Passive traffic capture across all tabs without attaching the debugger |
+| `tabs` | Open links and read the active tab's URL |
 | `activeTab` | Access the currently inspected page |
-| `storage` | Persist intercept state across DevTools open/close |
-| `scripting` | Inject the content script for endpoint and tech detection |
-| `alarms` | Keep the service worker alive in the background |
-| `host_permissions: <all_urls>` | Required to attach the debugger to any domain |
+| `storage` | Persist settings, sessions and intercept state |
+| `unlimitedStorage` | Saved sessions can hold large histories |
+| `scripting` | Inject the content script and the Probe scanner |
+| `cookies` | Cookie sync for Repeater and Intruder |
+| `downloads` | Export findings, sessions and container sync files |
+| `alarms` | Keep the service worker alive |
+| `host_permissions: <all_urls>` | Required to attach the debugger and capture traffic on any domain |
+
+The `extension_pages` CSP uses `connect-src *` because the Repeater, the crawler and the DNS/WHOIS lookups issue `fetch()` from the service worker to arbitrary hosts. `default-src 'none'` and `script-src 'self'` — the directives that actually stop injection — stay in place.
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 void-extension/
-├── manifest.json      # Extension manifest (MV3)
-├── devtools.html      # DevTools page entry point
-├── devtools.js        # Creates the DevTools panel
-├── panel.html         # Panel UI markup
-├── panel.js           # Panel logic (intercept, repeater, recon rendering)
-├── panel.css          # All styles
-├── background.js      # Service worker — debugger bridge, DNS/WHOIS/IP APIs
-├── content.js         # Content script — endpoint & tech fingerprinting
-├── early.js           # document_start content script
+├── manifest.json          # Extension manifest (MV3)
+├── devtools.html/.js      # DevTools page entry point
+├── panel.html             # Panel UI markup
+├── panel.js               # Panel logic — all tabs, rendering, proxy control channel
+├── panel.css              # All styles
+├── background.js          # Service worker — debugger bridge, passive capture,
+│                          #   DNS/WHOIS/IP APIs, crawler, proxy history
+├── content.js             # Content script — endpoint & tech fingerprinting
+├── early.js               # document_start content script
+├── sensitive-rules.js     # 169 passive scanner rules
+├── void-proxy-server.js   # Node helper — intercepting MITM proxy (:8081 / ws :8082)
+├── void-sync-server.js    # Node helper — cross-container sync (ws :17580)
+├── probe/                 # DOM XSS hunter, injected into the page
+│   ├── scanner.js  flows.js  hooks.js  frameworks.js
+│   ├── fuzzer-*.js        # payload generation and autofill
+│   └── highlighter.js  reporter.js  main.js
 └── icons/
-    ├── icon16.png
-    ├── icon48.png
-    └── icon128.png
 ```
+
+Neither Node helper is required to use the extension.
 
 ---
 
-## Legal & Ethics
+## Legal & ethics
 
-This tool is intended **only** for use on targets you own or have **explicit written permission** to test. Attaching the Chrome Debugger to a tab is visible to the user of that tab. Always operate within the scope of an authorised bug bounty program.
+This tool is intended **only** for targets you own or have **explicit written permission** to test.
+
+Two things worth stating plainly:
+
+- Attaching the Chrome Debugger is **visible** to whoever is using that tab.
+- The proxy's CA is a **real MITM certificate authority**. Trusting it means any process that trusts it can have its TLS intercepted. Install it only where you intend to, and delete `~/.void/` when you are done.
+
+Always operate within the scope of an authorised engagement or bug bounty program.
 
 ---
 
