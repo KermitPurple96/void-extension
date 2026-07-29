@@ -91,13 +91,16 @@ Or use **Code → Download ZIP** and extract it anywhere.
 
 ### 4. Optional — the Node helpers
 
-Both need the `ws` module:
+Both need the `ws` module, pinned in `package.json`:
 
 ```bash
-npm install ws               # or: apt install node-ws
-node void-proxy-server.js    # intercepting proxy   :8081  + control ws :8082
-node void-sync-server.js     # cross-container sync ws :17580
+npm install                  # installs ws
+npm run proxy                # intercepting proxy   :8081  + control ws :8082
+npm run sync                 # cross-container sync ws :17580
 ```
+
+Or run them directly with `node void-proxy-server.js` / `node void-sync-server.js`.
+The extension itself needs no install step — npm is only for these two helpers.
 
 ---
 
@@ -242,6 +245,7 @@ The `extension_pages` CSP uses `connect-src *` because the Repeater, the crawler
 ```
 void-extension/
 ├── manifest.json          # Extension manifest (MV3)
+├── package.json           # Pins `ws` for the two Node helpers — not needed by the extension
 ├── devtools.html/.js      # DevTools page entry point
 ├── panel.html             # Panel UI markup
 ├── panel.js               # Panel logic — all tabs, rendering, proxy control channel
