@@ -3276,7 +3276,9 @@ function sensScan() {
   // Compile built-in regexes
   const rules = typeof SENSITIVE_RULES !== "undefined" ? SENSITIVE_RULES : [];
   const compiled = rules.filter(r => r.active !== false).map(r => {
-    try { return { ...r, re: new RegExp(r.regex, "gi"), refRe: r.refiner ? new RegExp(r.refiner, "gi") : null }; }
+    // r.flags lets a rule opt into "m" so a ^ anchor means "start of header line"
+    // rather than "start of the whole joined header block"
+    try { return { ...r, re: new RegExp(r.regex, r.flags || "gi"), refRe: r.refiner ? new RegExp(r.refiner, "gi") : null }; }
     catch { return null; }
   }).filter(Boolean);
 

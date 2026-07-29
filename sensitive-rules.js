@@ -151,7 +151,24 @@ const SENSITIVE_RULES = [
   //  Passive Scanner — Information Disclosure
   // ═══════════════════════════════════════════════════════════════
   { id: "dir-listing", cat: "Information Disclosure", desc: "Directory Listing", regex: "(?:Index of /|\\[To Parent Directory\\]|<title>Directory listing for)", sections: ["resp_body"], severity: "high" },
-  { id: "source-map-ref", cat: "Information Disclosure", desc: "Source Map Reference", regex: "//[#@]\\s*sourceMappingURL=", sections: ["resp_body"], severity: "low" },
+  // ── Source maps ────────────────────────────────────────────────────────────
+  // A .map file hands over the original, un-minified sources (and with
+  // sourcesContent, the full file bodies). Ordered narrow → broad; the
+  // reference rule excludes data: URIs so an inline map is reported once, by
+  // the inline rule, rather than twice.
+  { id: "source-map-ref", cat: "Information Disclosure", desc: "Source Map Reference", regex: "//[#@]\\s*sourceMappingURL\\s*=\\s*(?!data:)[^\\s*'\"]+", sections: ["resp_body"], severity: "low" },
+  { id: "source-map-inline", cat: "Information Disclosure", desc: "Inline (data: URI) Source Map", regex: "//[#@]\\s*sourceMappingURL\\s*=\\s*data:[^\\s,]{0,120},", sections: ["resp_body"], severity: "medium" },
+  { id: "source-url-ref", cat: "Information Disclosure", desc: "sourceURL Directive", regex: "//[#@]\\s*sourceURL\\s*=\\s*[^\\s*'\"]+", sections: ["resp_body"], severity: "low" },
+  { id: "source-map-file", cat: "Information Disclosure", desc: "Source Map File Requested (.map)", regex: "\\.(?:js|mjs|cjs|jsx|ts|tsx|css|scss|less)\\.map(?:[?#]|$)", sections: ["req_url"], severity: "medium" },
+  { id: "source-map-file-other", cat: "Information Disclosure", desc: "Map File Requested (.map)", regex: "(?<!\\.(?:js|mjs|cjs|jsx|ts|tsx|css|scss|less))\\.map(?:[?#]|$)", sections: ["req_url"], severity: "low" },
+  { id: "source-map-header", cat: "Information Disclosure", desc: "SourceMap Response Header", regex: "^(?:x-)?sourcemap:[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  // The map document itself came back — this is the original source code, not a pointer to it
+  { id: "source-map-body", cat: "Information Disclosure", desc: "Source Map Body Served (original sources exposed)", regex: "\"sourcesContent\"\\s*:\\s*\\[", sections: ["resp_body"], severity: "high" },
+  // Only when sourcesContent is absent, so a map carrying the full sources is
+  // reported once (as high) instead of twice. The lookahead sits after the
+  // anchor text so it runs only where the prefix already matched, and v3 emits
+  // sourcesContent after sources, so looking forward is enough.
+  { id: "source-map-body-v3", cat: "Information Disclosure", desc: "Source Map Document (v3, no embedded sources)", regex: "\"version\"\\s*:\\s*3\\s*,\\s*\"(?:file|sources|sourceRoot|mappings)\"(?![\\s\\S]*\"sourcesContent\")", sections: ["resp_body"], severity: "medium" },
   { id: "html-comment-todo", cat: "Information Disclosure", desc: "HTML Comment (TODO/FIXME/HACK/BUG)", regex: "<!--[^>]*(?:TODO|FIXME|HACK|BUG|XXX|TEMP|DEBUG)[^>]*-->", sections: ["resp_body"], severity: "low" },
   { id: "html-comment-creds", cat: "Information Disclosure", desc: "HTML Comment with Credentials Hint", regex: "<!--[^>]*(?:password|passwd|secret|credential|api.?key|token)[^>]*-->", sections: ["resp_body"], severity: "medium" },
   { id: "phpinfo-page", cat: "Information Disclosure", desc: "phpinfo() Page", regex: "<title>phpinfo\\(\\)</title>", sections: ["resp_body"], severity: "critical" },
@@ -170,4 +187,51 @@ const SENSITIVE_RULES = [
   { id: "jwt-in-response", cat: "PII", desc: "JWT Token in Response", regex: "eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}", sections: ["resp_body"], severity: "high" },
   { id: "bcrypt-hash", cat: "PII", desc: "Bcrypt Hash", regex: "\\$2[aby]?\\$\\d{2}\\$[./A-Za-z0-9]{53}", sections: ["resp_body"], severity: "high" },
   { id: "md5-hash-context", cat: "PII", desc: "MD5 Hash in Context", regex: "(?:password|hash|digest|md5)[\"':=\\s]+[a-f0-9]{32}(?![a-f0-9])", sections: ["resp_body"], severity: "medium" },
+
+  // ═══════════════════════════════════════════════════════════════
+  //  Tech & Version Disclosure (response headers)
+  // ═══════════════════════════════════════════════════════════════
+  // These run against the joined "Name: value" header text, so every pattern is
+  // anchored on the header name and bounded with [^\n] — linear time, no
+  // backtracking blowup on long header values.
+  // A version number is worth more than a bare product name (it maps straight to
+  // a CVE lookup), so version-bearing patterns are "medium" and the rest "low".
+
+  // Server / product banners carrying a version
+  { id: "hdr-server-version", cat: "Tech & Version Disclosure", desc: "Server header leaks version", regex: "^server:[^\\n]*?\\d+\\.\\d+[^\\n]*", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-server", cat: "Tech & Version Disclosure", desc: "Server header leaks product", regex: "^server:(?![^\\n]*\\d+\\.\\d+)[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+  { id: "hdr-x-powered-by", cat: "Tech & Version Disclosure", desc: "X-Powered-By", regex: "^x-powered-by:(?![^\\n]*\\d+\\.\\d+)[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+  { id: "hdr-x-powered-by-version", cat: "Tech & Version Disclosure", desc: "X-Powered-By leaks version", regex: "^x-powered-by:[^\\n]*?\\d+\\.\\d+[^\\n]*", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-via", cat: "Tech & Version Disclosure", desc: "Via header (proxy/cache chain)", regex: "^via:[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+
+  // Framework / runtime versions
+  { id: "hdr-aspnet-version", cat: "Tech & Version Disclosure", desc: "ASP.NET version", regex: "^x-aspnet-version:[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-aspnetmvc-version", cat: "Tech & Version Disclosure", desc: "ASP.NET MVC version", regex: "^x-aspnetmvc-version:[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-php-version", cat: "Tech & Version Disclosure", desc: "PHP version", regex: "^x-php-version:[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-rails-runtime", cat: "Tech & Version Disclosure", desc: "X-Runtime (Ruby on Rails)", regex: "^x-runtime:[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+  { id: "hdr-generator", cat: "Tech & Version Disclosure", desc: "X-Generator (CMS/product)", regex: "^x-generator:[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-app-version", cat: "Tech & Version Disclosure", desc: "Application version header", regex: "^x-(?:app(?:lication)?|api|build|release|service)-version:[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-version-generic", cat: "Tech & Version Disclosure", desc: "Generic X-Version header", regex: "^x-version:[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+
+  // CMS / platform fingerprints
+  { id: "hdr-drupal", cat: "Tech & Version Disclosure", desc: "Drupal header", regex: "^x-drupal-[a-z-]+:[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+  { id: "hdr-wordpress", cat: "Tech & Version Disclosure", desc: "WordPress header", regex: "^x-(?:wp-[a-z-]+|wordpress-[a-z-]+|redirect-by|pingback):[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+  { id: "hdr-sharepoint", cat: "Tech & Version Disclosure", desc: "SharePoint version", regex: "^microsoftsharepointteamservices:[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-owa", cat: "Tech & Version Disclosure", desc: "Exchange/OWA version", regex: "^x-owa-version:[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-atlassian", cat: "Tech & Version Disclosure", desc: "Atlassian product header", regex: "^x-(?:confluence-[a-z-]+|ausername|arequestid|jira-[a-z-]+):[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+  { id: "hdr-jenkins", cat: "Tech & Version Disclosure", desc: "Jenkins version", regex: "^x-jenkins(?:-[a-z-]+)?:[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-liferay", cat: "Tech & Version Disclosure", desc: "Liferay Portal header", regex: "^liferay-portal:[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-shopify", cat: "Tech & Version Disclosure", desc: "Shopify stage header", regex: "^x-shopify-[a-z-]+:[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+
+  // App servers / gateways / proxies
+  { id: "hdr-kong", cat: "Tech & Version Disclosure", desc: "Kong API gateway", regex: "^x-kong-[a-z-]+:[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+  { id: "hdr-envoy", cat: "Tech & Version Disclosure", desc: "Envoy proxy header", regex: "^x-envoy-[a-z-]+:[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+  { id: "hdr-varnish", cat: "Tech & Version Disclosure", desc: "Varnish cache header", regex: "^x-varnish:[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+  { id: "hdr-litespeed", cat: "Tech & Version Disclosure", desc: "LiteSpeed header", regex: "^x-(?:litespeed-[a-z-]+|lsadc|turbo-charged-by):[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+  { id: "hdr-pagespeed", cat: "Tech & Version Disclosure", desc: "PageSpeed module version", regex: "^x-(?:mod-pagespeed|page-speed):[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-rack-cache", cat: "Tech & Version Disclosure", desc: "Rack cache header", regex: "^x-rack-cache:[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+
+  // Internal infrastructure leaks — these expose hostnames, not just products
+  { id: "hdr-backend-server", cat: "Tech & Version Disclosure", desc: "Internal backend hostname", regex: "^x-(?:backend|backend-server|server|node|host|served-by|application-context|powered-by-plesk):[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "hdr-upstream", cat: "Tech & Version Disclosure", desc: "Upstream/origin server header", regex: "^x-(?:upstream[a-z-]*|origin-server|proxy-backend):[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
 ];
