@@ -92,6 +92,25 @@ function leafContext(hostname) {
   return ctx;
 }
 
+// ── Listen errors ────────────────────────────────────────────────────────────
+// Without this a busy port surfaces as an unhandled 'error' event and a raw
+// stack trace — which is what you get every time you start a second instance.
+
+function onListenError(label, port) {
+  return (err) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`[Void Proxy] ${label} port ${port} is already in use.`);
+      console.error(`[Void Proxy] Another instance is probably running:  ss -ltnp | grep ${port}`);
+      console.error(`[Void Proxy] Or choose other ports:  VOID_PROXY_PORT=9081 VOID_CTRL_PORT=9082 node void-proxy-server.js`);
+    } else if (err.code === "EACCES") {
+      console.error(`[Void Proxy] ${label} port ${port} requires elevated privileges (ports below 1024).`);
+    } else {
+      console.error(`[Void Proxy] ${label} could not listen on port ${port}: ${err.message}`);
+    }
+    process.exit(1);
+  };
+}
+
 // ── Control channel ──────────────────────────────────────────────────────────
 
 let intercepting = false;
@@ -100,6 +119,7 @@ const history = [];
 let nextId = 1;
 
 const wss = new WebSocketServer({ port: CTRL_PORT });
+wss.on("error", onListenError("control", CTRL_PORT));
 const panels = new Set();
 
 function broadcast(msg) {
@@ -330,6 +350,7 @@ const mitm = https.createServer({
   },
 }, (req, res) => handle(req, res, true));
 mitm.on("clientError", (e, sock) => { try { sock.destroy(); } catch {} });
+mitm.on("error", onListenError("internal TLS", "(ephemeral)"));
 mitm.listen(0, "127.0.0.1");
 
 const proxy = http.createServer((req, res) => handle(req, res, false));
@@ -353,6 +374,7 @@ proxy.on("connect", (req, clientSocket, head) => {
 });
 
 proxy.on("clientError", (e, sock) => { try { sock.destroy(); } catch {} });
+proxy.on("error", onListenError("proxy", PROXY_PORT));
 
 proxy.listen(PROXY_PORT, () => {
   console.log(`[Void Proxy] proxy   http://127.0.0.1:${PROXY_PORT}`);

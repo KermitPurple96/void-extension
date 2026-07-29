@@ -9,10 +9,24 @@ const { WebSocketServer } = require("ws");
 const PORT = 17580;
 
 const wss = new WebSocketServer({ port: PORT });
+
+wss.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`[Void Sync] port ${PORT} is already in use — another instance is probably running.`);
+    console.error(`[Void Sync] Check with:  ss -ltnp | grep ${PORT}`);
+  } else {
+    console.error(`[Void Sync] could not listen on port ${PORT}: ${err.message}`);
+  }
+  process.exit(1);
+});
 const clients = new Map(); // ws → { name, entries[] }
 let allHistory = []; // merged history from all clients
 
-console.log(`[Void Sync] listening on ws://localhost:${PORT}`);
+// Announce only once the port is actually bound — at module scope this printed
+// "listening" a tick before the EADDRINUSE error arrived.
+wss.on("listening", () => {
+  console.log(`[Void Sync] listening on ws://localhost:${PORT}`);
+});
 
 wss.on("connection", (ws) => {
   const info = { name: "unknown", entries: [] };
