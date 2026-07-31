@@ -5282,7 +5282,10 @@ function cmpSendTo(side, entry) {
       document.getElementById("resp2-body-pre").textContent = respText;
       document.getElementById("resp2-empty").classList.add("hidden");
     }
-    document.getElementById("rep-compare-pane").classList.remove("hidden");
+    document.getElementById("rep-side-right").classList.remove("hidden");
+    document.getElementById("rep-compare-toggle").classList.add("btn-accent");
+    document.getElementById("rep-diff").classList.remove("hidden");
+    document.getElementById("rep-diff-case-wrap").classList.remove("hidden");
     showTab("repeater");
     showToast("Loaded into Compare pane");
   }

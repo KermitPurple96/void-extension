@@ -33,16 +33,16 @@ t("No dup IDs ("+ids.length+")",Object.values(ic).every(v=>v===1));
 S("3. JS-HTML Cross-Ref");
 const ji=[...new Set((js.match(/getElementById\("([^"]+)"\)/g)||[]).map(m=>m.match(/"([^"]+)"/)[1]))];
 const hs=new Set(ids);
-const cmpLegacy=new Set(["cmp-status","cmp-ignore-headers","cmp-to-rep","cmp-to-intr","cmp-to-poc","cmp-to-notes","cmp-render","cmp-curl","cmp-fetch","cmp-python","cmp-diff","cmp-swap","cmp-clear","cmp-resizer","cmp-left","cmp-right","cmp-left-title","cmp-right-title","cmp-left-req-pre","cmp-left-resp-pre","cmp-right-req-pre","cmp-right-resp-pre","cmp-left-req-pane","cmp-left-resp-pane","cmp-right-req-pane","cmp-right-resp-pane"]);
+const cmpLegacy=new Set(["rep-compare-pane","cmp-status","cmp-ignore-headers","cmp-to-rep","cmp-to-intr","cmp-to-poc","cmp-to-notes","cmp-render","cmp-curl","cmp-fetch","cmp-python","cmp-diff","cmp-swap","cmp-clear","cmp-resizer","cmp-left","cmp-right","cmp-left-title","cmp-right-title","cmp-left-req-pre","cmp-left-resp-pre","cmp-right-req-pre","cmp-right-resp-pre","cmp-left-req-pane","cmp-left-resp-pane","cmp-right-req-pane","cmp-right-resp-pane"]);
 const mi=ji.filter(id=>!hs.has(id)&&id!=="void-toast"&&!cmpLegacy.has(id));
 t("All "+ji.length+" refs",mi.length===0);
 if(mi.length)console.log("    "+mi.join(", "));
 
 S("4. Button Parity");
-const rq=["close","title","to-rep","cmp-l","cmp-r","poc","notes","curl","fetch","python","render"];
+const rq=["close","title","to-rep","poc","notes","curl","fetch","python","render"];
 ["hist","tgt","ep","log","sens"].forEach(p=>{const b=(html.match(new RegExp('id="'+p+'-detail-([^"]+)"',"g"))||[]).map(m=>m.match(/-detail-([^"]+)/)[1]);t(p,rq.filter(x=>!b.includes(x)).length===0);});
-["path","httpver","to-rep","to-intr","cmp-l","cmp-r","to-poc","to-notes","open","reflect-hl","render","curl","fetch","python"].forEach(n=>t("ed-"+n,html.includes('id="ed-'+n+'"')));
-["path","httpver","to-intr","cmp-l","cmp-r","to-poc","to-notes","open","reflect-hl","detail-render","detail-curl","detail-fetch","detail-python"].forEach(n=>t("rep-"+n,html.includes('id="rep-'+n+'"')));
+["path","httpver","to-rep","to-intr","to-poc","to-notes","open","reflect-hl","render","curl","fetch","python"].forEach(n=>t("ed-"+n,html.includes('id="ed-'+n+'"')));
+["path","httpver","to-intr","to-poc","to-notes","open","reflect-hl","detail-render","detail-curl","detail-fetch","detail-python"].forEach(n=>t("rep-"+n,html.includes('id="rep-'+n+'"')));
 
 S("5. Action Bars");
 ["hist","tgt","ep","rep","intr","log","sens","ed"].forEach(b=>t(b+"-reflect-bar",html.includes('id="'+b+'-reflect-bar"')));
@@ -54,11 +54,11 @@ S("6. Themes");
 ["--tint-green","--tint-yellow","--tint-blue","--tint-red"].forEach(v=>t(v,css.includes("var("+v+")")));
 
 S("7. Features");
-const ft={"WS":["ws-filter","ws-tbody"],"Seq":["seq-url","seq-start"],"Notes":["notes-add","notes-form-save"],"PoC":["poc-csrf-technique","poc-cj-technique"],"Scan":["scan-url","scan-start"],"OOB":["oob-server","oob-register"],"Denc":["dec-chain-add","dec-saved-sel"],"RespInt":["resp-ed-status","btn-intercept-resp"],"Profiles":["cfg-profiles","cfg-profile-save"],"ReqView":["ed-path","rep-path"],"RepCompare":["rep-compare-toggle","rep2-method","rep2-send","rep-diff"],"APISchema":["schema-generate","schema-spec","schema-tree"],"CollabEverywhere":["cfg-collab-url","cfg-collab-enable"]};
+const ft={"WS":["ws-filter","ws-tbody"],"Seq":["seq-url","seq-start"],"Notes":["notes-add","notes-form-save"],"PoC":["poc-csrf-technique","poc-cj-technique"],"Scan":["scan-url","scan-start","scan-dirbrute"],"OOB":["oob-server","oob-register"],"Denc":["dec-chain-add","dec-saved-sel"],"RespInt":["resp-ed-status","btn-intercept-resp"],"Profiles":["cfg-profiles","cfg-profile-save"],"ReqView":["ed-path","rep-path"],"DualRepeater":["rep-compare-toggle","rep2-method","rep2-send","rep-diff","rep2-tabs-bar","rep-side-right"],"APISchema":["schema-generate","schema-spec","schema-tree"],"CollabEverywhere":["cfg-collab-url","cfg-collab-enable"],"IntrAttacks":["intr-cfg-auth","intr-cfg-race","intr-cfg-param","intr-cfg-jwt","intr-cfg-cors","intr-cfg-smuggling","intr-cfg-graphql","intr-cfg-upload"],"JA3":["cfg-ja3-fetch","cfg-ja3-hash"]};
 Object.entries(ft).forEach(([n,e])=>{t(n,e.every(id=>html.includes('id="'+id+'"')));});
 
 S("8. Background.js");
-["GET_WS_HISTORY","GET_INTERCEPTED_RESPONSES","FORWARD_RESPONSE","DROP_RESPONSE","SET_INTERCEPT_RESPONSES"].forEach(m=>t(m,bg.includes(m)));
+["GET_WS_HISTORY","GET_INTERCEPTED_RESPONSES","FORWARD_RESPONSE","DROP_RESPONSE","SET_INTERCEPT_RESPONSES","FETCH_JA3"].forEach(m=>t(m,bg.includes(m)));
 ["webSocketCreated","webSocketFrameSent","webSocketFrameReceived","webSocketClosed"].forEach(e=>t(e,bg.includes(e)));
 t("fulfillRequest",bg.includes("Fetch.fulfillRequest"));
 t("Response stage",bg.includes('requestStage: "Response"'));
@@ -110,8 +110,42 @@ vm.runInThisContext(rules);
 t("Count "+SENSITIVE_RULES.length,SENSITIVE_RULES.length>50);
 ["cookie-no-secure","cookie-no-httponly","mixed-content","no-sri","crlf-indicator"].forEach(r=>t(r,SENSITIVE_RULES.some(x=>x.id===r)));
 
-S("15. Scanner");
-["sqli","xss","pathtraversal","ssrf","ssti","cmdi","openredirect","headerinject"].forEach(m=>t(m,js.includes(m+":")));
+S("15. Scanner + Content Discovery");
+["sqli","xss","pathtraversal","ssrf","ssti","cmdi","openredirect","headerinject","dirbrute"].forEach(m=>t(m,js.includes(m+":")|| js.includes('scan-'+m)));
+
+S("15b. Intruder Attack Modes");
+["auth-idor","race","param-miner","jwt-attack","cors-scan","smuggling","graphql","upload-scan"].forEach(m=>t("mode:"+m,html.includes('value="'+m+'"')));
+t("intrRunAuthTest",js.includes("intrRunAuthTest"));
+t("intrRunRaceTest",js.includes("intrRunRaceTest"));
+t("intrRunParamMiner",js.includes("intrRunParamMiner"));
+t("intrRunJwtAttack",js.includes("intrRunJwtAttack"));
+t("intrRunCorsScanner",js.includes("intrRunCorsScanner"));
+t("intrRunSmuggling",js.includes("intrRunSmuggling"));
+t("intrRunGraphQL",js.includes("intrRunGraphQL"));
+t("intrRunUploadScan",js.includes("intrRunUploadScan"));
+
+S("15c. Built-in Wordlists");
+t("WORDLIST_PARAMS",js.includes("WORDLIST_PARAMS"));
+t("WORDLIST_HEADERS",js.includes("WORDLIST_HEADERS"));
+t("WORDLIST_DIRS",js.includes("WORDLIST_DIRS"));
+t("CORS_ORIGINS",js.includes("CORS_ORIGINS"));
+t("JWT_WEAK_SECRETS",js.includes("JWT_WEAK_SECRETS"));
+t("SMUGGLING_PAYLOADS",js.includes("SMUGGLING_PAYLOADS"));
+t("UPLOAD_PAYLOADS",js.includes("UPLOAD_PAYLOADS"));
+
+S("15d. Dual Repeater");
+t("rep2ActiveTab",js.includes("rep2ActiveTab"));
+t("switchRep2Tab",js.includes("switchRep2Tab"));
+t("loadRep2FromTab",js.includes("loadRep2FromTab"));
+t("renderRep2Tabs",js.includes("renderRep2Tabs"));
+
+S("15e. API Schema");
+t("schemaGenerate",js.includes("schemaGenerate"));
+t("openapi output",js.includes('openapi: "3.0.0"'));
+
+S("15f. Collaborator Everywhere");
+t("COLLAB_HEADERS",js.includes("COLLAB_HEADERS"));
+t("_collab flag",js.includes("_collab"));
 
 S("16. Misc");
 ["initKeyboardShortcuts","exportHar","autoDetectScope","showToast","voidSettingsProfiles","voidDecChains"].forEach(f=>t(f,js.includes(f)));
