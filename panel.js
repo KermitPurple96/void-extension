@@ -6663,29 +6663,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   colFilterInit("intr-table", () => intrResults, (e, f) => String(e[f] ?? ""), intrColFilters, intrRenderResults);
 
-  // Decoder
-  document.querySelectorAll(".dec-btn").forEach(btn =>
-    btn.addEventListener("click", async () => {
-      const input = document.getElementById("dec-input").value;
-      const result = decOp(btn.dataset.op, input);
-      document.getElementById("dec-output").value = (result instanceof Promise) ? await result : result;
-    })
-  );
-  document.getElementById("dec-swap").addEventListener("click", () => {
-    const inp = document.getElementById("dec-input");
-    const out = document.getElementById("dec-output");
-    const tmp = inp.value;
-    inp.value = out.value;
-    out.value = tmp;
-  });
-  document.getElementById("dec-clear").addEventListener("click", () => {
-    document.getElementById("dec-input").value = "";
-    document.getElementById("dec-output").value = "";
-  });
-
-  // Decoder chain
+  // Dencoder — chain-only with saved presets
   const decChain = [];
-  const decChainOpNames = { "b64-enc": "Base64 Enc", "b64-dec": "Base64 Dec", "url-enc": "URL Enc", "url-dec": "URL Dec", "url-enc2": "URL 2x", "html-enc": "HTML Enc", "html-dec": "HTML Dec", "hex-enc": "Hex Enc", "hex-dec": "Hex Dec", "unicode-enc": "Unicode Enc", "unicode-dec": "Unicode Dec", "js-enc": "JS Esc", "js-dec": "JS Unesc", "md5": "MD5", "sha1": "SHA-1", "sha256": "SHA-256", "lowercase": "Lowercase", "uppercase": "Uppercase" };
+  const decChainOpNames = { "b64-enc": "Base64 Enc", "b64-dec": "Base64 Dec", "url-enc": "URL Enc", "url-dec": "URL Dec", "url-enc2": "URL 2x", "html-enc": "HTML Enc", "html-dec": "HTML Dec", "hex-enc": "Hex Enc", "hex-dec": "Hex Dec", "unicode-enc": "Unicode Enc", "unicode-dec": "Unicode Dec", "js-enc": "JS Esc", "js-dec": "JS Unesc", "ascii-hex": "ASCII Hex", "jwt-dec": "JWT Dec", "md5": "MD5", "sha1": "SHA-1", "sha256": "SHA-256", "lowercase": "Lowercase", "uppercase": "Uppercase" };
 
   function decRenderChain() {
     const list = document.getElementById("dec-chain-list");
@@ -6707,14 +6687,9 @@ document.addEventListener("DOMContentLoaded", () => {
     e.target.value = "";
     decRenderChain();
   });
-
-  document.getElementById("dec-chain-clear").addEventListener("click", () => {
-    decChain.length = 0;
-    decRenderChain();
-  });
-
+  document.getElementById("dec-chain-clear").addEventListener("click", () => { decChain.length = 0; decRenderChain(); });
   document.getElementById("dec-chain-apply").addEventListener("click", async () => {
-    if (!decChain.length) return;
+    if (!decChain.length) { showToast("Add steps to the chain first"); return; }
     let value = document.getElementById("dec-input").value;
     for (const op of decChain) {
       const result = decOp(op, value);
@@ -6723,20 +6698,74 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("dec-output").value = value;
     showToast(`Chain applied (${decChain.length} steps)`);
   });
+  document.getElementById("dec-swap").addEventListener("click", () => {
+    const inp = document.getElementById("dec-input");
+    const out = document.getElementById("dec-output");
+    const tmp = inp.value; inp.value = out.value; out.value = tmp;
+  });
+  document.getElementById("dec-clear").addEventListener("click", () => {
+    document.getElementById("dec-input").value = "";
+    document.getElementById("dec-output").value = "";
+  });
 
-  // Comparer action buttons (apply to LEFT side entry)
-  function cmpLeftEntry() {
-    const l = typeof cmpLeft !== "undefined" ? cmpLeft : null;
-    return l;
+  // Saved chains — persist to chrome.storage
+  let decSavedChains = {};
+  async function decLoadSaved() {
+    const stored = await new Promise(r => chrome.storage.local.get("voidDecChains", r));
+    decSavedChains = stored.voidDecChains || {};
+    decRenderSaved();
   }
-  document.getElementById("cmp-to-rep").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) sendToRepeater(e); });
-  document.getElementById("cmp-to-intr").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) intrSendToIntruder(e); });
-  document.getElementById("cmp-to-poc").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) pocLoadEntry(e); });
-  document.getElementById("cmp-to-notes").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) notesFromEntry(e); });
-  document.getElementById("cmp-render").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) renderResponse(e); });
-  document.getElementById("cmp-curl").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) copyAsCurl(e); });
-  document.getElementById("cmp-fetch").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) copyAsFetch(e); });
-  document.getElementById("cmp-python").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) copyAsPython(e); });
+  function decRenderSaved() {
+    const sel = document.getElementById("dec-saved-sel");
+    sel.replaceChildren();
+    const def = el("option"); def.value = ""; def.textContent = "Load chain\u2026"; sel.appendChild(def);
+    for (const name of Object.keys(decSavedChains).sort()) {
+      const o = el("option"); o.value = name;
+      o.textContent = `${name} (${decSavedChains[name].length} steps)`;
+      sel.appendChild(o);
+    }
+  }
+  document.getElementById("dec-saved-save").addEventListener("click", () => {
+    const name = document.getElementById("dec-save-name").value.trim();
+    if (!name) { showToast("Enter a chain name"); return; }
+    if (!decChain.length) { showToast("Chain is empty"); return; }
+    decSavedChains[name] = [...decChain];
+    chrome.storage.local.set({ voidDecChains: decSavedChains });
+    document.getElementById("dec-save-name").value = "";
+    decRenderSaved();
+    showToast(`Chain "${name}" saved`);
+  });
+  document.getElementById("dec-saved-load").addEventListener("click", () => {
+    const name = document.getElementById("dec-saved-sel").value;
+    if (!name || !decSavedChains[name]) return;
+    decChain.length = 0;
+    decChain.push(...decSavedChains[name]);
+    decRenderChain();
+    showToast(`Chain "${name}" loaded (${decChain.length} steps)`);
+  });
+  document.getElementById("dec-saved-del").addEventListener("click", () => {
+    const name = document.getElementById("dec-saved-sel").value;
+    if (!name) return;
+    delete decSavedChains[name];
+    chrome.storage.local.set({ voidDecChains: decSavedChains });
+    decRenderSaved();
+    showToast(`Chain "${name}" deleted`);
+  });
+  decLoadSaved();
+
+  // Comparer action buttons (apply to selected side)
+  function cmpSelectedEntry() {
+    // Prefer LEFT, fall back to RIGHT
+    return (typeof cmpLeft !== "undefined" && cmpLeft) ? cmpLeft : (typeof cmpRight !== "undefined" ? cmpRight : null);
+  }
+  document.getElementById("cmp-to-rep").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) sendToRepeater(e); });
+  document.getElementById("cmp-to-intr").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) intrSendToIntruder(e); });
+  document.getElementById("cmp-to-poc").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) pocLoadEntry(e); });
+  document.getElementById("cmp-to-notes").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) notesFromEntry(e); });
+  document.getElementById("cmp-render").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) renderResponse(e); });
+  document.getElementById("cmp-curl").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) copyAsCurl(e); });
+  document.getElementById("cmp-fetch").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) copyAsFetch(e); });
+  document.getElementById("cmp-python").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) copyAsPython(e); });
 
   // Settings
   document.getElementById("mr-add").addEventListener("click", addMRRule);

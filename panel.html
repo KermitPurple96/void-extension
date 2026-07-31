@@ -21,7 +21,7 @@
     <button class="tab"        data-tab="logger"    >Logger <span class="bdg" id="bdg-logger">0</span></button>
     <button class="tab"        data-tab="containers">Containers</button>
     <button class="tab"        data-tab="headers"  >Headers</button>
-    <button class="tab"        data-tab="decoder"  >Decoder</button>
+    <button class="tab"        data-tab="decoder"  >Dencoder</button>
     <button class="tab"        data-tab="comparer" >Comparer</button>
     <button class="tab"        data-tab="poc"      >PoC</button>
     <button class="tab"        data-tab="sequencer">Sequencer</button>
@@ -1317,71 +1317,77 @@
     </div>
   </div>
 
-  <!-- ═══════════════════════════ DECODER ══════════════════════════════════ -->
+  <!-- ═══════════════════════════ DENCODER ═════════════════════════════════ -->
   <div id="tab-decoder" class="tab-panel hidden">
     <div class="dec-layout">
+      <!-- LEFT: Input -->
       <div class="dec-pane">
         <div class="pane-label">INPUT</div>
         <textarea id="dec-input" class="raw-ta dec-ta" spellcheck="false" placeholder="Paste text to encode/decode…"></textarea>
       </div>
+      <!-- CENTER: Chain builder -->
       <div class="dec-controls">
-        <div class="dec-section-label">Single operation</div>
-        <div class="dec-btn-grid">
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="b64-enc">B64 Enc</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="b64-dec">B64 Dec</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="url-enc">URL Enc</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="url-dec">URL Dec</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="url-enc2">URL 2x</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="html-enc">HTML Enc</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="html-dec">HTML Dec</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="hex-enc">Hex Enc</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="hex-dec">Hex Dec</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="unicode-enc">Unicode Enc</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="unicode-dec">Unicode Dec</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="js-enc">JS Esc</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="js-dec">JS Unesc</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="ascii-hex">ASCII Hex</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="jwt-dec">JWT Dec</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="md5">MD5</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="sha1">SHA-1</button>
-          <button class="btn btn-xs btn-ghost dec-btn" data-op="sha256">SHA-256</button>
+        <!-- Saved chains -->
+        <div class="dec-section-label">Saved Chains</div>
+        <div class="dec-saved-bar">
+          <select id="dec-saved-sel" class="filter-sel" style="flex:1">
+            <option value="">Load chain…</option>
+          </select>
+          <button id="dec-saved-load" class="btn btn-xs btn-ghost">Load</button>
+          <button id="dec-saved-del" class="btn btn-xs btn-danger">Del</button>
+        </div>
+        <div class="dec-saved-bar" style="margin-top:3px">
+          <input id="dec-save-name" type="text" class="settings-inp" placeholder="Chain name" spellcheck="false" style="flex:1">
+          <button id="dec-saved-save" class="btn btn-xs btn-accent">Save</button>
         </div>
 
-        <div class="dec-section-label" style="margin-top:10px">Chain (add steps, apply in order)</div>
+        <!-- Current chain -->
+        <div class="dec-section-label" style="margin-top:8px">Current Chain</div>
         <div class="dec-chain-controls">
           <select id="dec-chain-add" class="filter-sel" style="flex:1">
             <option value="">+ Add step…</option>
-            <option value="b64-enc">Base64 Encode</option>
-            <option value="b64-dec">Base64 Decode</option>
-            <option value="url-enc">URL Encode</option>
-            <option value="url-dec">URL Decode</option>
-            <option value="url-enc2">URL Encode 2x</option>
-            <option value="html-enc">HTML Encode</option>
-            <option value="html-dec">HTML Decode</option>
-            <option value="hex-enc">Hex Encode</option>
-            <option value="hex-dec">Hex Decode</option>
-            <option value="unicode-enc">Unicode Encode</option>
-            <option value="unicode-dec">Unicode Decode</option>
-            <option value="js-enc">JS Escape</option>
-            <option value="js-dec">JS Unescape</option>
-            <option value="md5">MD5 Hash</option>
-            <option value="sha1">SHA-1 Hash</option>
-            <option value="sha256">SHA-256 Hash</option>
-            <option value="lowercase">Lowercase</option>
-            <option value="uppercase">Uppercase</option>
+            <optgroup label="Encode">
+              <option value="b64-enc">Base64 Encode</option>
+              <option value="url-enc">URL Encode</option>
+              <option value="url-enc2">URL Encode 2x</option>
+              <option value="html-enc">HTML Encode</option>
+              <option value="hex-enc">Hex Encode</option>
+              <option value="unicode-enc">Unicode Encode</option>
+              <option value="js-enc">JS Escape</option>
+              <option value="ascii-hex">ASCII Hex</option>
+            </optgroup>
+            <optgroup label="Decode">
+              <option value="b64-dec">Base64 Decode</option>
+              <option value="url-dec">URL Decode</option>
+              <option value="html-dec">HTML Decode</option>
+              <option value="hex-dec">Hex Decode</option>
+              <option value="unicode-dec">Unicode Decode</option>
+              <option value="js-dec">JS Unescape</option>
+              <option value="jwt-dec">JWT Decode</option>
+            </optgroup>
+            <optgroup label="Hash">
+              <option value="md5">MD5</option>
+              <option value="sha1">SHA-1</option>
+              <option value="sha256">SHA-256</option>
+            </optgroup>
+            <optgroup label="Transform">
+              <option value="lowercase">Lowercase</option>
+              <option value="uppercase">Uppercase</option>
+            </optgroup>
           </select>
         </div>
         <div id="dec-chain-list" class="dec-chain-list"></div>
         <div class="dec-chain-actions">
-          <button id="dec-chain-apply" class="btn btn-xs btn-accent">Apply Chain</button>
-          <button id="dec-chain-clear" class="btn btn-xs btn-ghost">Clear Chain</button>
+          <button id="dec-chain-apply" class="btn btn-xs btn-accent" style="flex:1">Apply Chain</button>
+          <button id="dec-chain-clear" class="btn btn-xs btn-ghost">Clear</button>
         </div>
 
         <div style="margin-top:auto">
           <button id="dec-swap" class="btn btn-sm btn-ghost" style="width:100%">↕ Swap Input/Output</button>
-          <button id="dec-clear" class="btn btn-sm btn-ghost" style="width:100%;margin-top:4px">Clear</button>
+          <button id="dec-clear" class="btn btn-sm btn-ghost" style="width:100%;margin-top:4px">Clear All</button>
         </div>
       </div>
+      <!-- RIGHT: Output -->
       <div class="dec-pane">
         <div class="pane-label">OUTPUT</div>
         <textarea id="dec-output" class="raw-ta dec-ta" spellcheck="false" readonly placeholder="Result appears here…"></textarea>
@@ -1398,8 +1404,6 @@
       <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-headers" checked><span class="toggle-track"></span> Ignore header order</label>
       <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-case"><span class="toggle-track"></span> Case-insensitive</label>
       <span id="cmp-status" class="settings-status"></span>
-    </div>
-    <div class="detail-action-bar">
       <button id="cmp-to-rep" class="btn btn-xs btn-ghost">→ Repeater</button>
       <button id="cmp-to-intr" class="btn btn-xs btn-ghost">→ Intruder</button>
       <button id="cmp-to-poc" class="btn btn-xs btn-ghost">→ PoC</button>
@@ -1408,7 +1412,6 @@
       <button id="cmp-curl" class="btn btn-xs btn-ghost">curl</button>
       <button id="cmp-fetch" class="btn btn-xs btn-ghost">fetch</button>
       <button id="cmp-python" class="btn btn-xs btn-ghost">py</button>
-      <span class="settings-status" style="font-size:10px;color:var(--muted)">(actions apply to LEFT side)</span>
     </div>
     <div class="cmp-layout">
       <!-- LEFT side -->
