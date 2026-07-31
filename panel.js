@@ -6526,10 +6526,11 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   })();
 
-  // Endpoint split resizer
-  (function() {
-    const handle = document.getElementById("ep-resizer");
-    const left   = document.getElementById("ep-split-left");
+  // Reusable clamped split resizer — prevents overflow/gap
+  function initSplitResizer(handleId, leftId, minLeft, minRight) {
+    const handle = document.getElementById(handleId);
+    const left = document.getElementById(leftId);
+    if (!handle || !left) return;
     let dragging = false, startX = 0, startW = 0;
     handle.addEventListener("mousedown", e => {
       dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width;
@@ -6537,74 +6538,22 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.addEventListener("mousemove", e => {
       if (!dragging) return;
+      const container = left.parentElement;
+      const maxW = container.getBoundingClientRect().width - (minRight || 250) - 5;
+      const w = Math.max(minLeft || 200, Math.min(maxW, startW + e.clientX - startX));
       left.style.flex = "none";
-      left.style.width = Math.max(200, startW + e.clientX - startX) + "px";
+      left.style.width = w + "px";
     });
     document.addEventListener("mouseup", () => {
       if (!dragging) return;
       dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
     });
-  })();
+  }
 
-  // Target tree resizer
-  (function() {
-    const handle = document.getElementById("tgt-resizer");
-    const pane   = document.getElementById("tgt-tree-pane");
-    let dragging = false, startX = 0, startW = 0;
-    handle.addEventListener("mousedown", e => {
-      dragging = true; startX = e.clientX; startW = pane.getBoundingClientRect().width;
-      document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
-    });
-    document.addEventListener("mousemove", e => {
-      if (!dragging) return;
-      pane.style.flex = "none";
-      pane.style.width = Math.max(150, startW + e.clientX - startX) + "px";
-    });
-    document.addEventListener("mouseup", () => {
-      if (!dragging) return;
-      dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
-    });
-  })();
-
-  // Intercept split resizer
-  (function() {
-    const handle = document.getElementById("ic-resizer");
-    const left   = document.getElementById("ic-split-left");
-    let dragging = false, startX = 0, startW = 0;
-    handle.addEventListener("mousedown", e => {
-      dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width;
-      document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
-    });
-    document.addEventListener("mousemove", e => {
-      if (!dragging) return;
-      left.style.flex = "none";
-      left.style.width = Math.max(200, startW + e.clientX - startX) + "px";
-    });
-    document.addEventListener("mouseup", () => {
-      if (!dragging) return;
-      dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
-    });
-  })();
-
-  // History split resizer
-  (function() {
-    const handle = document.getElementById("hist-resizer");
-    const left   = document.getElementById("hist-split-left");
-    let dragging = false, startX = 0, startW = 0;
-    handle.addEventListener("mousedown", e => {
-      dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width;
-      document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
-    });
-    document.addEventListener("mousemove", e => {
-      if (!dragging) return;
-      left.style.flex = "none";
-      left.style.width = Math.max(200, startW + e.clientX - startX) + "px";
-    });
-    document.addEventListener("mouseup", () => {
-      if (!dragging) return;
-      dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
-    });
-  })();
+  initSplitResizer("hist-resizer", "hist-split-left", 200, 250);
+  initSplitResizer("ep-resizer", "ep-split-left", 200, 250);
+  initSplitResizer("tgt-resizer", "tgt-tree-pane", 150, 250);
+  initSplitResizer("ic-resizer", "ic-split-left", 200, 250);
 
   // Intruder
   const intrMSel = document.getElementById("intr-method");
@@ -6779,14 +6728,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }, logColFilters, logRender);
     createPaneSearch(document.getElementById("log-req-side"), document.getElementById("log-req-search"), document.getElementById("log-req-search-count"));
     createPaneSearch(document.getElementById("log-resp-side"), document.getElementById("log-resp-search"), document.getElementById("log-resp-search-count"));
-    // Resizer
-    (function() {
-      const handle = document.getElementById("log-resizer"), left = document.getElementById("log-split-left");
-      let dragging = false, startX = 0, startW = 0;
-      handle.addEventListener("mousedown", e => { dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width; document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize"; });
-      document.addEventListener("mousemove", e => { if (!dragging) return; left.style.flex = "none"; left.style.width = Math.max(200, startW + e.clientX - startX) + "px"; });
-      document.addEventListener("mouseup", () => { if (!dragging) return; dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = ""; });
-    })();
+    initSplitResizer("log-resizer", "log-split-left", 200, 250);
   });
 
   // ── Sensitive Discoverer ────────────────────────────────────────────────────
@@ -6850,25 +6792,7 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("sens-resp-search"),
       document.getElementById("sens-resp-search-count")
     );
-    // Resizer
-    (function() {
-      const handle = document.getElementById("sens-resizer");
-      const left = document.getElementById("sens-split-left");
-      let dragging = false, startX = 0, startW = 0;
-      handle.addEventListener("mousedown", e => {
-        dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width;
-        document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
-      });
-      document.addEventListener("mousemove", e => {
-        if (!dragging) return;
-        left.style.flex = "none";
-        left.style.width = Math.max(200, startW + e.clientX - startX) + "px";
-      });
-      document.addEventListener("mouseup", () => {
-        if (!dragging) return;
-        dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
-      });
-    })();
+    initSplitResizer("sens-resizer", "sens-split-left", 200, 250);
     sensLoadCustomRules();
   });
 
@@ -7050,14 +6974,7 @@ document.addEventListener("DOMContentLoaded", () => {
         renderWsHistory();
       });
     });
-    (function() {
-      const handle = document.getElementById("ws-resizer");
-      const left = document.getElementById("ws-split-left");
-      let dragging = false, startX = 0, startW = 0;
-      handle.addEventListener("mousedown", e => { dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width; document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize"; });
-      document.addEventListener("mousemove", e => { if (!dragging) return; left.style.flex = "none"; left.style.width = Math.max(200, startW + e.clientX - startX) + "px"; });
-      document.addEventListener("mouseup", () => { if (!dragging) return; dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = ""; });
-    })();
+    initSplitResizer("ws-resizer", "ws-split-left", 200, 250);
     document.getElementById("ws-detail-cmp-l").addEventListener("click", () => {
       if (!wsDetailFrame) return;
       cmpSendTo("left", { method: "WS", url: wsDetailFrame.url, host: "", path: "", headers: {}, body: wsDetailFrame.data, status: null, respHeaders: {}, respBody: "" });

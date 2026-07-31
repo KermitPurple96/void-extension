@@ -321,8 +321,8 @@ body {
 .ic-editor {
   display: none;
   flex-direction: column;
-  flex: 0 0 55%;
-  min-width: 300px;
+  flex: 1;
+  min-width: 250px;
   overflow: hidden;
 }
 .ic-editor.visible {
@@ -1168,8 +1168,8 @@ body {
 .hist-detail {
   display: none;
   flex-direction: column;
-  flex: 0 0 55%;
-  min-width: 300px;
+  flex: 1;
+  min-width: 250px;
   overflow: hidden;
   background: var(--bg);
   border-left: 1px solid var(--border);
