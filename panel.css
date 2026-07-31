@@ -166,46 +166,90 @@ body {
   flex-shrink: 0;
 }
 
-/* ── Buttons ─────────────────────────────────────────────────────────────── */
+/* ── Buttons (unified) ───────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 5px 12px;
+  padding: 4px 10px;
   border-radius: var(--r);
   border: 1px solid var(--border);
   background: var(--bg3);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: .12s;
+  transition: background .1s, border-color .1s, color .1s;
   white-space: nowrap;
+  line-height: 1.4;
 }
 .btn:hover   { border-color: var(--accent); color: var(--accent); }
-.btn:disabled { opacity: .35; cursor: not-allowed; }
-.btn.btn-sm  { padding: 3px 8px; font-size: 11px; }
-.btn.btn-xs  { padding: 2px 6px; font-size: 11px; }
+.btn:disabled { opacity: .35; cursor: not-allowed; pointer-events: none; }
+.btn.btn-sm  { padding: 3px 8px; }
+.btn.btn-xs  { padding: 2px 6px; }
 
-.btn-ghost   { background: none; color: var(--muted); }
-.btn-ghost:hover { color: var(--text); border-color: var(--border); }
+.btn-ghost   { background: transparent; border-color: transparent; color: var(--muted); }
+.btn-ghost:hover { color: var(--text); background: var(--bg3); border-color: var(--border); }
 
-.btn-success { background: var(--btn-success-bg); border-color: var(--green); color: var(--green); }
-.btn-success:hover { background: var(--btn-success-hover); }
+.btn-accent  { background: var(--tint-blue); border-color: var(--accent); color: var(--accent); }
+.btn-accent:hover { background: var(--accent); color: var(--btn-send-text); }
 
-.btn-danger  { background: var(--btn-danger-bg); border-color: var(--red); color: var(--red); }
-.btn-danger:hover  { background: var(--btn-danger-hover); }
+.btn-success { background: var(--tint-green); border-color: var(--green); color: var(--green); }
+.btn-success:hover { background: var(--green); color: var(--btn-send-text); }
+
+.btn-danger  { background: var(--tint-red); border-color: var(--red); color: var(--red); }
+.btn-danger:hover  { background: var(--red); color: var(--btn-send-text); }
 
 .btn-send {
-  padding: 5px 18px;
   background: var(--accent);
   border-color: var(--accent);
-  color: #000;
-  font-weight: 700;
+  color: var(--btn-send-text);
+  font-weight: 600;
 }
-.btn-send:hover { background: var(--btn-send-hover); border-color: var(--btn-send-hover); color: var(--btn-send-text); }
+.btn-send:hover { background: var(--btn-send-hover); border-color: var(--btn-send-hover); }
 .btn-send:disabled { background: var(--bg3); border-color: var(--border); color: var(--muted); }
+
+/* ── Toggle switch (replaces native checkboxes) ─────────────────────────── */
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.toggle input { display: none; }
+.toggle .toggle-track {
+  position: relative;
+  width: 28px;
+  height: 14px;
+  background: var(--bg4);
+  border-radius: 7px;
+  transition: background .15s;
+  flex-shrink: 0;
+}
+.toggle .toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform .15s, background .15s;
+}
+.toggle input:checked + .toggle-track {
+  background: var(--accent);
+}
+.toggle input:checked + .toggle-track::after {
+  transform: translateX(14px);
+  background: var(--btn-send-text);
+}
 
 /* ── Method pill ─────────────────────────────────────────────────────────── */
 .method-pill {
@@ -597,13 +641,6 @@ body {
   font-family: var(--mono);
   flex: 1;
 }
-.btn-accent {
-  background: var(--tint-blue);
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
-}
-.btn-accent:hover { opacity: .85; }
 
 /* ── Crawl bar ─────────────────────────────────────────────────────────── */
 .crawl-bar {
@@ -1308,14 +1345,23 @@ body {
    find them) must not change their box behaviour — .resp-pane is display:block */
 .resp-pane > .raw-pre { flex: none; overflow: visible; }
 .reflect-bar-toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   color: var(--muted);
   cursor: pointer;
   white-space: nowrap;
+  font-size: 11px;
 }
-.reflect-bar-toggle input { margin: 0; cursor: pointer; }
+.reflect-bar-toggle input { display: none; }
+.reflect-bar-toggle .toggle-track {
+  position: relative; width: 28px; height: 14px; background: var(--bg4); border-radius: 7px; transition: background .15s; flex-shrink: 0;
+}
+.reflect-bar-toggle .toggle-track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s;
+}
+.reflect-bar-toggle input:checked + .toggle-track { background: var(--accent); }
+.reflect-bar-toggle input:checked + .toggle-track::after { transform: translateX(14px); background: var(--btn-send-text); }
 .reflect-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .reflect-chip {
   display: inline-flex;
@@ -1655,16 +1701,24 @@ body {
 
 /* ═══ AUTO-COOKIE ═════════════════════════════════════════════════════════════ */
 .rep-autocookie {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   font-size: 11px;
   color: var(--muted);
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
 }
-.rep-autocookie input { accent-color: var(--green); }
+.rep-autocookie input { display: none; }
+.rep-autocookie .toggle-track {
+  position: relative; width: 28px; height: 14px; background: var(--bg4); border-radius: 7px; transition: background .15s; flex-shrink: 0;
+}
+.rep-autocookie .toggle-track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s;
+}
+.rep-autocookie input:checked + .toggle-track { background: var(--green); }
+.rep-autocookie input:checked + .toggle-track::after { transform: translateX(14px); background: var(--btn-send-text); }
 
 /* ═══ INTRUDER ═══════════════════════════════════════════════════════════════ */
 .intr-layout {
@@ -1839,16 +1893,22 @@ body {
   margin-bottom: 6px;
 }
 .settings-label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
 }
-.settings-label input[type="checkbox"] {
-  accent-color: var(--accent);
+.settings-label input[type="checkbox"] { display: none; }
+.settings-label .toggle-track {
+  position: relative; width: 28px; height: 14px; background: var(--bg4); border-radius: 7px; transition: background .15s; flex-shrink: 0;
 }
+.settings-label .toggle-track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s;
+}
+.settings-label input:checked + .toggle-track { background: var(--accent); }
+.settings-label input:checked + .toggle-track::after { transform: translateX(14px); background: var(--btn-send-text); }
 .settings-label-sm {
   font-size: 11px;
   color: var(--muted);
@@ -2062,10 +2122,18 @@ body {
   border-bottom: 1px solid var(--border); background: var(--bg2);
 }
 .probe-toggle {
-  display: flex; align-items: center; gap: 5px;
-  font-size: 12px; color: var(--muted); cursor: pointer; user-select: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--muted); cursor: pointer; user-select: none;
 }
-.probe-toggle input { accent-color: var(--accent); }
+.probe-toggle input { display: none; }
+.probe-toggle .toggle-track {
+  position: relative; width: 28px; height: 14px; background: var(--bg4); border-radius: 7px; transition: background .15s; flex-shrink: 0;
+}
+.probe-toggle .toggle-track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s;
+}
+.probe-toggle input:checked + .toggle-track { background: var(--accent); }
+.probe-toggle input:checked + .toggle-track::after { transform: translateX(14px); background: var(--btn-send-text); }
 
 .probe-test-cmds { padding: 8px 12px; overflow-y: auto; max-height: 260px; }
 .probe-cmd-section { margin-bottom: 10px; }

@@ -45,7 +45,7 @@
       <button class="sub-tab" data-tgtsub="scope">Scope</button>
       <div class="tabbar-gap"></div>
       <input id="tgt-filter" type="text" class="tgt-filter-inp" placeholder="Filter URLs…" spellcheck="false" autocomplete="off">
-      <label class="rep-autocookie"><input type="checkbox" id="tgt-inscope-only"> In-scope only</label>
+      <label class="rep-autocookie"><input type="checkbox" id="tgt-inscope-only"><span class="toggle-track"></span> In-scope only</label>
     </div>
 
     <!-- Session sub-panel -->
@@ -117,7 +117,7 @@
             <button id="tgt-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
           </div>
                     <div class="detail-action-bar" id="tgt-reflect-bar">
-            <label class="reflect-bar-toggle"><input type="checkbox" id="tgt-reflect-hl"> Reflections</label>
+            <label class="reflect-bar-toggle"><input type="checkbox" id="tgt-reflect-hl"><span class="toggle-track"></span> Reflections</label>
             <span class="reflect-chips hidden" id="tgt-reflect-chips"></span>
             <div class="tabbar-gap"></div>
             <button id="tgt-detail-render" class="btn btn-xs btn-ghost">Render</button>
@@ -188,7 +188,7 @@
             <button id="ep-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
           </div>
                     <div class="detail-action-bar" id="ep-reflect-bar">
-            <label class="reflect-bar-toggle"><input type="checkbox" id="ep-reflect-hl"> Reflections</label>
+            <label class="reflect-bar-toggle"><input type="checkbox" id="ep-reflect-hl"><span class="toggle-track"></span> Reflections</label>
             <span class="reflect-chips hidden" id="ep-reflect-chips"></span>
             <div class="tabbar-gap"></div>
             <button id="ep-detail-render" class="btn btn-xs btn-ghost">Render</button>
@@ -368,8 +368,8 @@
         <option value="image">Image</option>
         <option value="font">Font</option>
       </select>
-      <label class="rep-autocookie"><input type="checkbox" id="hist-inscope-only"> In-scope only</label>
-      <label class="rep-autocookie"><input type="checkbox" id="hist-reflect-only"> Reflections</label>
+      <label class="rep-autocookie"><input type="checkbox" id="hist-inscope-only"><span class="toggle-track"></span> In-scope only</label>
+      <label class="rep-autocookie"><input type="checkbox" id="hist-reflect-only"><span class="toggle-track"></span> Reflections</label>
       <select id="hist-flt-ext" class="filter-sel">
         <option value="">All extensions</option>
         <option value="no-static">No static (img/css/font/js)</option>
@@ -419,7 +419,7 @@
           <button id="hist-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
         </div>
                 <div class="detail-action-bar" id="hist-reflect-bar">
-          <label class="reflect-bar-toggle"><input type="checkbox" id="hist-reflect-hl"> Reflections</label>
+          <label class="reflect-bar-toggle"><input type="checkbox" id="hist-reflect-hl"><span class="toggle-track"></span> Reflections</label>
           <span class="reflect-chips hidden" id="hist-reflect-chips"></span>
           <div class="tabbar-gap"></div>
           <button id="hist-detail-render" class="btn btn-xs btn-ghost">Render</button>
@@ -537,7 +537,7 @@
       <button id="rep-target-toggle" class="btn btn-xs btn-ghost rep-target-btn" title="Edit target (connect to different host/IP)">✎ Target</button>
       <button id="rep-send"   class="btn btn-send">Send</button>
       <button id="rep-to-intr" class="btn btn-xs btn-ghost" title="Send this request to Intruder">→ Intruder</button>
-      <label class="rep-autocookie" title="Auto-sync cookies from browser tab"><input type="checkbox" id="rep-autocookie"> Cookie sync</label>
+      <label class="rep-autocookie" title="Auto-sync cookies from browser tab"><input type="checkbox" id="rep-autocookie"><span class="toggle-track"></span> Cookie sync</label>
     </div>
     <input id="rep-url" type="hidden">
     <!-- Target override bar (hidden by default) -->
@@ -546,12 +546,12 @@
       <input id="rep-target-host" class="settings-inp" type="text" placeholder="IP or hostname (e.g. 141.101.90.106)" spellcheck="false" style="flex:1;max-width:220px">
       <span class="rep-target-label">:</span>
       <input id="rep-target-port" class="settings-inp settings-inp-sm" type="text" placeholder="443" spellcheck="false">
-      <label class="rep-autocookie"><input type="checkbox" id="rep-target-tls" checked> TLS</label>
+      <label class="rep-autocookie"><input type="checkbox" id="rep-target-tls" checked><span class="toggle-track"></span> TLS</label>
       <span class="rep-target-info">Host header auto-set from URL. Target overrides TCP destination.</span>
     </div>
 
         <div class="detail-action-bar" id="rep-reflect-bar">
-      <label class="reflect-bar-toggle"><input type="checkbox" id="rep-reflect-hl"> Reflections</label>
+      <label class="reflect-bar-toggle"><input type="checkbox" id="rep-reflect-hl"><span class="toggle-track"></span> Reflections</label>
       <span class="reflect-chips hidden" id="rep-reflect-chips"></span>
       <div class="tabbar-gap"></div>
       <button id="rep-detail-render" class="btn btn-xs btn-ghost">Render</button>
@@ -677,8 +677,8 @@
           </div>
 
           <div class="intr-toolbar">
-            <label class="rep-autocookie"><input type="checkbox" id="intr-autocookie"> Cookie sync</label>
-            <label class="rep-autocookie" title="Only show results whose response reflects a request value"><input type="checkbox" id="intr-reflect-only"> Reflections</label>
+            <label class="rep-autocookie"><input type="checkbox" id="intr-autocookie"><span class="toggle-track"></span> Cookie sync</label>
+            <label class="rep-autocookie" title="Only show results whose response reflects a request value"><input type="checkbox" id="intr-reflect-only"><span class="toggle-track"></span> Reflections</label>
             <div class="tabbar-gap"></div>
             <button id="intr-start" class="btn btn-accent">Start Attack</button>
             <button id="intr-stop"  class="btn btn-sm btn-danger" disabled>Stop</button>
@@ -714,7 +714,7 @@
             <button id="intr-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
           </div>
                     <div class="detail-action-bar" id="intr-reflect-bar">
-            <label class="reflect-bar-toggle"><input type="checkbox" id="intr-reflect-hl"> Reflections</label>
+            <label class="reflect-bar-toggle"><input type="checkbox" id="intr-reflect-hl"><span class="toggle-track"></span> Reflections</label>
             <span class="reflect-chips hidden" id="intr-reflect-chips"></span>
             <div class="tabbar-gap"></div>
             <button id="intr-detail-render" class="btn btn-xs btn-ghost">Render</button>
@@ -805,7 +805,7 @@
         <button class="sub-tab" data-findtab="sinks">Sinks <span class="bdg" id="bdg-p-snk">0</span></button>
         <button class="sub-tab" data-findtab="flows">Flows <span class="bdg" id="bdg-p-flw">0</span></button>
         <div class="tabbar-gap"></div>
-        <label class="rep-autocookie"><input type="checkbox" id="probe-ctrl-only" checked> Controllable only</label>
+        <label class="rep-autocookie"><input type="checkbox" id="probe-ctrl-only" checked><span class="toggle-track"></span> Controllable only</label>
         <button class="sub-tab" data-findtab="runtime">Runtime <span class="bdg" id="bdg-p-rt">0</span></button>
       </div>
 
@@ -902,10 +902,10 @@
 
       <!-- Toggles -->
       <div class="probe-toggles">
-        <label class="probe-toggle" title="Auto-fill forms with XSS payloads for stored XSS testing"><input type="checkbox" id="probe-autofill"> Auto Fill Forms</label>
-        <label class="probe-toggle" title="Client-Side Template Injection testing (AngularJS/Vue)"><input type="checkbox" id="probe-csti"> CSTI</label>
-        <label class="probe-toggle" title="Server-Side Template Injection detection"><input type="checkbox" id="probe-ssti"> SSTI</label>
-        <label class="probe-toggle" title="Scan for prototype pollution gadgets"><input type="checkbox" id="probe-protopoll"> Proto Pollution</label>
+        <label class="probe-toggle" title="Auto-fill forms with XSS payloads for stored XSS testing"><input type="checkbox" id="probe-autofill"><span class="toggle-track"></span> Auto Fill Forms</label>
+        <label class="probe-toggle" title="Client-Side Template Injection testing (AngularJS/Vue)"><input type="checkbox" id="probe-csti"><span class="toggle-track"></span> CSTI</label>
+        <label class="probe-toggle" title="Server-Side Template Injection detection"><input type="checkbox" id="probe-ssti"><span class="toggle-track"></span> SSTI</label>
+        <label class="probe-toggle" title="Scan for prototype pollution gadgets"><input type="checkbox" id="probe-protopoll"><span class="toggle-track"></span> Proto Pollution</label>
       </div>
 
       <!-- Testing command groups -->
@@ -972,7 +972,7 @@
         <div class="probe-console-bar">
           <span class="pane-label">CONSOLE OUTPUT</span>
           <button id="probe-console-clear" class="btn btn-xs btn-ghost">Clear</button>
-          <label class="probe-toggle"><input type="checkbox" id="probe-autoscroll" checked> Auto-scroll</label>
+          <label class="probe-toggle"><input type="checkbox" id="probe-autoscroll" checked><span class="toggle-track"></span> Auto-scroll</label>
         </div>
         <div id="probe-console" class="probe-console"></div>
       </div>
@@ -1002,14 +1002,14 @@
           <textarea id="scan-body" class="raw-ta settings-ta" rows="2" spellcheck="false" placeholder="user=admin&pass=test"></textarea>
           <div class="pane-label" style="margin-top:6px">SCAN MODULES</div>
           <div class="poc-evasions">
-            <label class="probe-toggle"><input type="checkbox" id="scan-sqli" checked> SQL Injection (error + blind)</label>
-            <label class="probe-toggle"><input type="checkbox" id="scan-xss" checked> Reflected XSS</label>
-            <label class="probe-toggle"><input type="checkbox" id="scan-pathtraversal" checked> Path Traversal</label>
-            <label class="probe-toggle"><input type="checkbox" id="scan-ssrf"> SSRF (requires Interactsh)</label>
-            <label class="probe-toggle"><input type="checkbox" id="scan-ssti"> Server-Side Template Injection</label>
-            <label class="probe-toggle"><input type="checkbox" id="scan-cmdi"> Command Injection</label>
-            <label class="probe-toggle"><input type="checkbox" id="scan-openredirect"> Open Redirect</label>
-            <label class="probe-toggle"><input type="checkbox" id="scan-headerinject"> Header Injection / CRLF</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-sqli" checked><span class="toggle-track"></span> SQL Injection (error + blind)</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-xss" checked><span class="toggle-track"></span> Reflected XSS</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-pathtraversal" checked><span class="toggle-track"></span> Path Traversal</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-ssrf"><span class="toggle-track"></span> SSRF (requires Interactsh)</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-ssti"><span class="toggle-track"></span> Server-Side Template Injection</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-cmdi"><span class="toggle-track"></span> Command Injection</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-openredirect"><span class="toggle-track"></span> Open Redirect</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-headerinject"><span class="toggle-track"></span> Header Injection / CRLF</label>
           </div>
           <div class="settings-row" style="margin-top:6px">
             <label class="settings-label-sm">Threads</label>
@@ -1064,7 +1064,7 @@
         </div>
         <div class="settings-row">
           <button id="oob-poll" class="btn btn-sm btn-ghost">Poll for interactions</button>
-          <label class="probe-toggle"><input type="checkbox" id="oob-auto-poll"> Auto-poll (10s)</label>
+          <label class="probe-toggle"><input type="checkbox" id="oob-auto-poll"><span class="toggle-track"></span> Auto-poll (10s)</label>
           <span id="oob-poll-status" class="settings-status"></span>
         </div>
         <div class="pane-label" style="margin-top:8px">INTERACTIONS</div>
@@ -1101,7 +1101,7 @@
         <option value="proxy">Proxy</option>
         <option value="repeater">Repeater</option>
       </select>
-      <label class="rep-autocookie"><input type="checkbox" id="log-scope-only"> In-scope</label>
+      <label class="rep-autocookie"><input type="checkbox" id="log-scope-only"><span class="toggle-track"></span> In-scope</label>
       <span class="log-sync-status" id="log-sync-status"><span class="dot dot-off" id="log-sync-dot"></span> <span id="log-sync-label">Disconnected</span></span>
       <button id="log-sync" class="btn btn-sm btn-accent" title="Connect to sync server (node void-sync-server.js)">Sync</button>
       <button id="log-merge" class="btn btn-sm btn-ghost">+ Import</button>
@@ -1148,7 +1148,7 @@
           <button id="log-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
         </div>
                 <div class="detail-action-bar" id="log-reflect-bar">
-          <label class="reflect-bar-toggle"><input type="checkbox" id="log-reflect-hl"> Reflections</label>
+          <label class="reflect-bar-toggle"><input type="checkbox" id="log-reflect-hl"><span class="toggle-track"></span> Reflections</label>
           <span class="reflect-chips hidden" id="log-reflect-chips"></span>
           <div class="tabbar-gap"></div>
           <button id="log-detail-render" class="btn btn-xs btn-ghost">Render</button>
@@ -1286,7 +1286,7 @@
         <div class="pane-label">
           ALL HEADERS
           <label class="hdr-scope-toggle" title="Off: only headers from the main document response. On: every response seen in this tab, including sub-frames and third-party assets.">
-            <input type="checkbox" id="hdr-show-all"> include sub-resources
+            <input type="checkbox" id="hdr-show-all"><span class="toggle-track"></span> include sub-resources
           </label>
         </div>
         <div class="hdr-pane-scroll">
@@ -1350,8 +1350,8 @@
       <button id="cmp-diff" class="btn btn-accent">Diff</button>
       <button id="cmp-swap" class="btn btn-sm btn-ghost">⇄ Swap</button>
       <button id="cmp-clear" class="btn btn-sm btn-ghost">Clear</button>
-      <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-headers" checked> Ignore header order</label>
-      <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-case"> Case-insensitive</label>
+      <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-headers" checked><span class="toggle-track"></span> Ignore header order</label>
+      <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-case"><span class="toggle-track"></span> Case-insensitive</label>
       <span id="cmp-status" class="settings-status"></span>
     </div>
     <div class="cmp-layout">
@@ -1419,10 +1419,10 @@
               <label class="settings-label-sm">Evasions</label>
             </div>
             <div class="poc-evasions">
-              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-autosubmit" checked> Auto-submit on load</label>
-              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-no-referrer"> Suppress Referer header</label>
-              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-strip-token"> Strip CSRF token params</label>
-              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-sandbox"> Sandbox iframe (bypass frame-buster)</label>
+              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-autosubmit" checked><span class="toggle-track"></span> Auto-submit on load</label>
+              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-no-referrer"><span class="toggle-track"></span> Suppress Referer header</label>
+              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-strip-token"><span class="toggle-track"></span> Strip CSRF token params</label>
+              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-sandbox"><span class="toggle-track"></span> Sandbox iframe (bypass frame-buster)</label>
             </div>
             <div class="settings-row" style="margin-top:8px">
               <label class="settings-label-sm">Target URL</label>
@@ -1674,7 +1674,7 @@
     <div class="sens-toolbar">
       <button id="sens-scan" class="btn btn-accent">Scan History</button>
       <button id="sens-clear" class="btn btn-sm btn-ghost">Clear</button>
-      <label class="rep-autocookie"><input type="checkbox" id="sens-scope-only"> In-scope only</label>
+      <label class="rep-autocookie"><input type="checkbox" id="sens-scope-only"><span class="toggle-track"></span> In-scope only</label>
       <select id="sens-flt-cat" class="filter-sel">
         <option value="">All categories</option>
         <option value="Tokens & Keys">Tokens & Keys</option>
@@ -1759,7 +1759,7 @@
           <button id="sens-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
         </div>
                 <div class="detail-action-bar" id="sens-reflect-bar">
-          <label class="reflect-bar-toggle"><input type="checkbox" id="sens-reflect-hl"> Reflections</label>
+          <label class="reflect-bar-toggle"><input type="checkbox" id="sens-reflect-hl"><span class="toggle-track"></span> Reflections</label>
           <span class="reflect-chips hidden" id="sens-reflect-chips"></span>
           <div class="tabbar-gap"></div>
           <button id="sens-detail-render" class="btn btn-xs btn-ghost">Render</button>
@@ -1811,7 +1811,7 @@
           <option value="req_body">Request body</option>
           <option value="req_headers">Request headers</option>
         </select>
-        <label class="rep-autocookie"><input type="checkbox" id="sens-custom-isregex" checked> Regex</label>
+        <label class="rep-autocookie"><input type="checkbox" id="sens-custom-isregex" checked><span class="toggle-track"></span> Regex</label>
         <button id="sens-custom-add" class="btn btn-xs btn-accent">Add</button>
       </div>
     </div>
@@ -1907,7 +1907,7 @@
         <div class="settings-section-title">Request Defaults</div>
         <div class="settings-section-desc">Default settings for Repeater requests.</div>
         <div class="settings-row">
-          <label class="settings-label"><input type="checkbox" id="cfg-follow-redirects" checked> Follow redirects</label>
+          <label class="settings-label"><input type="checkbox" id="cfg-follow-redirects" checked><span class="toggle-track"></span> Follow redirects</label>
         </div>
         <div class="settings-row">
           <label class="settings-label-sm">Timeout (ms)</label>
@@ -1937,7 +1937,7 @@
         <div class="settings-section-title">Session Handling</div>
         <div class="settings-section-desc">Define a login macro that auto-replays when a session expires. Void detects expiry by status code or response content match.</div>
         <div class="settings-row">
-          <label class="settings-label"><input type="checkbox" id="cfg-session-enabled"> Enable session auto-renewal</label>
+          <label class="settings-label"><input type="checkbox" id="cfg-session-enabled"><span class="toggle-track"></span> Enable session auto-renewal</label>
         </div>
         <div class="settings-row">
           <label class="settings-label-sm">Detect expiry by</label>
