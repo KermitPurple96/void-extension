@@ -1987,7 +1987,7 @@ function createReflectBar(toggleId, chipsId, getContainers) {
 
 // Built in setup() once the DOM exists; call sites use ?. because repeater tab
 // restore can fire during session load, before setup has run.
-let histReflectBar = null, repReflectBar = null, intrReflectBar = null;
+let histReflectBar = null, repReflectBar = null, intrReflectBar = null, edReflectBar = null;
 let logReflectBar = null, sensReflectBar = null, tgtReflectBar = null, epReflectBar = null;
 
 
@@ -6265,6 +6265,8 @@ document.addEventListener("DOMContentLoaded", () => {
     () => [document.getElementById("tgt-req-side"), document.getElementById("tgt-resp-side")]);
   epReflectBar = createReflectBar("ep-reflect-hl", "ep-reflect-chips",
     () => [document.getElementById("ep-req-side"), document.getElementById("ep-resp-side")]);
+  edReflectBar = createReflectBar("ed-reflect-hl", "ed-reflect-chips",
+    () => [document.getElementById("ed-split")]);
 
   // ── Intruder result detail ─────────────────────────────────────────────────
   document.getElementById("intr-detail-close").addEventListener("click", intrCloseDetail);
@@ -6380,6 +6382,11 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("ed-cmp-r").addEventListener("click", () => { if (editingReq) cmpSendTo("right", editingReq); });
   document.getElementById("ed-to-poc").addEventListener("click", () => { if (editingReq) pocLoadEntry(editingReq); });
   document.getElementById("ed-to-notes").addEventListener("click", () => { if (editingReq) notesFromEntry(editingReq); });
+  document.getElementById("ed-open").addEventListener("click", () => { if (editingReq) chrome.tabs.create({ url: editingReq.url }); });
+  document.getElementById("ed-curl").addEventListener("click", () => { if (editingReq) copyAsCurl(editingReq); });
+  document.getElementById("ed-fetch").addEventListener("click", () => { if (editingReq) copyAsFetch(editingReq); });
+  document.getElementById("ed-python").addEventListener("click", () => { if (editingReq) copyAsPython(editingReq); });
+  document.getElementById("ed-render").addEventListener("click", () => { if (editingReq) renderResponse(editingReq); });
 
   // Endpoint filters
   document.getElementById("ep-filter").addEventListener("input", e => {
@@ -6609,13 +6616,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ── Cross-send between Repeater and Intruder ───────────────────────────────
   document.getElementById("rep-to-intr").addEventListener("click", () => {
-    intrSendToIntruder({
-      method:     document.getElementById("rep-method").value,
-      url:        document.getElementById("rep-url").value.trim(),
-      rawHeaders: document.getElementById("rep-headers").value,
-      body:       document.getElementById("rep-body-ta").value,
-    });
+    saveRepTabState();
+    const tab = repTabs.find(t => t.id === repActiveTab);
+    if (!tab) return;
+    intrSendToIntruder({ method: tab.method, url: tab.url, rawHeaders: tab.headers, body: tab.body });
   });
+  function repCurrentEntry() {
+    saveRepTabState();
+    const tab = repTabs.find(t => t.id === repActiveTab);
+    if (!tab) return null;
+    return { method: tab.method, url: tab.url, headers: rawToHeaders(tab.headers || ""), body: tab.body || "", respBody: tab.response?.body || "", respHeaders: tab.response?.headers || {}, status: tab.response?.status };
+  }
+  document.getElementById("rep-cmp-l").addEventListener("click", () => { const e = repCurrentEntry(); if (e) cmpSendTo("left", e); });
+  document.getElementById("rep-cmp-r").addEventListener("click", () => { const e = repCurrentEntry(); if (e) cmpSendTo("right", e); });
+  document.getElementById("rep-to-poc").addEventListener("click", () => { const e = repCurrentEntry(); if (e) pocLoadEntry(e); });
+  document.getElementById("rep-to-notes").addEventListener("click", () => { const e = repCurrentEntry(); if (e) notesFromEntry(e); });
+  document.getElementById("rep-open").addEventListener("click", () => { const tab = repTabs.find(t => t.id === repActiveTab); if (tab?.url) chrome.tabs.create({ url: tab.url }); });
   document.getElementById("intr-to-rep").addEventListener("click", () => {
     const parsed = intrParseRaw(
       intrStripPositions(document.getElementById("intr-request").value),

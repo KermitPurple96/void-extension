@@ -297,7 +297,16 @@
           <button id="ed-cmp-r"   class="btn btn-sm btn-ghost">→ Cmp R</button>
           <button id="ed-to-poc"  class="btn btn-sm btn-ghost">→ PoC</button>
           <button id="ed-to-notes" class="btn btn-sm btn-ghost">→ Notes</button>
+          <button id="ed-open"    class="btn btn-sm btn-ghost">↗ Open</button>
           <button id="ed-drop"    class="btn btn-sm btn-danger">Drop ✕</button>
+        </div>
+        <div class="detail-action-bar" id="ed-reflect-bar">
+          <label class="reflect-bar-toggle"><input type="checkbox" id="ed-reflect-hl"><span class="toggle-track"></span> Reflections</label>
+          <span class="reflect-chips hidden" id="ed-reflect-chips"></span>
+          <button id="ed-render" class="btn btn-xs btn-ghost">Render</button>
+          <button id="ed-curl" class="btn btn-xs btn-ghost">curl</button>
+          <button id="ed-fetch" class="btn btn-xs btn-ghost">fetch</button>
+          <button id="ed-python" class="btn btn-xs btn-ghost">py</button>
         </div>
         <input id="ed-url" type="hidden">
         <!-- Split mode -->
@@ -539,6 +548,11 @@
       <button id="rep-target-toggle" class="btn btn-xs btn-ghost rep-target-btn" title="Edit target (connect to different host/IP)">✎ Target</button>
       <button id="rep-send"   class="btn btn-send">Send</button>
       <button id="rep-to-intr" class="btn btn-xs btn-ghost" title="Send this request to Intruder">→ Intruder</button>
+      <button id="rep-cmp-l" class="btn btn-xs btn-ghost">→ Cmp L</button>
+      <button id="rep-cmp-r" class="btn btn-xs btn-ghost">→ Cmp R</button>
+      <button id="rep-to-poc" class="btn btn-xs btn-ghost">→ PoC</button>
+      <button id="rep-to-notes" class="btn btn-xs btn-ghost">→ Notes</button>
+      <button id="rep-open" class="btn btn-xs btn-ghost">↗ Open</button>
       <label class="rep-autocookie" title="Auto-sync cookies from browser tab"><input type="checkbox" id="rep-autocookie"><span class="toggle-track"></span> Cookie sync</label>
     </div>
     <input id="rep-url" type="hidden">
