@@ -116,15 +116,9 @@
             <button id="tgt-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
             <button id="tgt-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
           </div>
-          <div class="reflect-bar" id="tgt-reflect-bar">
-            <label class="reflect-bar-toggle"><input type="checkbox" id="tgt-reflect-hl"> Highlight reflections</label>
-            <span class="reflect-chips hidden" id="tgt-reflect-chips"></span>
-          </div>
           <div class="hist-detail-body">
             <div class="hist-detail-pane" id="tgt-req-side">
-              <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">REQUEST</span>
-              </div>
+              <div class="hist-detail-sub-tabs"><span class="pane-heading">REQUEST</span></div>
               <div id="tgt-req-pane" class="hist-sub-pane"><pre id="tgt-req-pre" class="raw-pre"></pre></div>
               <div class="detail-search-bar">
                 <input id="tgt-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
@@ -132,9 +126,7 @@
               </div>
             </div>
             <div class="hist-detail-pane" id="tgt-resp-side">
-              <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">RESPONSE</span>
-              </div>
+              <div class="hist-detail-sub-tabs"><span class="pane-heading">RESPONSE</span></div>
               <div id="tgt-resp-pane" class="hist-sub-pane"><pre id="tgt-resp-pre" class="raw-pre"></pre></div>
               <div class="detail-search-bar">
                 <input id="tgt-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
@@ -142,13 +134,15 @@
               </div>
             </div>
           </div>
-        </div>
-        <div class="detail-action-bar">
-          <button id="tgt-detail-render" class="btn btn-xs btn-ghost">Render</button>
-          <button id="tgt-detail-curl" class="btn btn-xs btn-ghost">curl</button>
-          <button id="tgt-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
-          <button id="tgt-detail-python" class="btn btn-xs btn-ghost">py</button>
-        </div>
+          <div class="detail-action-bar" id="tgt-reflect-bar">
+            <label class="reflect-bar-toggle"><input type="checkbox" id="tgt-reflect-hl"> Reflections</label>
+            <span class="reflect-chips hidden" id="tgt-reflect-chips"></span>
+            <div class="tabbar-gap"></div>
+            <button id="tgt-detail-render" class="btn btn-xs btn-ghost">Render</button>
+            <button id="tgt-detail-curl" class="btn btn-xs btn-ghost">curl</button>
+            <button id="tgt-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
+            <button id="tgt-detail-python" class="btn btn-xs btn-ghost">py</button>
+          </div>
       </div>
     </div>
 
@@ -191,15 +185,9 @@
             <button id="ep-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
             <button id="ep-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
           </div>
-          <div class="reflect-bar" id="ep-reflect-bar">
-            <label class="reflect-bar-toggle"><input type="checkbox" id="ep-reflect-hl"> Highlight reflections</label>
-            <span class="reflect-chips hidden" id="ep-reflect-chips"></span>
-          </div>
           <div class="hist-detail-body">
             <div class="hist-detail-pane" id="ep-req-side">
-              <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">REQUEST</span>
-              </div>
+              <div class="hist-detail-sub-tabs"><span class="pane-heading">REQUEST</span></div>
               <div id="ep-req-pane" class="hist-sub-pane"><pre id="ep-req-pre" class="raw-pre"></pre></div>
               <div class="detail-search-bar">
                 <input id="ep-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
@@ -207,9 +195,7 @@
               </div>
             </div>
             <div class="hist-detail-pane" id="ep-resp-side">
-              <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">RESPONSE</span>
-              </div>
+              <div class="hist-detail-sub-tabs"><span class="pane-heading">RESPONSE</span></div>
               <div id="ep-resp-pane" class="hist-sub-pane"><pre id="ep-resp-pre" class="raw-pre"></pre></div>
               <div class="detail-search-bar">
                 <input id="ep-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
@@ -217,13 +203,15 @@
               </div>
             </div>
           </div>
-        </div>
-        <div class="detail-action-bar">
-          <button id="ep-detail-render" class="btn btn-xs btn-ghost">Render</button>
-          <button id="ep-detail-curl" class="btn btn-xs btn-ghost">curl</button>
-          <button id="ep-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
-          <button id="ep-detail-python" class="btn btn-xs btn-ghost">py</button>
-        </div>
+          <div class="detail-action-bar" id="ep-reflect-bar">
+            <label class="reflect-bar-toggle"><input type="checkbox" id="ep-reflect-hl"> Reflections</label>
+            <span class="reflect-chips hidden" id="ep-reflect-chips"></span>
+            <div class="tabbar-gap"></div>
+            <button id="ep-detail-render" class="btn btn-xs btn-ghost">Render</button>
+            <button id="ep-detail-curl" class="btn btn-xs btn-ghost">curl</button>
+            <button id="ep-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
+            <button id="ep-detail-python" class="btn btn-xs btn-ghost">py</button>
+          </div>
       </div>
     </div>
 
@@ -426,43 +414,36 @@
           <button id="hist-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
           <button id="hist-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
         </div>
-        <div class="reflect-bar" id="hist-reflect-bar">
-          <label class="reflect-bar-toggle" title="Highlight values reflected from the request into the response — one colour per distinct value">
-            <input type="checkbox" id="hist-reflect-hl"> Highlight reflections
-          </label>
-          <span class="reflect-chips hidden" id="hist-reflect-chips"></span>
-        </div>
         <div class="hist-detail-body">
-          <!-- Request side -->
           <div class="hist-detail-pane" id="hist-req-side">
-            <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">REQUEST</span>
-              </div>
-              <div id="hist-req-pane" class="hist-sub-pane"><pre id="hist-req-pre" class="raw-pre"></pre></div>
+            <div class="hist-detail-sub-tabs"><span class="pane-heading">REQUEST</span></div>
+            <div id="hist-req-pane" class="hist-sub-pane"><pre id="hist-req-pre" class="raw-pre"></pre></div>
             <div class="detail-search-bar">
               <input id="hist-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
               <span id="hist-req-search-count" class="detail-search-count"></span>
             </div>
           </div>
-          <!-- Response side -->
           <div class="hist-detail-pane" id="hist-resp-side">
             <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">RESPONSE</span>
-                <span id="hist-reflect-badge" class="reflect-badge hidden">Reflections</span>
-              </div>
-              <div id="hist-resp-pane" class="hist-sub-pane"><pre id="hist-resp-pre" class="raw-pre"></pre></div>
-              <div id="hist-render-pane" class="hist-sub-pane hidden"><iframe id="hist-render-frame" class="render-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer"></iframe></div>
+              <span class="pane-heading">RESPONSE</span>
+              <span id="hist-reflect-badge" class="reflect-badge hidden">Reflections</span>
+            </div>
+            <div id="hist-resp-pane" class="hist-sub-pane"><pre id="hist-resp-pre" class="raw-pre"></pre></div>
+            <div id="hist-render-pane" class="hist-sub-pane hidden"><iframe id="hist-render-frame" class="render-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer"></iframe></div>
             <div class="detail-search-bar">
               <input id="hist-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
               <span id="hist-resp-search-count" class="detail-search-count"></span>
             </div>
           </div>
         </div>
-        <div class="detail-action-bar">
-          <button id="hist-detail-render" class="btn btn-xs btn-ghost" title="Render response HTML">Render</button>
-          <button id="hist-detail-curl" class="btn btn-xs btn-ghost" title="Copy as curl command">curl</button>
-          <button id="hist-detail-fetch" class="btn btn-xs btn-ghost" title="Copy as fetch()">fetch</button>
-          <button id="hist-detail-python" class="btn btn-xs btn-ghost" title="Copy as Python requests">py</button>
+        <div class="detail-action-bar" id="hist-reflect-bar">
+          <label class="reflect-bar-toggle"><input type="checkbox" id="hist-reflect-hl"> Reflections</label>
+          <span class="reflect-chips hidden" id="hist-reflect-chips"></span>
+          <div class="tabbar-gap"></div>
+          <button id="hist-detail-render" class="btn btn-xs btn-ghost">Render</button>
+          <button id="hist-detail-curl" class="btn btn-xs btn-ghost">curl</button>
+          <button id="hist-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
+          <button id="hist-detail-python" class="btn btn-xs btn-ghost">py</button>
         </div>
       </div>
     </div>
@@ -583,12 +564,6 @@
           <textarea id="rep-raw-ta" class="raw-ta" spellcheck="false"
                     placeholder="GET /path HTTP/1.1&#10;Host: target.com&#10;Content-Type: application/json&#10;&#10;{&quot;key&quot;: &quot;value&quot;}"></textarea>
         </div>
-        <div class="reflect-bar" id="rep-reflect-bar">
-          <label class="reflect-bar-toggle" title="Highlight request values reflected in the response — one colour per distinct value">
-            <input type="checkbox" id="rep-reflect-hl"> Highlight reflections
-          </label>
-          <span class="reflect-chips hidden" id="rep-reflect-chips"></span>
-        </div>
       </div>
 
       <!-- Drag handle (vertical) -->
@@ -606,6 +581,15 @@
         </div>
       </div>
 
+    </div>
+    <div class="detail-action-bar" id="rep-reflect-bar">
+      <label class="reflect-bar-toggle"><input type="checkbox" id="rep-reflect-hl"> Reflections</label>
+      <span class="reflect-chips hidden" id="rep-reflect-chips"></span>
+      <div class="tabbar-gap"></div>
+      <button id="rep-detail-render" class="btn btn-xs btn-ghost">Render</button>
+      <button id="rep-detail-curl" class="btn btn-xs btn-ghost">curl</button>
+      <button id="rep-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
+      <button id="rep-detail-python" class="btn btn-xs btn-ghost">py</button>
     </div>
   </div>
 
@@ -723,29 +707,17 @@
             <button id="intr-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
             <button id="intr-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
           </div>
-          <div class="reflect-bar" id="intr-reflect-bar">
-            <label class="reflect-bar-toggle" title="Highlight request values reflected in the response — one colour per distinct value">
-              <input type="checkbox" id="intr-reflect-hl"> Highlight reflections
-            </label>
-            <span class="reflect-chips hidden" id="intr-reflect-chips"></span>
-          </div>
           <div class="hist-detail-body">
-            <!-- Request side -->
             <div class="hist-detail-pane" id="intr-req-side">
-              <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">REQUEST</span>
-              </div>
+              <div class="hist-detail-sub-tabs"><span class="pane-heading">REQUEST</span></div>
               <div id="intr-req-pane" class="intr-sub-pane"><pre id="intr-req-pre" class="raw-pre"></pre></div>
               <div class="detail-search-bar">
                 <input id="intr-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
                 <span id="intr-req-search-count" class="detail-search-count"></span>
               </div>
             </div>
-            <!-- Response side -->
             <div class="hist-detail-pane" id="intr-resp-side">
-              <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">RESPONSE</span>
-              </div>
+              <div class="hist-detail-sub-tabs"><span class="pane-heading">RESPONSE</span></div>
               <div id="intr-resp-pane" class="intr-sub-pane"><pre id="intr-resp-pre" class="raw-pre"></pre></div>
               <div class="detail-search-bar">
                 <input id="intr-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
@@ -753,13 +725,15 @@
               </div>
             </div>
           </div>
-        </div>
-        <div class="detail-action-bar">
-          <button id="intr-detail-render" class="btn btn-xs btn-ghost">Render</button>
-          <button id="intr-detail-curl" class="btn btn-xs btn-ghost">curl</button>
-          <button id="intr-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
-          <button id="intr-detail-python" class="btn btn-xs btn-ghost">py</button>
-        </div>
+          <div class="detail-action-bar" id="intr-reflect-bar">
+            <label class="reflect-bar-toggle"><input type="checkbox" id="intr-reflect-hl"> Reflections</label>
+            <span class="reflect-chips hidden" id="intr-reflect-chips"></span>
+            <div class="tabbar-gap"></div>
+            <button id="intr-detail-render" class="btn btn-xs btn-ghost">Render</button>
+            <button id="intr-detail-curl" class="btn btn-xs btn-ghost">curl</button>
+            <button id="intr-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
+            <button id="intr-detail-python" class="btn btn-xs btn-ghost">py</button>
+          </div>
 
       </div>
     </div>
@@ -1164,35 +1138,28 @@
           <button id="log-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
           <button id="log-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
         </div>
-        <div class="reflect-bar" id="log-reflect-bar">
-          <label class="reflect-bar-toggle" title="Highlight reflections">
-            <input type="checkbox" id="log-reflect-hl"> Highlight reflections
-          </label>
-          <span class="reflect-chips hidden" id="log-reflect-chips"></span>
-        </div>
         <div class="hist-detail-body">
           <div class="hist-detail-pane" id="log-req-side">
-            <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">REQUEST</span>
-              </div>
-              <div id="log-req-pane" class="hist-sub-pane"><pre id="log-req-pre" class="raw-pre"></pre></div>
+            <div class="hist-detail-sub-tabs"><span class="pane-heading">REQUEST</span></div>
+            <div id="log-req-pane" class="hist-sub-pane"><pre id="log-req-pre" class="raw-pre"></pre></div>
             <div class="detail-search-bar">
               <input id="log-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
               <span id="log-req-search-count" class="detail-search-count"></span>
             </div>
           </div>
           <div class="hist-detail-pane" id="log-resp-side">
-            <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">RESPONSE</span>
-              </div>
-              <div id="log-resp-pane" class="hist-sub-pane"><pre id="log-resp-pre" class="raw-pre"></pre></div>
+            <div class="hist-detail-sub-tabs"><span class="pane-heading">RESPONSE</span></div>
+            <div id="log-resp-pane" class="hist-sub-pane"><pre id="log-resp-pre" class="raw-pre"></pre></div>
             <div class="detail-search-bar">
               <input id="log-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
               <span id="log-resp-search-count" class="detail-search-count"></span>
             </div>
           </div>
         </div>
-        <div class="detail-action-bar">
+        <div class="detail-action-bar" id="log-reflect-bar">
+          <label class="reflect-bar-toggle"><input type="checkbox" id="log-reflect-hl"> Reflections</label>
+          <span class="reflect-chips hidden" id="log-reflect-chips"></span>
+          <div class="tabbar-gap"></div>
           <button id="log-detail-render" class="btn btn-xs btn-ghost">Render</button>
           <button id="log-detail-curl" class="btn btn-xs btn-ghost">curl</button>
           <button id="log-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
@@ -1781,33 +1748,28 @@
           <button id="sens-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
           <button id="sens-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
         </div>
-        <div class="reflect-bar" id="sens-reflect-bar">
-          <label class="reflect-bar-toggle"><input type="checkbox" id="sens-reflect-hl"> Highlight reflections</label>
-          <span class="reflect-chips hidden" id="sens-reflect-chips"></span>
-        </div>
         <div class="hist-detail-body">
           <div class="hist-detail-pane" id="sens-req-side">
-            <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">REQUEST</span>
-              </div>
-              <div id="sens-req-pane" class="hist-sub-pane"><pre id="sens-req-pre" class="raw-pre"></pre></div>
+            <div class="hist-detail-sub-tabs"><span class="pane-heading">REQUEST</span></div>
+            <div id="sens-req-pane" class="hist-sub-pane"><pre id="sens-req-pre" class="raw-pre"></pre></div>
             <div class="detail-search-bar">
               <input id="sens-req-search" type="text" class="detail-search-inp" placeholder="Search request…" spellcheck="false">
               <span id="sens-req-search-count" class="detail-search-count"></span>
             </div>
           </div>
           <div class="hist-detail-pane" id="sens-resp-side">
-            <div class="hist-detail-sub-tabs">
-                <span class="pane-heading">RESPONSE</span>
-              </div>
-              <div id="sens-resp-pane" class="hist-sub-pane"><pre id="sens-resp-pre" class="raw-pre"></pre></div>
+            <div class="hist-detail-sub-tabs"><span class="pane-heading">RESPONSE</span></div>
+            <div id="sens-resp-pane" class="hist-sub-pane"><pre id="sens-resp-pre" class="raw-pre"></pre></div>
             <div class="detail-search-bar">
               <input id="sens-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
               <span id="sens-resp-search-count" class="detail-search-count"></span>
             </div>
           </div>
         </div>
-        <div class="detail-action-bar">
+        <div class="detail-action-bar" id="sens-reflect-bar">
+          <label class="reflect-bar-toggle"><input type="checkbox" id="sens-reflect-hl"> Reflections</label>
+          <span class="reflect-chips hidden" id="sens-reflect-chips"></span>
+          <div class="tabbar-gap"></div>
           <button id="sens-detail-render" class="btn btn-xs btn-ghost">Render</button>
           <button id="sens-detail-curl" class="btn btn-xs btn-ghost">curl</button>
           <button id="sens-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>

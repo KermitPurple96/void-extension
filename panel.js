@@ -7145,6 +7145,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const sel = document.querySelector("#intr-results tr.hist-selected");
       return sel?._intrResult || null;
     });
+    // Repeater: build entry from current tab state
+    wireActionBar("rep", () => {
+      saveRepTabState();
+      const tab = repTabs.find(t => t.id === repActiveTab);
+      if (!tab) return null;
+      return { method: tab.method, url: tab.url, headers: rawToHeaders(tab.headers || ""), body: tab.body || "", respBody: tab.response?.body || "", respHeaders: tab.response?.headers || {}, status: tab.response?.status };
+    });
   });
 
   // ── Active Scanner ────────────────────────────────────────────────────
