@@ -7222,12 +7222,16 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("rep-open").addEventListener("click", () => { const tab = repTabs.find(t => t.id === repActiveTab); if (tab?.url) chrome.tabs.create({ url: tab.url }); });
 
   // Compare toggle
+  // Compare toggle — show/hide right Repeater
   document.getElementById("rep-compare-toggle").addEventListener("click", () => {
-    const pane = document.getElementById("rep-compare-pane");
-    pane.classList.toggle("hidden");
+    const right = document.getElementById("rep-side-right");
+    const isHidden = right.classList.toggle("hidden");
+    document.getElementById("rep-diff").classList.toggle("hidden", isHidden);
+    document.getElementById("rep-diff-case-wrap").classList.toggle("hidden", isHidden);
+    document.getElementById("rep-compare-toggle").classList.toggle("btn-accent", !isHidden);
   });
 
-  // Compare pane: send second request
+  // Right Repeater: send request
   document.getElementById("rep2-send").addEventListener("click", async () => {
     const method = document.getElementById("rep2-method").value;
     const path = document.getElementById("rep2-path").value || "/";
@@ -7235,10 +7239,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const body = document.getElementById("rep2-body-ta").value;
     const host = extractHostFromHeaders(headers);
     const url = host ? recomposeUrl("https", host, path) : path;
+    document.getElementById("rep2-url").value = url;
 
     document.getElementById("resp2-empty").classList.add("hidden");
     document.getElementById("resp2-body-pre").textContent = "Sending…";
+    document.getElementById("resp2-loading")?.classList.remove("hidden");
     const res = await bg({ type: "SEND_REQUEST", url, method, rawHeaders: headers, body: body || undefined });
+    document.getElementById("resp2-loading")?.classList.add("hidden");
     if (res) {
       let respText = `HTTP/1.1 ${res.status} ${res.statusText || ""}\n`;
       respText += Object.entries(res.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
@@ -7248,6 +7255,27 @@ document.addEventListener("DOMContentLoaded", () => {
     } else {
       document.getElementById("resp2-body-pre").textContent = "Error";
     }
+  });
+
+  // Right Repeater action buttons
+  document.getElementById("rep2-to-intr").addEventListener("click", () => {
+    intrSendToIntruder({ method: document.getElementById("rep2-method").value, url: document.getElementById("rep2-url").value, rawHeaders: document.getElementById("rep2-headers").value, body: document.getElementById("rep2-body-ta").value });
+  });
+  document.getElementById("rep2-to-poc").addEventListener("click", () => {
+    const url = document.getElementById("rep2-url").value;
+    if (url) pocLoadEntry({ method: document.getElementById("rep2-method").value, url, headers: rawToHeaders(document.getElementById("rep2-headers").value), body: document.getElementById("rep2-body-ta").value });
+  });
+  document.getElementById("rep2-to-notes").addEventListener("click", () => {
+    const url = document.getElementById("rep2-url").value;
+    if (url) notesFromEntry({ method: document.getElementById("rep2-method").value, url, headers: rawToHeaders(document.getElementById("rep2-headers").value), body: document.getElementById("rep2-body-ta").value });
+  });
+  document.getElementById("rep2-open").addEventListener("click", () => {
+    const url = document.getElementById("rep2-url").value;
+    if (url) chrome.tabs.create({ url });
+  });
+  wireActionBar("rep2", () => {
+    const url = document.getElementById("rep2-url").value;
+    return url ? { method: document.getElementById("rep2-method").value, url, headers: rawToHeaders(document.getElementById("rep2-headers").value), body: document.getElementById("rep2-body-ta").value, respBody: document.getElementById("resp2-body-pre").textContent } : null;
   });
 
   // Diff between primary and compare responses
