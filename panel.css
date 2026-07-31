@@ -222,9 +222,9 @@ body {
   gap: 8px;
   padding: 7px 12px;
   border-bottom: 1px solid var(--border);
-  transition: background .1s;
+  cursor: pointer;
 }
-.req-row:hover { background: var(--bg2); }
+.req-row:hover { background: var(--bg3); }
 .req-row:last-child { border-bottom: none; }
 
 .req-type {
@@ -2326,6 +2326,7 @@ body {
 
 /* ── Response editor label ──────────────────────────────────────────── */
 .resp-ed-label { font-weight: 600; font-size: 11px; color: #e8a838; margin-right: 4px; }
+.method-pill.m-resp { background: rgba(232,168,56,.18); color: #e8a838; }
 
 /* ── Intruder processing + grep ─────────────────────────────────────── */
 .intr-processing { display: flex; gap: 6px; align-items: center; }

@@ -164,14 +164,24 @@ function showTab(name) {
   if (name === "probe" && probeInjected) probeStartPoll(); else probeStopPoll();
 }
 
-// ── Polling for paused requests ───────────────────────────────────────────────
+// ── Polling for paused requests + responses ─────────────────────────────────
+let _lastInterceptSnapshot = "";
+
 function startPoll() {
   if (pollTimer) return;
   pollTimer = setInterval(async () => {
-    const res = await bg({ type: "GET_INTERCEPTED" });
-    if (!res) return;
-    intercepted = res.requests || [];
-    renderInterceptList();
+    const [reqRes, respRes] = await Promise.all([
+      bg({ type: "GET_INTERCEPTED" }),
+      bg({ type: "GET_INTERCEPTED_RESPONSES" }),
+    ]);
+    if (reqRes) intercepted = reqRes.requests || [];
+    if (respRes) interceptedResponses = respRes.responses || [];
+    // Only re-render if the queue actually changed (prevents hover-destroying DOM thrash)
+    const snapshot = JSON.stringify(intercepted.map(r => r.requestId)) + "|" + JSON.stringify(interceptedResponses.map(r => r.requestId));
+    if (snapshot !== _lastInterceptSnapshot) {
+      _lastInterceptSnapshot = snapshot;
+      renderInterceptList();
+    }
     updateInterceptBadge();
   }, 600);
 }
@@ -6916,7 +6926,6 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("resp-ed-back").addEventListener("click", closeRespEditor);
     document.getElementById("resp-ed-forward").addEventListener("click", forwardResp);
     document.getElementById("resp-ed-drop").addEventListener("click", dropResp);
-    startRespPoll();
   });
 
   // ── Copy as / Render ──────────────────────────────────────────────────
