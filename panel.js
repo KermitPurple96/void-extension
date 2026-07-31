@@ -830,6 +830,7 @@ function logOpenDetail(entry) {
   document.getElementById("log-resizer").classList.add("visible");
   document.querySelectorAll("#log-tbody tr").forEach(r => r.classList.remove("hist-selected"));
   document.querySelectorAll("#log-tbody tr").forEach(r => { if (r._logEntry === entry) r.classList.add("hist-selected"); });
+  logReflectBar?.update(entry);
 }
 
 function logCloseDetail() {
@@ -1987,6 +1988,7 @@ function createReflectBar(toggleId, chipsId, getContainers) {
 // Built in setup() once the DOM exists; call sites use ?. because repeater tab
 // restore can fire during session load, before setup has run.
 let histReflectBar = null, repReflectBar = null, intrReflectBar = null;
+let logReflectBar = null, sensReflectBar = null, tgtReflectBar = null, epReflectBar = null;
 
 
 // ═══════════════════════════ HEADERS ═════════════════════════════════════════
@@ -6238,6 +6240,14 @@ document.addEventListener("DOMContentLoaded", () => {
     () => [document.getElementById("rep-resp-pane")]);
   intrReflectBar = createReflectBar("intr-reflect-hl", "intr-reflect-chips",
     () => [document.getElementById("intr-req-side"), document.getElementById("intr-resp-side")]);
+  logReflectBar = createReflectBar("log-reflect-hl", "log-reflect-chips",
+    () => [document.getElementById("log-req-side"), document.getElementById("log-resp-side")]);
+  sensReflectBar = createReflectBar("sens-reflect-hl", "sens-reflect-chips",
+    () => [document.getElementById("sens-req-side"), document.getElementById("sens-resp-side")]);
+  tgtReflectBar = createReflectBar("tgt-reflect-hl", "tgt-reflect-chips",
+    () => [document.getElementById("tgt-req-side"), document.getElementById("tgt-resp-side")]);
+  epReflectBar = createReflectBar("ep-reflect-hl", "ep-reflect-chips",
+    () => [document.getElementById("ep-req-side"), document.getElementById("ep-resp-side")]);
 
   // ── Intruder result detail ─────────────────────────────────────────────────
   document.getElementById("intr-detail-close").addEventListener("click", intrCloseDetail);
