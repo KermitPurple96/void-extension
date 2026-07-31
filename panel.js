@@ -1239,6 +1239,7 @@ function sendToRepeater(req) {
   repActiveTab = newTab.id;
   renderRepTabs();
   loadRepTab(newTab);
+  loadRep2FromTab(newTab);
 
   // Flash the Repeater badge to notify the user
   const bdg = document.getElementById("bdg-repeater");
@@ -1435,7 +1436,36 @@ function switchRepTab(id) {
   repActiveTab = id;
   renderRepTabs();
   const tab = repTabs.find(t => t.id === id);
-  if (tab) loadRepTab(tab);
+  if (tab) {
+    loadRepTab(tab);
+    loadRep2FromTab(tab);
+  }
+}
+
+// Load a tab's data into the right Repeater (for comparison editing)
+function loadRep2FromTab(tab) {
+  if (!tab) return;
+  const { host, path } = decomposeUrl(tab.url);
+  document.getElementById("rep2-method").value = tab.method || "GET";
+  document.getElementById("rep2-path").value = path || "/";
+  const hdrs = ensureHostHeader(tab.headers || "", host);
+  document.getElementById("rep2-headers").value = hdrs;
+  document.getElementById("rep2-body-ta").value = tab.body || "";
+  document.getElementById("rep2-url").value = tab.url || "";
+  // Load response if available
+  if (tab.response) {
+    const r = tab.response;
+    let respText = `HTTP/1.1 ${r.status} ${r.statusText || ""}\n`;
+    respText += Object.entries(r.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+    respText += "\n\n" + (r.body || "");
+    document.getElementById("resp2-body-pre").textContent = respText;
+    document.getElementById("resp2-label").textContent = `RESPONSE — ${r.status} ${r.elapsed || 0}ms`;
+    document.getElementById("resp2-empty").classList.add("hidden");
+  } else {
+    document.getElementById("resp2-body-pre").textContent = "";
+    document.getElementById("resp2-label").textContent = "RESPONSE";
+    document.getElementById("resp2-empty").classList.remove("hidden");
+  }
 }
 
 function closeRepTab(id) {
