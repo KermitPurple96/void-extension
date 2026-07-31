@@ -1851,6 +1851,15 @@ body {
   color: var(--muted);
   margin-bottom: 2px;
 }
+/* ── API Schema ──────────────────────────────────────────────────────── */
+.schema-layout { display: flex; flex: 1; overflow: hidden; }
+.schema-endpoints { width: 280px; border-right: 1px solid var(--border); overflow-y: auto; padding: 4px; }
+.schema-output { flex: 1; overflow: auto; }
+.schema-spec-pre { font-size: 11px; padding: 8px; }
+.schema-tree { font-size: 11px; font-family: var(--mono); }
+.schema-ep-item { padding: 3px 6px; cursor: pointer; display: flex; gap: 6px; align-items: center; }
+.schema-ep-item:hover { background: var(--bg3); }
+
 .dec-saved-bar { display: flex; gap: 4px; align-items: center; }
 
 /* ── JA3 Fingerprint ────────────────────────────────────────────────── */
@@ -2490,6 +2499,12 @@ body {
 .method-pill.m-resp { background: rgba(232,168,56,.18); color: #e8a838; }
 
 /* ── Intruder processing + grep ─────────────────────────────────────── */
+/* ── Repeater Compare pane ───────────────────────────────────────────── */
+.rep-compare-pane { border-top: 2px solid var(--accent); flex-shrink: 0; max-height: 50%; display: flex; flex-direction: column; overflow: hidden; }
+.rep-compare-pane.hidden { display: none; }
+.rep-compare-toolbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.rep-compare-pane .rep-body { flex: 1; }
+
 .intr-processing { display: flex; gap: 6px; align-items: center; }
 .intr-spec-config { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 4px; }
 .intr-spec { padding: 4px 0; }

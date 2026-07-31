@@ -5208,9 +5208,31 @@ function cmpSendTo(side, entry) {
   if (!data.host || !data.path) {
     try { const u = new URL(data.url); data.host = u.host; data.path = u.pathname + u.search; } catch {}
   }
-  if (side === "left") cmpLeft = data; else cmpRight = data;
+  if (side === "left") {
+    cmpLeft = data;
+    // Send to Repeater as primary
+    sendToRepeater({ method: data.method, url: data.url, headers: data.headers, body: data.body, rawHeaders: headersToRaw(data.headers) });
+  } else {
+    cmpRight = data;
+    // Populate compare pane
+    document.getElementById("rep2-method").value = data.method || "GET";
+    document.getElementById("rep2-path").value = data.path || "/";
+    const hdrs = typeof data.headers === "object" ? headersToRaw(data.headers) : (data.headers || "");
+    document.getElementById("rep2-headers").value = ensureHostHeader(hdrs, data.host);
+    document.getElementById("rep2-body-ta").value = data.body || "";
+    // Show response if available
+    if (data.respBody || data.status) {
+      let respText = `HTTP/1.1 ${data.status || "?"} ${data.statusText || ""}\n`;
+      respText += Object.entries(data.respHeaders || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+      respText += "\n\n" + (data.respBody || "");
+      document.getElementById("resp2-body-pre").textContent = respText;
+      document.getElementById("resp2-empty").classList.add("hidden");
+    }
+    document.getElementById("rep-compare-pane").classList.remove("hidden");
+    showTab("repeater");
+    showToast("Loaded into Compare pane");
+  }
   cmpRenderSide(side);
-  showTab("comparer");
 }
 
 function cmpRenderSide(side) {
@@ -5528,6 +5550,86 @@ function syncRawToSplit(prefix) {
   document.getElementById(prefix === "ed" ? "ed-httpver" : "rep-httpver").value = parsed.httpVer;
   document.getElementById(prefix === "ed" ? "ed-headers" : "rep-headers").value = parsed.headersRaw;
   document.getElementById(prefix === "ed" ? "ed-body" : "rep-body-ta").value = parsed.body;
+}
+
+// ═══════════════════════════ API SCHEMA GENERATOR ════════════════════════════
+
+function schemaGenerate() {
+  const scopeOnly = document.getElementById("schema-scope-only")?.checked;
+  let entries = historyData;
+  if (scopeOnly) entries = entries.filter(e => tgtIsInScope(e.url));
+
+  // Group by host + path + method
+  const endpoints = {};
+  for (const e of entries) {
+    if (!e.url || !e.method) continue;
+    let host = "", path = "";
+    try { const u = new URL(e.url); host = u.host; path = u.pathname; } catch { continue; }
+    const key = `${e.method} ${path}`;
+    if (!endpoints[key]) {
+      endpoints[key] = { method: e.method.toLowerCase(), path, host, params: new Set(), statuses: new Set(), contentTypes: new Set(), bodies: [] };
+    }
+    const ep = endpoints[key];
+    ep.statuses.add(e.status || 0);
+    try {
+      const u = new URL(e.url);
+      for (const [k] of u.searchParams) ep.params.add(k);
+    } catch {}
+    if (e.body) {
+      ep.bodies.push(e.body);
+      const ct = Object.entries(e.headers || {}).find(([k]) => k.toLowerCase() === "content-type")?.[1] || "";
+      if (ct) ep.contentTypes.add(ct.split(";")[0].trim());
+    }
+  }
+
+  // Render endpoint tree
+  const tree = document.getElementById("schema-tree");
+  tree.replaceChildren();
+  for (const [key, ep] of Object.entries(endpoints).sort((a, b) => a[0].localeCompare(b[0]))) {
+    const item = el("div", "schema-ep-item");
+    item.appendChild(txt("span", `method-pill m-${ep.method}`, ep.method.toUpperCase()));
+    item.appendChild(txt("span", "", ep.path));
+    item.appendChild(txt("span", "settings-status", `${ep.statuses.size} status, ${ep.params.size} params`));
+    tree.appendChild(item);
+  }
+
+  // Generate OpenAPI 3.0 YAML
+  const host = entries[0]?.url ? new URL(entries[0].url).host : "api.example.com";
+  let yaml = `openapi: "3.0.0"\ninfo:\n  title: "Auto-generated from Void Extension"\n  version: "1.0.0"\nservers:\n  - url: "https://${host}"\npaths:\n`;
+
+  const pathGroups = {};
+  for (const [, ep] of Object.entries(endpoints)) {
+    if (!pathGroups[ep.path]) pathGroups[ep.path] = [];
+    pathGroups[ep.path].push(ep);
+  }
+
+  for (const [path, methods] of Object.entries(pathGroups).sort((a, b) => a[0].localeCompare(b[0]))) {
+    yaml += `  "${path}":\n`;
+    for (const ep of methods) {
+      yaml += `    ${ep.method}:\n`;
+      yaml += `      summary: "Auto-discovered"\n`;
+      yaml += `      responses:\n`;
+      for (const status of [...ep.statuses].sort()) {
+        yaml += `        "${status}":\n          description: "Observed response"\n`;
+      }
+      if (ep.params.size) {
+        yaml += `      parameters:\n`;
+        for (const p of ep.params) {
+          yaml += `        - name: "${p}"\n          in: query\n          schema:\n            type: string\n`;
+        }
+      }
+      if (ep.contentTypes.size) {
+        yaml += `      requestBody:\n        content:\n`;
+        for (const ct of ep.contentTypes) {
+          yaml += `          "${ct}":\n            schema:\n              type: object\n`;
+        }
+      }
+    }
+  }
+
+  document.getElementById("schema-spec").textContent = yaml;
+  document.getElementById("schema-status").textContent = `${Object.keys(endpoints).length} endpoints`;
+  showToast(`Generated schema: ${Object.keys(endpoints).length} endpoints`);
 }
 
 // ═══════════════════════════ RESPONSE INTERCEPTION ═══════════════════════════
@@ -7118,6 +7220,53 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("rep-to-poc").addEventListener("click", () => { const e = repCurrentEntry(); if (e) pocLoadEntry(e); });
   document.getElementById("rep-to-notes").addEventListener("click", () => { const e = repCurrentEntry(); if (e) notesFromEntry(e); });
   document.getElementById("rep-open").addEventListener("click", () => { const tab = repTabs.find(t => t.id === repActiveTab); if (tab?.url) chrome.tabs.create({ url: tab.url }); });
+
+  // Compare toggle
+  document.getElementById("rep-compare-toggle").addEventListener("click", () => {
+    const pane = document.getElementById("rep-compare-pane");
+    pane.classList.toggle("hidden");
+  });
+
+  // Compare pane: send second request
+  document.getElementById("rep2-send").addEventListener("click", async () => {
+    const method = document.getElementById("rep2-method").value;
+    const path = document.getElementById("rep2-path").value || "/";
+    const headers = document.getElementById("rep2-headers").value;
+    const body = document.getElementById("rep2-body-ta").value;
+    const host = extractHostFromHeaders(headers);
+    const url = host ? recomposeUrl("https", host, path) : path;
+
+    document.getElementById("resp2-empty").classList.add("hidden");
+    document.getElementById("resp2-body-pre").textContent = "Sending…";
+    const res = await bg({ type: "SEND_REQUEST", url, method, rawHeaders: headers, body: body || undefined });
+    if (res) {
+      let respText = `HTTP/1.1 ${res.status} ${res.statusText || ""}\n`;
+      respText += Object.entries(res.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+      respText += "\n\n" + (res.body || "");
+      document.getElementById("resp2-body-pre").textContent = respText;
+      document.getElementById("resp2-label").textContent = `RESPONSE — ${res.status} ${res.elapsed || 0}ms`;
+    } else {
+      document.getElementById("resp2-body-pre").textContent = "Error";
+    }
+  });
+
+  // Diff between primary and compare responses
+  document.getElementById("rep-diff").addEventListener("click", () => {
+    const resp1 = document.getElementById("resp-body-pre").textContent;
+    const resp2 = document.getElementById("resp2-body-pre").textContent;
+    if (!resp1 || !resp2) { document.getElementById("rep-diff-status").textContent = "Need both responses"; return; }
+    const ignoreCase = document.getElementById("cmp-ignore-case")?.checked;
+    const lines1 = resp1.split("\n");
+    const lines2 = resp2.split("\n");
+    const diff = cmpLineDiff(lines1, lines2, ignoreCase);
+    document.getElementById("resp-body-pre").replaceChildren();
+    document.getElementById("resp2-body-pre").replaceChildren();
+    cmpRenderDiff(document.getElementById("resp-body-pre"), diff.left);
+    cmpRenderDiff(document.getElementById("resp2-body-pre"), diff.right);
+    const changes = diff.left.filter(d => d.type !== "same").length + diff.right.filter(d => d.type !== "same").length;
+    document.getElementById("rep-diff-status").textContent = changes === 0 ? "Identical" : `${changes} differences`;
+    showToast(changes === 0 ? "Responses identical" : `${changes} differences found`);
+  });
   document.getElementById("intr-to-rep").addEventListener("click", () => {
     const parsed = intrParseRaw(
       intrStripPositions(document.getElementById("intr-request").value),
@@ -7832,6 +7981,54 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // ── HAR export + scope auto-detect ────────────────────────────────────
+  // ── Collaborator Everywhere ────────────────────────────────────────
+  initBlock("collab-everywhere", () => {
+    const COLLAB_HEADERS = ["Referer", "X-Forwarded-For", "X-Forwarded-Host", "Origin", "X-Real-IP", "X-Client-IP", "True-Client-IP", "X-Custom-IP-Authorization", "Contact", "From"];
+    const COLLAB_PREFIX = "[Collab]";
+
+    document.getElementById("cfg-collab-enable").addEventListener("click", () => {
+      const oobUrl = document.getElementById("cfg-collab-url").value.trim();
+      if (!oobUrl) { showToast("Enter your OOB URL first"); return; }
+      // Remove existing collab rules
+      settings.matchReplace = (settings.matchReplace || []).filter(r => !r._collab);
+      // Add new rules
+      for (const hdr of COLLAB_HEADERS) {
+        settings.matchReplace.push({
+          enabled: true, type: "req-header", match: "", replace: `${hdr}: https://${hdr.toLowerCase().replace(/[^a-z]/g, "")}.${oobUrl}`,
+          scope: "", _collab: true,
+        });
+      }
+      saveSettings();
+      renderMRRules();
+      document.getElementById("cfg-collab-status").textContent = `${COLLAB_HEADERS.length} rules added`;
+      showToast(`Collaborator Everywhere enabled — ${COLLAB_HEADERS.length} headers injected`);
+    });
+
+    document.getElementById("cfg-collab-disable").addEventListener("click", () => {
+      settings.matchReplace = (settings.matchReplace || []).filter(r => !r._collab);
+      saveSettings();
+      renderMRRules();
+      document.getElementById("cfg-collab-status").textContent = "Disabled";
+      showToast("Collaborator rules removed");
+    });
+  });
+
+  // ── API Schema ─────────────────────────────────────────────────────
+  initBlock("api-schema", () => {
+    document.getElementById("schema-generate").addEventListener("click", schemaGenerate);
+    document.getElementById("schema-copy").addEventListener("click", () => {
+      navigator.clipboard.writeText(document.getElementById("schema-spec").textContent);
+      showToast("Schema copied");
+    });
+    document.getElementById("schema-download").addEventListener("click", () => {
+      const blob = new Blob([document.getElementById("schema-spec").textContent], { type: "text/yaml" });
+      const a = el("a"); a.href = URL.createObjectURL(blob);
+      a.download = `void-api-schema-${new Date().toISOString().slice(0, 10)}.yaml`;
+      a.click(); URL.revokeObjectURL(a.href);
+      showToast("Schema downloaded");
+    });
+  });
+
   initBlock("har-scope", () => {
     document.getElementById("cfg-export-har").addEventListener("click", exportHar);
     document.getElementById("cfg-scope-auto").addEventListener("click", autoDetectScope);

@@ -22,7 +22,7 @@
     <button class="tab"        data-tab="containers">Containers</button>
     <button class="tab"        data-tab="headers"  >Headers</button>
     <button class="tab"        data-tab="decoder"  >Dencoder</button>
-    <button class="tab"        data-tab="comparer" >Comparer</button>
+    <button class="tab"        data-tab="apischema">API Schema</button>
     <button class="tab"        data-tab="poc"      >PoC</button>
     <button class="tab"        data-tab="sequencer">Sequencer</button>
     <button class="tab"        data-tab="notes"    >Notes <span class="bdg" id="bdg-notes">0</span></button>
@@ -553,6 +553,7 @@
       <button id="rep-to-poc" class="btn btn-xs btn-ghost">→ PoC</button>
       <button id="rep-to-notes" class="btn btn-xs btn-ghost">→ Notes</button>
       <button id="rep-open" class="btn btn-xs btn-ghost">↗ Open</button>
+      <button id="rep-compare-toggle" class="btn btn-xs btn-ghost" title="Toggle split comparison view">Compare</button>
       <label class="rep-autocookie" title="Auto-sync cookies from browser tab"><input type="checkbox" id="rep-autocookie"><span class="toggle-track"></span> Cookie sync</label>
     </div>
     <input id="rep-url" type="hidden">
@@ -610,6 +611,35 @@
         </div>
       </div>
 
+    </div>
+
+    <!-- ══ Compare pane (second Repeater, hidden by default) ══ -->
+    <div id="rep-compare-pane" class="rep-compare-pane hidden">
+      <div class="rep-compare-toolbar">
+        <span class="pane-label">COMPARE</span>
+        <select id="rep2-method" class="method-sel"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select>
+        <input id="rep2-path" class="path-inp" type="text" placeholder="/path" spellcheck="false" style="max-width:200px">
+        <button id="rep2-send" class="btn btn-send">Send</button>
+        <button id="rep-diff" class="btn btn-xs btn-accent">Diff</button>
+        <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-case"><span class="toggle-track"></span> Case-insensitive</label>
+        <span id="rep-diff-status" class="settings-status"></span>
+      </div>
+      <div class="rep-body rep-body-horizontal">
+        <div class="rep-req rep-req-side" id="rep2-req-pane">
+          <div class="rep-view-pane">
+            <div class="pane-label">REQUEST HEADERS</div>
+            <textarea id="rep2-headers" class="raw-ta" spellcheck="false" placeholder="Host: target.com"></textarea>
+            <div class="pane-label pane-label-body">BODY</div>
+            <textarea id="rep2-body-ta" class="raw-ta body-ta" spellcheck="false"></textarea>
+          </div>
+        </div>
+        <div class="rep-resizer rep-resizer-h" id="rep2-resizer"></div>
+        <div class="rep-resp rep-resp-side" id="rep2-resp-pane">
+          <div class="pane-label" id="resp2-label">RESPONSE</div>
+          <div class="resp-pane active"><pre id="resp2-body-pre" class="raw-pre"></pre></div>
+          <div id="resp2-empty" class="empty">Hit Send to see response</div>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -1518,52 +1548,25 @@
     </div>
   </div>
 
-  <!-- ═══════════════════════════ COMPARER ═══════════════════════════════════ -->
-  <div id="tab-comparer" class="tab-panel hidden">
-    <div class="cmp-toolbar">
-      <button id="cmp-diff" class="btn btn-accent">Diff</button>
-      <button id="cmp-swap" class="btn btn-sm btn-ghost">⇄ Swap</button>
-      <button id="cmp-clear" class="btn btn-sm btn-ghost">Clear</button>
-      <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-headers" checked><span class="toggle-track"></span> Ignore header order</label>
-      <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-case"><span class="toggle-track"></span> Case-insensitive</label>
-      <span id="cmp-status" class="settings-status"></span>
-      <button id="cmp-to-rep" class="btn btn-xs btn-ghost">→ Repeater</button>
-      <button id="cmp-to-intr" class="btn btn-xs btn-ghost">→ Intruder</button>
-      <button id="cmp-to-poc" class="btn btn-xs btn-ghost">→ PoC</button>
-      <button id="cmp-to-notes" class="btn btn-xs btn-ghost">→ Notes</button>
-      <button id="cmp-render" class="btn btn-xs btn-ghost">Render</button>
-      <button id="cmp-curl" class="btn btn-xs btn-ghost">curl</button>
-      <button id="cmp-fetch" class="btn btn-xs btn-ghost">fetch</button>
-      <button id="cmp-python" class="btn btn-xs btn-ghost">py</button>
+  <!-- ═══════════════════════════ API SCHEMA ═══════════════════════════════ -->
+  <div id="tab-apischema" class="tab-panel hidden">
+    <div class="filter-bar">
+      <button id="schema-generate" class="btn btn-accent">Generate from History</button>
+      <button id="schema-copy" class="btn btn-sm btn-ghost">Copy</button>
+      <button id="schema-download" class="btn btn-sm btn-ghost">Download .yaml</button>
+      <label class="rep-autocookie"><input type="checkbox" id="schema-scope-only"><span class="toggle-track"></span> In-scope only</label>
+      <span id="schema-status" class="settings-status"></span>
     </div>
-    <div class="cmp-layout">
-      <!-- LEFT side -->
-      <div class="cmp-side" id="cmp-left">
-        <div class="cmp-side-header">
-          <span class="cmp-side-label">LEFT</span>
-          <span id="cmp-left-title" class="cmp-side-title">(empty — send a request here with → Cmp L)</span>
-        </div>
-        <div class="cmp-sub-tabs">
-          <button class="sub-tab active" data-cmppane="left-req">Request</button>
-          <button class="sub-tab" data-cmppane="left-resp">Response</button>
-        </div>
-        <div id="cmp-left-req-pane" class="cmp-pane active"><pre id="cmp-left-req-pre" class="raw-pre cmp-pre"></pre></div>
-        <div id="cmp-left-resp-pane" class="cmp-pane hidden"><pre id="cmp-left-resp-pre" class="raw-pre cmp-pre"></pre></div>
+    <div class="schema-layout">
+      <!-- LEFT: Endpoints tree -->
+      <div class="schema-endpoints">
+        <div class="pane-label">ENDPOINTS</div>
+        <div id="schema-tree" class="schema-tree"></div>
       </div>
-      <!-- Resize handle -->
-      <div class="cmp-resizer" id="cmp-resizer"></div>
-      <!-- RIGHT side -->
-      <div class="cmp-side" id="cmp-right">
-        <div class="cmp-side-header">
-          <span class="cmp-side-label">RIGHT</span>
-          <span id="cmp-right-title" class="cmp-side-title">(empty — send a request here with → Cmp R)</span>
-        </div>
-        <div class="cmp-sub-tabs">
-          <button class="sub-tab active" data-cmppane="right-req">Request</button>
-          <button class="sub-tab" data-cmppane="right-resp">Response</button>
-        </div>
-        <div id="cmp-right-req-pane" class="cmp-pane active"><pre id="cmp-right-req-pre" class="raw-pre cmp-pre"></pre></div>
-        <div id="cmp-right-resp-pane" class="cmp-pane hidden"><pre id="cmp-right-resp-pre" class="raw-pre cmp-pre"></pre></div>
+      <!-- RIGHT: Generated spec -->
+      <div class="schema-output">
+        <div class="pane-label">OPENAPI SPEC</div>
+        <pre id="schema-spec" class="raw-pre schema-spec-pre"></pre>
       </div>
     </div>
   </div>
@@ -2100,6 +2103,21 @@
             <option value="split">Split (Headers + Body)</option>
             <option value="raw">Raw (single editor)</option>
           </select>
+        </div>
+      </div>
+
+      <!-- ── Collaborator Everywhere ──────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Collaborator Everywhere</div>
+        <div class="settings-section-desc">Auto-inject your Interactsh OOB URL into common headers on every request. Creates Match &amp; Replace rules that inject the callback URL into Referer, X-Forwarded-For, Origin, and other headers.</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">OOB URL</label>
+          <input id="cfg-collab-url" type="text" class="settings-inp" placeholder="your-id.oast.fun" spellcheck="false">
+        </div>
+        <div class="settings-actions">
+          <button id="cfg-collab-enable" class="btn btn-sm btn-accent">Enable (add M&amp;R rules)</button>
+          <button id="cfg-collab-disable" class="btn btn-sm btn-danger">Disable (remove rules)</button>
+          <span id="cfg-collab-status" class="settings-status"></span>
         </div>
       </div>
 
