@@ -304,6 +304,8 @@ function getTab(id) {
       docStatus:    null,
       history:      [],   // HTTP history entries
       historyMap:   {},   // Network.requestId → history index (for matching responses)
+      wsConnections: {},  // requestId → { url, status, time }
+      wsFrames:      [],  // { requestId, url, direction, opcode, data, length, time, mask }
     });
   }
   return tabs.get(id);
@@ -403,6 +405,29 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
     if (idx !== undefined && t.history[idx]) {
       t.history[idx].length = (t.history[idx].length || 0) + (params.dataLength || 0);
     }
+  }
+
+  // ── WebSocket: track connections and frames ─────────────────────────
+  if (method === "Network.webSocketCreated") {
+    t.wsConnections[params.requestId] = { url: params.url || "", status: "connecting", time: Date.now() };
+  }
+  if (method === "Network.webSocketHandshakeResponseReceived") {
+    if (t.wsConnections[params.requestId]) t.wsConnections[params.requestId].status = "open";
+  }
+  if (method === "Network.webSocketFrameSent") {
+    const conn = t.wsConnections[params.requestId];
+    const frame = params.response || {};
+    t.wsFrames.push({ requestId: params.requestId, url: conn?.url || "", direction: "sent", opcode: frame.opcode ?? 1, data: (frame.payloadData || "").slice(0, 100000), length: frame.payloadData?.length || 0, time: Date.now(), mask: frame.mask ?? true });
+    if (t.wsFrames.length > 5000) t.wsFrames.splice(0, 500);
+  }
+  if (method === "Network.webSocketFrameReceived") {
+    const conn = t.wsConnections[params.requestId];
+    const frame = params.response || {};
+    t.wsFrames.push({ requestId: params.requestId, url: conn?.url || "", direction: "received", opcode: frame.opcode ?? 1, data: (frame.payloadData || "").slice(0, 100000), length: frame.payloadData?.length || 0, time: Date.now(), mask: frame.mask ?? false });
+    if (t.wsFrames.length > 5000) t.wsFrames.splice(0, 500);
+  }
+  if (method === "Network.webSocketClosed") {
+    if (t.wsConnections[params.requestId]) t.wsConnections[params.requestId].status = "closed";
   }
 
   if (method === "Fetch.requestPaused") {
@@ -611,6 +636,7 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
       t.endpoints = []; t.technologies = []; t.headers = {}; t.headerSrc = {};
       t.docHeaders = null; t.docUrl = ""; t.docStatus = null;
       t.pending = {}; t._epSeen = null;
+      t.wsConnections = {}; t.wsFrames = [];
     }
     probeInjectedTabs.delete(tabId);
   }
@@ -626,7 +652,7 @@ const ALLOWED = new Set([
   "GET_DATA","GET_INTERCEPTED","GET_HISTORY","CLEAR_HISTORY","REPORT","CLEAR",
   "RESTORE_HISTORY","RESTORE_ENDPOINTS",
   "CNT_LAUNCH","CNT_AUTO_EXPORT","GET_EXT_PATH","PROXY_TXN",
-  "LOOKUP","CRAWL_START","CRAWL_STOP","UPDATE_SETTINGS","GET_COOKIES",
+  "LOOKUP","CRAWL_START","CRAWL_STOP","UPDATE_SETTINGS","GET_COOKIES","GET_WS_HISTORY",
   "PROBE_INJECT","PROBE_CMD","PROBE_STATUS","PROBE_FINDINGS",
 ]);
 
@@ -1014,6 +1040,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       t.history = []; t.historyMap = {};
       proxyHistory.length = 0;
       sendResponse({ ok: true });
+      break;
+    }
+
+    case "GET_WS_HISTORY": {
+      if (!tabId) { sendResponse({ frames: [], connections: {} }); break; }
+      const t = getTab(tabId);
+      sendResponse({ frames: t.wsFrames, connections: t.wsConnections });
       break;
     }
 

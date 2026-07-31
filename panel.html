@@ -14,6 +14,7 @@
     <button class="tab"        data-tab="target"   >Project</button>
     <button class="tab active" data-tab="intercept">Intercept <span class="bdg hidden" id="bdg-intercept">0</span></button>
     <button class="tab"        data-tab="history"  >History <span class="bdg" id="bdg-history">0</span></button>
+    <button class="tab"        data-tab="ws"       >WebSocket <span class="bdg" id="bdg-ws">0</span></button>
     <button class="tab"        data-tab="repeater" >Repeater <span class="bdg hidden" id="bdg-repeater">0</span></button>
     <button class="tab"        data-tab="intruder" >Intruder <span class="bdg hidden" id="bdg-intruder">0</span></button>
     <button class="tab"        data-tab="probe"    >Probe <span class="bdg" id="bdg-probe">0</span></button>
@@ -22,6 +23,9 @@
     <button class="tab"        data-tab="headers"  >Headers</button>
     <button class="tab"        data-tab="decoder"  >Decoder</button>
     <button class="tab"        data-tab="comparer" >Comparer</button>
+    <button class="tab"        data-tab="poc"      >PoC</button>
+    <button class="tab"        data-tab="sequencer">Sequencer</button>
+    <button class="tab"        data-tab="notes"    >Notes <span class="bdg" id="bdg-notes">0</span></button>
     <button class="tab"        data-tab="sensitive">Sensitive <span class="bdg" id="bdg-sensitive">0</span></button>
     <button class="tab"        data-tab="settings" >Settings</button>
     <div class="tabbar-gap"></div>
@@ -109,6 +113,8 @@
             <button id="tgt-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
             <button id="tgt-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
             <button id="tgt-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
+            <button id="tgt-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
+            <button id="tgt-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
           </div>
           <div class="hist-detail-body">
             <div class="hist-detail-pane" id="tgt-req-side">
@@ -172,6 +178,8 @@
             <button id="ep-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
             <button id="ep-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
             <button id="ep-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
+            <button id="ep-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
+            <button id="ep-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
           </div>
           <div class="hist-detail-body">
             <div class="hist-detail-pane" id="ep-req-side">
@@ -363,6 +371,8 @@
           <button id="hist-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
           <button id="hist-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
           <button id="hist-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">↗ Open</button>
+          <button id="hist-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
+          <button id="hist-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
         </div>
         <div class="reflect-bar" id="hist-reflect-bar">
           <label class="reflect-bar-toggle" title="Highlight values reflected from the request into the response — one colour per distinct value">
@@ -394,6 +404,70 @@
               <span id="hist-resp-search-count" class="detail-search-count"></span>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ WEBSOCKET HISTORY ══════════════════════════ -->
+  <div id="tab-ws" class="tab-panel hidden">
+    <div class="filter-bar">
+      <input id="ws-filter" type="text" placeholder="Filter messages…" spellcheck="false" autocomplete="off">
+      <select id="ws-flt-dir" class="filter-sel">
+        <option value="">All directions</option>
+        <option value="sent">Sent</option>
+        <option value="received">Received</option>
+      </select>
+      <select id="ws-flt-type" class="filter-sel">
+        <option value="">All types</option>
+        <option value="1">Text</option>
+        <option value="2">Binary</option>
+      </select>
+      <select id="ws-flt-conn" class="filter-sel">
+        <option value="">All connections</option>
+      </select>
+      <button id="ws-clear" class="btn btn-sm btn-ghost">Clear</button>
+    </div>
+    <div id="ws-conn-bar" class="ws-conn-bar hidden">
+      <span id="ws-conn-info" class="ws-conn-info"></span>
+    </div>
+    <div class="hist-split">
+      <div class="hist-split-left" id="ws-split-left">
+        <div class="hist-table-wrap">
+          <table class="hist-table" id="ws-table">
+            <thead>
+              <tr>
+                <th class="hist-th-sortable" data-wssort="id" style="width:36px">#</th>
+                <th class="hist-th-sortable" data-wssort="direction" style="width:28px">Dir</th>
+                <th class="hist-th-sortable" data-wssort="url" style="width:220px">URL</th>
+                <th class="hist-th-sortable" data-wssort="opcode" style="width:52px">Type</th>
+                <th class="hist-th-sortable" data-wssort="length" style="width:64px">Length</th>
+                <th>Data</th>
+                <th class="hist-th-sortable" data-wssort="time" style="width:110px">Time</th>
+              </tr>
+            </thead>
+            <tbody id="ws-tbody"></tbody>
+          </table>
+        </div>
+        <div id="ws-empty" class="empty">
+          No WebSocket frames captured.<br>
+          Attach debugger — frames are recorded from live WebSocket connections.
+        </div>
+      </div>
+      <div class="hist-resizer" id="ws-resizer"></div>
+      <div id="ws-detail" class="hist-detail hidden">
+        <div class="hist-detail-topbar">
+          <button id="ws-detail-close" class="btn btn-sm btn-ghost">✕</button>
+          <span id="ws-detail-title" class="hist-detail-title"></span>
+          <button id="ws-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
+          <button id="ws-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
+        </div>
+        <div class="ws-detail-body">
+          <pre id="ws-detail-pre" class="raw-pre"></pre>
+        </div>
+        <div class="detail-search-bar">
+          <input id="ws-detail-search" type="text" class="detail-search-inp" placeholder="Search message…" spellcheck="false">
+          <span id="ws-detail-search-count" class="detail-search-count"></span>
         </div>
       </div>
     </div>
@@ -546,6 +620,7 @@
             <button id="intr-detail-close" class="btn btn-sm btn-ghost">✕</button>
             <span id="intr-detail-title" class="hist-detail-title"></span>
             <button id="intr-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
+            <button id="intr-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
           </div>
           <div class="reflect-bar" id="intr-reflect-bar">
             <label class="reflect-bar-toggle" title="Highlight request values reflected in the response — one colour per distinct value">
@@ -881,6 +956,8 @@
           <button id="log-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
           <button id="log-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
           <button id="log-detail-open" class="btn btn-sm btn-ghost">↗</button>
+          <button id="log-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
+          <button id="log-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
         </div>
         <div class="hist-detail-body">
           <div class="hist-detail-pane" id="log-req-side">
@@ -1115,6 +1192,289 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════ PoC GENERATOR ═══════════════════════════════ -->
+  <div id="tab-poc" class="tab-panel hidden">
+
+    <!-- Sub-tabs: CSRF | Clickjacking -->
+    <div class="poc-sub-bar">
+      <button class="sub-tab active" data-pocsub="csrf">CSRF</button>
+      <button class="sub-tab" data-pocsub="clickjack">Clickjacking</button>
+      <div class="tabbar-gap"></div>
+      <span id="poc-req-label" class="poc-req-label">No request loaded — use → PoC from any detail pane</span>
+    </div>
+
+    <!-- ════════ CSRF SUB-PANEL ════════ -->
+    <div id="poc-csrf" class="poc-sub-panel active">
+      <div class="poc-layout">
+        <!-- LEFT: Config -->
+        <div class="poc-config">
+          <div class="settings-section">
+            <div class="settings-section-title">CSRF Configuration</div>
+            <div class="settings-row">
+              <label class="settings-label-sm">Technique</label>
+              <select id="poc-csrf-technique" class="filter-sel">
+                <option value="auto-form">Auto-submit form</option>
+                <option value="auto-form-get">GET (img + iframe)</option>
+                <option value="xhr-text-plain">XHR (text/plain Content-Type)</option>
+                <option value="fetch-no-cors">Fetch (no-cors, credentials)</option>
+                <option value="method-override">Method override (_method=POST)</option>
+                <option value="multipart">Multipart form-data</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label-sm">Evasions</label>
+            </div>
+            <div class="poc-evasions">
+              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-autosubmit" checked> Auto-submit on load</label>
+              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-no-referrer"> Suppress Referer header</label>
+              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-strip-token"> Strip CSRF token params</label>
+              <label class="probe-toggle"><input type="checkbox" id="poc-csrf-sandbox"> Sandbox iframe (bypass frame-buster)</label>
+            </div>
+            <div class="settings-row" style="margin-top:8px">
+              <label class="settings-label-sm">Target URL</label>
+            </div>
+            <input id="poc-csrf-url" type="text" class="settings-inp" placeholder="https://target.com/change-email" spellcheck="false">
+            <div class="settings-row">
+              <label class="settings-label-sm">Method</label>
+              <select id="poc-csrf-method" class="filter-sel" style="width:80px">
+                <option>GET</option><option selected>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option>
+              </select>
+            </div>
+            <div class="settings-row"><label class="settings-label-sm">Body</label></div>
+            <textarea id="poc-csrf-body" class="raw-ta settings-ta" rows="3" spellcheck="false" placeholder="email=attacker@evil.com&submit=1"></textarea>
+            <div class="settings-row"><label class="settings-label-sm">Content-Type</label></div>
+            <input id="poc-csrf-ct" type="text" class="settings-inp" placeholder="application/x-www-form-urlencoded" spellcheck="false">
+            <div class="settings-actions" style="margin-top:8px">
+              <button id="poc-csrf-generate" class="btn btn-accent">Generate</button>
+              <span id="poc-csrf-status" class="settings-status"></span>
+            </div>
+          </div>
+        </div>
+        <!-- RIGHT: Output -->
+        <div class="poc-output">
+          <div class="poc-output-bar">
+            <span class="pane-label">GENERATED PoC</span>
+            <button id="poc-csrf-copy" class="btn btn-xs btn-ghost">Copy</button>
+            <button id="poc-csrf-download" class="btn btn-xs btn-ghost">Download .html</button>
+          </div>
+          <div id="poc-csrf-warnings" class="csrf-warnings"></div>
+          <pre id="poc-csrf-code" class="raw-pre poc-code-pre"></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ CLICKJACKING SUB-PANEL ════════ -->
+    <div id="poc-clickjack" class="poc-sub-panel hidden">
+      <div class="poc-layout">
+        <!-- LEFT: Config -->
+        <div class="poc-config">
+          <div class="settings-section">
+            <div class="settings-section-title">Clickjacking Configuration</div>
+            <div class="settings-row">
+              <label class="settings-label-sm">Technique</label>
+              <select id="poc-cj-technique" class="filter-sel">
+                <option value="basic">Basic overlay (single click)</option>
+                <option value="prefill">Prefilled form input</option>
+                <option value="framebuster">Frame buster bypass (sandbox)</option>
+                <option value="multistep">Multistep (2 clicks)</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label-sm">Target URL</label>
+            </div>
+            <input id="poc-cj-url" type="text" class="settings-inp" placeholder="https://target.com/my-account" spellcheck="false">
+            <div class="settings-row">
+              <label class="settings-label-sm">Prefill params</label>
+            </div>
+            <input id="poc-cj-params" type="text" class="settings-inp" placeholder="email=attacker@evil.com (appended as ?key=val)" spellcheck="false">
+            <div class="poc-cj-positions">
+              <div class="settings-section-title" style="font-size:11px;margin-top:10px">Button 1 position</div>
+              <div class="settings-row">
+                <label class="settings-label-sm">Top</label>
+                <input id="poc-cj-top1" type="number" class="settings-inp settings-inp-sm" value="300">
+                <label class="settings-label-sm">Left</label>
+                <input id="poc-cj-left1" type="number" class="settings-inp settings-inp-sm" value="60">
+                <label class="settings-label-sm">Text</label>
+                <input id="poc-cj-text1" type="text" class="settings-inp" value="Click me" style="width:100px">
+              </div>
+              <div id="poc-cj-step2" class="hidden">
+                <div class="settings-section-title" style="font-size:11px;margin-top:6px">Button 2 position</div>
+                <div class="settings-row">
+                  <label class="settings-label-sm">Top</label>
+                  <input id="poc-cj-top2" type="number" class="settings-inp settings-inp-sm" value="285">
+                  <label class="settings-label-sm">Left</label>
+                  <input id="poc-cj-left2" type="number" class="settings-inp settings-inp-sm" value="225">
+                  <label class="settings-label-sm">Text</label>
+                  <input id="poc-cj-text2" type="text" class="settings-inp" value="Click me next" style="width:100px">
+                </div>
+              </div>
+            </div>
+            <div class="settings-row" style="margin-top:8px">
+              <label class="settings-label-sm">Iframe</label>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label-sm">W</label>
+              <input id="poc-cj-width" type="number" class="settings-inp settings-inp-sm" value="500">
+              <label class="settings-label-sm">H</label>
+              <input id="poc-cj-height" type="number" class="settings-inp settings-inp-sm" value="700">
+              <label class="settings-label-sm">Opacity</label>
+              <input id="poc-cj-opacity" type="text" class="settings-inp settings-inp-sm" value="0.0001" style="width:70px">
+            </div>
+            <div class="settings-actions" style="margin-top:8px">
+              <button id="poc-cj-generate" class="btn btn-accent">Generate</button>
+              <span id="poc-cj-status" class="settings-status"></span>
+            </div>
+          </div>
+        </div>
+        <!-- RIGHT: Output -->
+        <div class="poc-output">
+          <div class="poc-output-bar">
+            <span class="pane-label">GENERATED PoC</span>
+            <button id="poc-cj-copy" class="btn btn-xs btn-ghost">Copy</button>
+            <button id="poc-cj-download" class="btn btn-xs btn-ghost">Download .html</button>
+          </div>
+          <pre id="poc-cj-code" class="raw-pre poc-code-pre"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ SEQUENCER ══════════════════════════════════ -->
+  <div id="tab-sequencer" class="tab-panel hidden">
+    <div class="seq-layout">
+      <div class="seq-config">
+        <div class="settings-section">
+          <div class="settings-section-title">Token Collection</div>
+          <div class="settings-section-desc">
+            Configure a request that returns a session token. Sequencer sends it N times and extracts the token from each response.
+          </div>
+          <div class="settings-row">
+            <label class="settings-label-sm">URL</label>
+            <input id="seq-url" type="text" class="settings-inp" placeholder="https://target.com/login" spellcheck="false">
+          </div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Method</label>
+            <select id="seq-method" class="method-sel">
+              <option>GET</option><option>POST</option><option>PUT</option>
+            </select>
+          </div>
+          <div class="settings-row"><label class="settings-label-sm">Headers</label></div>
+          <textarea id="seq-headers" class="raw-ta settings-ta" rows="3" spellcheck="false" placeholder="Cookie: session=abc123&#10;Content-Type: application/x-www-form-urlencoded"></textarea>
+          <div class="settings-row"><label class="settings-label-sm">Body</label></div>
+          <textarea id="seq-body" class="raw-ta settings-ta" rows="2" spellcheck="false" placeholder="username=admin&password=test"></textarea>
+          <div class="settings-row">
+            <label class="settings-label-sm">Extract from</label>
+            <select id="seq-extract" class="filter-sel">
+              <option value="cookie">Cookie</option>
+              <option value="header">Response header</option>
+              <option value="body-regex">Body (regex)</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Name / Pattern</label>
+            <input id="seq-token-name" type="text" class="settings-inp" placeholder="session_id (or regex with capture group)" spellcheck="false">
+          </div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Samples</label>
+            <input id="seq-count" type="number" class="settings-inp settings-inp-sm" value="100" min="10" max="2000">
+            <label class="settings-label-sm">Delay (ms)</label>
+            <input id="seq-delay" type="number" class="settings-inp settings-inp-sm" value="0" min="0">
+          </div>
+          <div class="settings-actions">
+            <button id="seq-start" class="btn btn-accent">Start Collection</button>
+            <button id="seq-stop" class="btn btn-sm btn-danger" disabled>Stop</button>
+            <button id="seq-from-hist" class="btn btn-sm btn-ghost" title="Load config from last History entry with Set-Cookie">From History</button>
+            <span id="seq-collect-status" class="settings-status"></span>
+          </div>
+          <div id="seq-progress" class="crawl-bar hidden">
+            <div class="crawl-progress-wrap"><div id="seq-progress-fill" class="crawl-fill" style="width:0%"></div></div>
+            <span id="seq-progress-text" class="crawl-status-text">0 / 100</span>
+          </div>
+        </div>
+      </div>
+      <div class="seq-results">
+        <div class="settings-section">
+          <div class="settings-section-title">Analysis</div>
+          <div id="seq-analysis" class="seq-analysis">
+            <div id="seq-empty" class="empty">Collect tokens to see analysis.</div>
+            <div id="seq-score-card" class="seq-score-card hidden">
+              <div class="seq-score-row"><span class="seq-score-label">Overall Entropy</span><span id="seq-score-value" class="seq-score-value">—</span><span id="seq-score-rating" class="seq-score-rating">—</span></div>
+              <div class="seq-score-row"><span class="seq-score-label">Tokens collected</span><span id="seq-token-count" class="seq-score-value">0</span></div>
+              <div class="seq-score-row"><span class="seq-score-label">Unique tokens</span><span id="seq-unique-count" class="seq-score-value">0</span></div>
+              <div class="seq-score-row"><span class="seq-score-label">Avg length</span><span id="seq-avg-len" class="seq-score-value">0</span></div>
+              <div class="seq-score-row"><span class="seq-score-label">Char set size</span><span id="seq-charset-size" class="seq-score-value">0</span></div>
+            </div>
+            <div id="seq-tests" class="seq-tests hidden">
+              <div class="pane-label">STATISTICAL TESTS</div>
+              <div id="seq-test-results" class="seq-test-results"></div>
+            </div>
+            <div id="seq-chart-wrap" class="seq-chart-wrap hidden">
+              <div class="pane-label">CHARACTER FREQUENCY</div>
+              <canvas id="seq-chart" width="600" height="200"></canvas>
+            </div>
+            <div id="seq-tokens-wrap" class="seq-tokens-wrap hidden">
+              <div class="pane-label">COLLECTED TOKENS <button id="seq-export" class="btn btn-xs btn-ghost">Export CSV</button></div>
+              <div id="seq-token-list" class="seq-token-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ NOTES ══════════════════════════════════════ -->
+  <div id="tab-notes" class="tab-panel hidden">
+    <div class="filter-bar">
+      <input id="notes-filter" type="text" placeholder="Search notes…" spellcheck="false" autocomplete="off">
+      <select id="notes-flt-sev" class="filter-sel">
+        <option value="">All severities</option>
+        <option value="critical">Critical</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+        <option value="info">Info</option>
+      </select>
+      <select id="notes-flt-host" class="filter-sel">
+        <option value="">All hosts</option>
+      </select>
+      <button id="notes-add" class="btn btn-sm btn-accent">+ Add Note</button>
+      <button id="notes-export" class="btn btn-sm btn-ghost">Export MD</button>
+      <button id="notes-clear" class="btn btn-sm btn-ghost">Clear All</button>
+    </div>
+    <div id="notes-form" class="notes-form hidden">
+      <div class="settings-row">
+        <label class="settings-label-sm">Title</label>
+        <input id="notes-title" type="text" class="settings-inp" placeholder="Finding title" spellcheck="false">
+      </div>
+      <div class="settings-row">
+        <label class="settings-label-sm">Severity</label>
+        <select id="notes-sev" class="filter-sel">
+          <option value="info">Info</option>
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+          <option value="critical">Critical</option>
+        </select>
+        <label class="settings-label-sm">Host</label>
+        <input id="notes-host" type="text" class="settings-inp" placeholder="target.com" spellcheck="false" style="flex:1">
+      </div>
+      <div class="settings-row">
+        <label class="settings-label-sm">URL</label>
+        <input id="notes-url" type="text" class="settings-inp" placeholder="https://target.com/path (optional)" spellcheck="false">
+      </div>
+      <textarea id="notes-body" class="raw-ta settings-ta" rows="4" spellcheck="false" placeholder="Describe the finding…"></textarea>
+      <div class="settings-actions">
+        <button id="notes-form-save" class="btn btn-accent">Save</button>
+        <button id="notes-form-cancel" class="btn btn-sm btn-ghost">Cancel</button>
+        <span id="notes-form-status" class="settings-status"></span>
+      </div>
+    </div>
+    <div id="notes-list" class="notes-list"></div>
+    <div id="notes-empty" class="empty">
+      No notes yet. Click <b>+ Add Note</b> or use <b>→ Notes</b> from any request detail pane.
+    </div>
+  </div>
+
   <!-- ═══════════════════════════ SENSITIVE ═══════════════════════════════════ -->
   <div id="tab-sensitive" class="tab-panel hidden">
     <div class="sens-toolbar">
@@ -1201,6 +1561,8 @@
           <button id="sens-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
           <button id="sens-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
           <button id="sens-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">↗</button>
+          <button id="sens-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
+          <button id="sens-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
         </div>
         <div class="hist-detail-body">
           <div class="hist-detail-pane" id="sens-req-side">
@@ -1362,6 +1724,8 @@
 
     </div>
   </div>
+
+
 
 </div>
 <script src="sensitive-rules.js"></script>

