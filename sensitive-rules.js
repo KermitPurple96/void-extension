@@ -234,4 +234,24 @@ const SENSITIVE_RULES = [
   // Internal infrastructure leaks — these expose hostnames, not just products
   { id: "hdr-backend-server", cat: "Tech & Version Disclosure", desc: "Internal backend hostname", regex: "^x-(?:backend|backend-server|server|node|host|served-by|application-context|powered-by-plesk):[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
   { id: "hdr-upstream", cat: "Tech & Version Disclosure", desc: "Upstream/origin server header", regex: "^x-(?:upstream[a-z-]*|origin-server|proxy-backend):[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+
+  // ── Cookie security flags ─────────────────────────────────────────
+  { id: "cookie-no-secure", cat: "Security Misconfiguration", desc: "Cookie missing Secure flag", regex: "^set-cookie:(?!.*\\bsecure\\b)[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "cookie-no-httponly", cat: "Security Misconfiguration", desc: "Cookie missing HttpOnly flag", regex: "^set-cookie:(?!.*\\bhttponly\\b)[^\\n]+", sections: ["resp_headers"], severity: "medium", flags: "gim" },
+  { id: "cookie-no-samesite", cat: "Security Misconfiguration", desc: "Cookie missing SameSite attribute", regex: "^set-cookie:(?!.*\\bsamesite\\b)[^\\n]+", sections: ["resp_headers"], severity: "low", flags: "gim" },
+
+  // ── Missing security headers ──────────────────────────────────────
+  { id: "no-csp", cat: "Security Misconfiguration", desc: "Missing Content-Security-Policy header", regex: "^content-type:\\s*text/html", sections: ["resp_headers"], severity: "medium", flags: "gim", negative: "content-security-policy" },
+
+  // ── Mixed content ─────────────────────────────────────────────────
+  { id: "mixed-content", cat: "Security Misconfiguration", desc: "HTTP resource loaded on HTTPS page", regex: "(?:src|href|action)=[\"']http://[^\"']+[\"']", sections: ["resp_body"], severity: "medium", flags: "gim" },
+
+  // ── SRI missing on external scripts ────────────────────────────────
+  { id: "no-sri", cat: "Security Misconfiguration", desc: "External script/link without integrity attribute", regex: "<(?:script|link)[^>]+(?:src|href)=[\"']https?://[^\"']+[\"'][^>]*(?!integrity)[^>]*>", sections: ["resp_body"], severity: "low", flags: "gim" },
+
+  // ── CRLF injection indicators ─────────────────────────────────────
+  { id: "crlf-indicator", cat: "Information Disclosure", desc: "CRLF sequence in URL parameter value", regex: "%0[dD]%0[aA]", sections: ["req_url"], severity: "medium", flags: "gim" },
+
+  // ── Open redirect in response body ─────────────────────────────────
+  { id: "open-redirect-body", cat: "Open Redirect", desc: "Client-side redirect with user-controlled input", regex: "(?:window\\.location|document\\.location|location\\.href)\\s*=\\s*[^;]*(?:location\\.(?:search|hash)|(?:get|query)Param|url|redirect|next|return|goto)", sections: ["resp_body"], severity: "medium", flags: "gim" },
 ];

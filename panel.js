@@ -316,35 +316,56 @@ function renderInterceptList() {
   list.replaceChildren();
 
   const queue = [...intercepted, ...proxyPending];
-  if (!queue.length) { empty.classList.remove("hidden"); return; }
+  // Add intercepted responses
+  const allItems = [...queue, ...interceptedResponses];
+  if (!allItems.length) { empty.classList.remove("hidden"); return; }
   empty.classList.add("hidden");
 
-  queue.forEach(req => {
+  allItems.forEach(req => {
+    const isResp = req._isResponse;
     const row = el("div", "req-row");
-    if (editingReq && editingReq.requestId === req.requestId) row.classList.add("hist-selected");
-    ap(row,
-      txt("span", `method-pill m-${req.method.toLowerCase()}`, req.method),
-      txt("span", "req-type",  req.resourceType || "other"),
-      txt("span", "req-url",   req.url),
-    );
-    // Say which side held it — the actions differ underneath
+    if (!isResp && editingReq && editingReq.requestId === req.requestId) row.classList.add("hist-selected");
+    if (isResp && editingResp && editingResp.requestId === req.requestId) row.classList.add("hist-selected");
+
+    if (isResp) {
+      ap(row,
+        txt("span", "method-pill m-resp", `${req.status}`),
+        txt("span", "req-type", "RESPONSE"),
+        txt("span", "req-url", req.url),
+      );
+    } else {
+      ap(row,
+        txt("span", `method-pill m-${(req.method || "").toLowerCase()}`, req.method),
+        txt("span", "req-type",  req.resourceType || "other"),
+        txt("span", "req-url",   req.url),
+      );
+    }
     if (req._via === "proxy") row.appendChild(txt("span", "req-via", "PROXY"));
     const acts = el("div", "req-actions");
-    const btnRep  = txt("button", "btn btn-xs btn-ghost",   "→ Rep");
-    const btnIntr = txt("button", "btn btn-xs btn-ghost",   "→ Intr");
-    const btnOpen = txt("button", "btn btn-xs btn-ghost",   "↗"); btnOpen.title = "Open in new tab";
-    const btnFwd  = txt("button", "btn btn-xs btn-success", "Forward →");
-    const btnDrop = txt("button", "btn btn-xs btn-danger",  "Drop");
 
-    btnRep.addEventListener("click",  e => { e.stopPropagation(); sendToRepeater(req); });
-    btnIntr.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder(req); });
-    btnOpen.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: req.url }); });
-    btnFwd.addEventListener("click",  e => { e.stopPropagation(); doForward(req.requestId, null); });
-    btnDrop.addEventListener("click", e => { e.stopPropagation(); doDrop(req.requestId); });
+    if (isResp) {
+      const btnFwd = txt("button", "btn btn-xs btn-success", "Forward →");
+      const btnDrop = txt("button", "btn btn-xs btn-danger", "Drop");
+      btnFwd.addEventListener("click", e => { e.stopPropagation(); bg({ type: "FORWARD_RESPONSE", requestId: req.requestId, overrides: {} }); interceptedResponses = interceptedResponses.filter(r => r.requestId !== req.requestId); renderInterceptList(); });
+      btnDrop.addEventListener("click", e => { e.stopPropagation(); bg({ type: "DROP_RESPONSE", requestId: req.requestId }); interceptedResponses = interceptedResponses.filter(r => r.requestId !== req.requestId); renderInterceptList(); });
+      ap(acts, btnFwd, btnDrop);
+      row.addEventListener("click", () => openRespEditor(req));
+    } else {
+      const btnRep  = txt("button", "btn btn-xs btn-ghost",   "→ Rep");
+      const btnIntr = txt("button", "btn btn-xs btn-ghost",   "→ Intr");
+      const btnOpen = txt("button", "btn btn-xs btn-ghost",   "↗"); btnOpen.title = "Open in new tab";
+      const btnFwd  = txt("button", "btn btn-xs btn-success", "Forward →");
+      const btnDrop = txt("button", "btn btn-xs btn-danger",  "Drop");
+      btnRep.addEventListener("click",  e => { e.stopPropagation(); sendToRepeater(req); });
+      btnIntr.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder(req); });
+      btnOpen.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: req.url }); });
+      btnFwd.addEventListener("click",  e => { e.stopPropagation(); doForward(req.requestId, null); });
+      btnDrop.addEventListener("click", e => { e.stopPropagation(); doDrop(req.requestId); });
+      ap(acts, btnRep, btnIntr, btnOpen, btnFwd, btnDrop);
+      row.addEventListener("click", () => openEditor(req));
+    }
 
-    ap(acts, btnRep, btnIntr, btnOpen, btnFwd, btnDrop);
     row.appendChild(acts);
-    row.addEventListener("click", () => openEditor(req));
     list.appendChild(row);
   });
 }
@@ -2641,6 +2662,21 @@ function intrBuildRequests(template, attackType, payloadSets) {
       });
       requests.push({ payload: payloadParts.join(" | "), posIndex: -1, raw: req });
     }
+  } else if (attackType === "cluster-bomb") {
+    // Cartesian product of all payload sets
+    function cartesian(sets, idx, current) {
+      if (idx >= sets.length) { requests.push({ payload: current.join(" | "), posIndex: -1, raw: buildReq(current) }); return; }
+      for (const p of sets[idx]) { cartesian(sets, idx + 1, [...current, p]); }
+    }
+    function buildReq(vals) {
+      let req = template;
+      positions.forEach((pos, idx) => { req = req.replace(`§${pos.original}§`, vals[idx] || ""); });
+      return req;
+    }
+    const sets = positions.map((_, idx) => expanded[Math.min(idx, expanded.length - 1)] || [""]);
+    if (sets.every(s => s.length) && sets.reduce((a, s) => a * s.length, 1) <= 100000) {
+      cartesian(sets, 0, []);
+    }
   }
 
   return requests;
@@ -3255,7 +3291,7 @@ function decOp(op, input) {
       }
 
       // Hash (Web Crypto API)
-      case "md5":    return "Use SHA — MD5 not available in browser crypto";
+      case "md5":    return md5(input);
       case "sha1":   return cryptoHash("SHA-1", input);
       case "sha256": return cryptoHash("SHA-256", input);
 
@@ -5231,6 +5267,601 @@ function cmpClear() {
   cmpRenderSide("right");
 }
 
+// ═══════════════════════════ RESPONSE INTERCEPTION ═══════════════════════════
+
+let interceptedResponses = [];
+let editingResp = null;
+let respPollTimer = null;
+
+function startRespPoll() {
+  if (respPollTimer) return;
+  respPollTimer = setInterval(async () => {
+    const res = await bg({ type: "GET_INTERCEPTED_RESPONSES" });
+    if (!res) return;
+    interceptedResponses = res.responses || [];
+    renderInterceptList();
+  }, 600);
+}
+function stopRespPoll() { clearInterval(respPollTimer); respPollTimer = null; }
+
+function openRespEditor(resp) {
+  editingResp = resp;
+  document.getElementById("resp-ed-status").value = resp.status || 200;
+  document.getElementById("resp-ed-url").value = resp.url || "";
+  document.getElementById("resp-ed-headers").value = headersToRaw(resp.headers || {});
+  document.getElementById("resp-ed-body").value = resp.body || "";
+  const editor = document.getElementById("ic-resp-editor");
+  editor.classList.remove("hidden"); editor.classList.add("visible");
+}
+
+function closeRespEditor() {
+  editingResp = null;
+  document.getElementById("ic-resp-editor").classList.add("hidden");
+  document.getElementById("ic-resp-editor").classList.remove("visible");
+}
+
+async function forwardResp() {
+  if (!editingResp) return;
+  const overrides = {
+    status: parseInt(document.getElementById("resp-ed-status").value) || 200,
+    headers: rawToHeaders(document.getElementById("resp-ed-headers").value),
+    body: document.getElementById("resp-ed-body").value,
+  };
+  await bg({ type: "FORWARD_RESPONSE", requestId: editingResp.requestId, overrides });
+  interceptedResponses = interceptedResponses.filter(r => r.requestId !== editingResp.requestId);
+  closeRespEditor();
+  renderInterceptList();
+}
+
+async function dropResp() {
+  if (!editingResp) return;
+  await bg({ type: "DROP_RESPONSE", requestId: editingResp.requestId });
+  interceptedResponses = interceptedResponses.filter(r => r.requestId !== editingResp.requestId);
+  closeRespEditor();
+  renderInterceptList();
+}
+
+// ═══════════════════════════ COPY AS (curl/fetch/Python) ═════════════════════
+
+function copyAsCurl(entry) {
+  if (!entry) return;
+  const method = entry.method || "GET";
+  const url = entry.url || "";
+  const headers = entry.headers || {};
+  const body = entry.body || "";
+  let cmd = `curl -X ${method}`;
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() === "host") continue;
+    cmd += ` \\\n  -H '${k}: ${v}'`;
+  }
+  if (body) cmd += ` \\\n  -d '${body.replace(/'/g, "'\\''")}'`;
+  cmd += ` \\\n  '${url}'`;
+  navigator.clipboard.writeText(cmd);
+}
+
+function copyAsFetch(entry) {
+  if (!entry) return;
+  const method = entry.method || "GET";
+  const headers = entry.headers || {};
+  const body = entry.body || "";
+  const hdrs = Object.entries(headers).filter(([k]) => k.toLowerCase() !== "host")
+    .map(([k, v]) => `    '${k}': '${v}'`).join(",\n");
+  let code = `fetch('${entry.url}', {\n  method: '${method}',\n  headers: {\n${hdrs}\n  }`;
+  if (body) code += `,\n  body: '${body.replace(/'/g, "\\'")}'`;
+  code += `\n});`;
+  navigator.clipboard.writeText(code);
+}
+
+function copyAsPython(entry) {
+  if (!entry) return;
+  const method = entry.method || "GET";
+  const headers = entry.headers || {};
+  const body = entry.body || "";
+  const hdrs = Object.entries(headers).filter(([k]) => k.toLowerCase() !== "host")
+    .map(([k, v]) => `    '${k}': '${v}'`).join(",\n");
+  let code = `import requests\n\nresponse = requests.${method.toLowerCase()}(\n    '${entry.url}',\n    headers={\n${hdrs}\n    }`;
+  if (body) code += `,\n    data='${body.replace(/'/g, "\\'")}'`;
+  code += `\n)\nprint(response.status_code, response.text)`;
+  navigator.clipboard.writeText(code);
+}
+
+// ═══════════════════════════ RESPONSE RENDER ═════════════════════════════════
+
+function renderResponse(entry) {
+  if (!entry) return;
+  const body = entry.respBody || "";
+  const pane = document.getElementById("hist-render-pane");
+  const frame = document.getElementById("hist-render-frame");
+  const respPane = document.getElementById("hist-resp-pane");
+  if (pane.classList.contains("hidden")) {
+    pane.classList.remove("hidden");
+    respPane.classList.add("hidden");
+    frame.srcdoc = body;
+  } else {
+    pane.classList.add("hidden");
+    respPane.classList.remove("hidden");
+    frame.srcdoc = "";
+  }
+}
+
+// ═══════════════════════════ KEYBOARD SHORTCUTS ══════════════════════════════
+
+function initKeyboardShortcuts() {
+  document.addEventListener("keydown", e => {
+    // Ctrl+Enter → Send in Repeater
+    if (e.ctrlKey && e.key === "Enter") {
+      const repPanel = document.getElementById("tab-repeater");
+      if (repPanel && !repPanel.classList.contains("hidden")) {
+        document.getElementById("rep-send")?.click();
+        e.preventDefault();
+      }
+    }
+    // Ctrl+I → Toggle intercept
+    if (e.ctrlKey && e.key === "i" && !e.shiftKey && !e.altKey) {
+      const el = document.activeElement;
+      if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT")) return;
+      document.getElementById("btn-intercept")?.click();
+      e.preventDefault();
+    }
+    // Ctrl+1-9 → Switch tabs
+    if (e.ctrlKey && e.key >= "1" && e.key <= "9" && !e.shiftKey && !e.altKey) {
+      const el = document.activeElement;
+      if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT")) return;
+      const tabs = [...document.querySelectorAll(".tabbar > .tab")];
+      const idx = parseInt(e.key) - 1;
+      if (idx < tabs.length) { tabs[idx].click(); e.preventDefault(); }
+    }
+  });
+}
+
+// ═══════════════════════════ THEME ═══════════════════════════════════════════
+
+function applyTheme(theme) {
+  document.documentElement.classList.toggle("theme-light", theme === "light");
+}
+
+// ═══════════════════════════ HAR EXPORT ══════════════════════════════════════
+
+function exportHar() {
+  const entries = historyData.map(e => ({
+    startedDateTime: new Date(e.time || 0).toISOString(),
+    time: e.elapsed || 0,
+    request: {
+      method: e.method || "GET",
+      url: e.url || "",
+      httpVersion: "HTTP/1.1",
+      headers: Object.entries(e.headers || {}).map(([name, value]) => ({ name, value })),
+      queryString: [],
+      bodySize: (e.body || "").length,
+      postData: e.body ? { mimeType: "application/x-www-form-urlencoded", text: e.body } : undefined,
+    },
+    response: {
+      status: e.status || 0,
+      statusText: e.statusText || "",
+      httpVersion: "HTTP/1.1",
+      headers: Object.entries(e.respHeaders || {}).map(([name, value]) => ({ name, value })),
+      content: { size: e.length || 0, mimeType: e.mimeType || "", text: e.respBody || "" },
+      bodySize: (e.respBody || "").length,
+    },
+    cache: {},
+    timings: { send: 0, wait: e.elapsed || 0, receive: 0 },
+  }));
+  const har = {
+    log: {
+      version: "1.2",
+      creator: { name: "Void Extension", version: "1.0" },
+      entries,
+    },
+  };
+  const blob = new Blob([JSON.stringify(har, null, 2)], { type: "application/json" });
+  const a = el("a"); a.href = URL.createObjectURL(blob);
+  a.download = `void-${new Date().toISOString().slice(0, 10)}.har`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+// ═══════════════════════════ SCOPE AUTO-DETECT ═══════════════════════════════
+
+function autoDetectScope() {
+  chrome.tabs.get(TAB_ID, tab => {
+    try {
+      const u = new URL(tab.url);
+      const pattern = `*://${u.hostname}/*`;
+      document.getElementById("cfg-scope-include").value = pattern;
+      document.getElementById("tgt-scope-include").value = pattern;
+    } catch {}
+  });
+}
+
+// ═══════════════════════════ MD5 (pure JS) ═══════════════════════════════════
+
+function md5(str) {
+  function md5cycle(x, k) {
+    let a = x[0], b = x[1], c = x[2], d = x[3];
+    a = ff(a,b,c,d,k[0],7,-680876936);d=ff(d,a,b,c,k[1],12,-389564586);c=ff(c,d,a,b,k[2],17,606105819);b=ff(b,c,d,a,k[3],22,-1044525330);
+    a=ff(a,b,c,d,k[4],7,-176418897);d=ff(d,a,b,c,k[5],12,1200080426);c=ff(c,d,a,b,k[6],17,-1473231341);b=ff(b,c,d,a,k[7],22,-45705983);
+    a=ff(a,b,c,d,k[8],7,1770035416);d=ff(d,a,b,c,k[9],12,-1958414417);c=ff(c,d,a,b,k[10],17,-42063);b=ff(b,c,d,a,k[11],22,-1990404162);
+    a=ff(a,b,c,d,k[12],7,1804603682);d=ff(d,a,b,c,k[13],12,-40341101);c=ff(c,d,a,b,k[14],17,-1502002290);b=ff(b,c,d,a,k[15],22,1236535329);
+    a=gg(a,b,c,d,k[1],5,-165796510);d=gg(d,a,b,c,k[6],9,-1069501632);c=gg(c,d,a,b,k[11],14,643717713);b=gg(b,c,d,a,k[0],20,-373897302);
+    a=gg(a,b,c,d,k[5],5,-701558691);d=gg(d,a,b,c,k[10],9,38016083);c=gg(c,d,a,b,k[15],14,-660478335);b=gg(b,c,d,a,k[4],20,-405537848);
+    a=gg(a,b,c,d,k[9],5,568446438);d=gg(d,a,b,c,k[14],9,-1019803690);c=gg(c,d,a,b,k[3],14,-187363961);b=gg(b,c,d,a,k[8],20,1163531501);
+    a=gg(a,b,c,d,k[13],5,-1444681467);d=gg(d,a,b,c,k[2],9,-51403784);c=gg(c,d,a,b,k[7],14,1735328473);b=gg(b,c,d,a,k[12],20,-1926607734);
+    a=hh(a,b,c,d,k[5],4,-378558);d=hh(d,a,b,c,k[8],11,-2022574463);c=hh(c,d,a,b,k[11],16,1839030562);b=hh(b,c,d,a,k[14],23,-35309556);
+    a=hh(a,b,c,d,k[1],4,-1530992060);d=hh(d,a,b,c,k[4],11,1272893353);c=hh(c,d,a,b,k[7],16,-155497632);b=hh(b,c,d,a,k[10],23,-1094730640);
+    a=hh(a,b,c,d,k[13],4,681279174);d=hh(d,a,b,c,k[0],11,-358537222);c=hh(c,d,a,b,k[3],16,-722521979);b=hh(b,c,d,a,k[6],23,76029189);
+    a=hh(a,b,c,d,k[9],4,-640364487);d=hh(d,a,b,c,k[12],11,-421815835);c=hh(c,d,a,b,k[15],16,530742520);b=hh(b,c,d,a,k[2],23,-995338651);
+    a=ii(a,b,c,d,k[0],6,-198630844);d=ii(d,a,b,c,k[7],10,1126891415);c=ii(c,d,a,b,k[14],15,-1416354905);b=ii(b,c,d,a,k[5],21,-57434055);
+    a=ii(a,b,c,d,k[12],6,1700485571);d=ii(d,a,b,c,k[3],10,-1894986606);c=ii(c,d,a,b,k[10],15,-1051523);b=ii(b,c,d,a,k[1],21,-2054922799);
+    a=ii(a,b,c,d,k[8],6,1873313359);d=ii(d,a,b,c,k[15],10,-30611744);c=ii(c,d,a,b,k[6],15,-1560198380);b=ii(b,c,d,a,k[13],21,1309151649);
+    a=ii(a,b,c,d,k[4],6,-145523070);d=ii(d,a,b,c,k[11],10,-1120210379);c=ii(c,d,a,b,k[2],15,718787259);b=ii(b,c,d,a,k[9],21,-343485551);
+    x[0]=add32(a,x[0]);x[1]=add32(b,x[1]);x[2]=add32(c,x[2]);x[3]=add32(d,x[3]);
+  }
+  function cmn(q,a,b,x,s,t){a=add32(add32(a,q),add32(x,t));return add32((a<<s)|(a>>>(32-s)),b);}
+  function ff(a,b,c,d,x,s,t){return cmn((b&c)|((~b)&d),a,b,x,s,t);}
+  function gg(a,b,c,d,x,s,t){return cmn((b&d)|(c&(~d)),a,b,x,s,t);}
+  function hh(a,b,c,d,x,s,t){return cmn(b^c^d,a,b,x,s,t);}
+  function ii(a,b,c,d,x,s,t){return cmn(c^(b|(~d)),a,b,x,s,t);}
+  function add32(a,b){return(a+b)&0xFFFFFFFF;}
+  const n=str.length;let state=[1732584193,-271733879,-1732584194,271733878],i;
+  for(i=64;i<=n;i+=64){const k=[];for(let j=i-64;j<i;j+=4)k.push(str.charCodeAt(j)|(str.charCodeAt(j+1)<<8)|(str.charCodeAt(j+2)<<16)|(str.charCodeAt(j+3)<<24));md5cycle(state,k);}
+  const tail=[];for(let j=i-64;j<n;j++)tail.push(str.charCodeAt(j));tail.push(0x80);while(tail.length<64&&(tail.length%64)!==56)tail.push(0);
+  if(tail.length===64){const k=[];for(let j=0;j<64;j+=4)k.push(tail[j]|(tail[j+1]<<8)|(tail[j+2]<<16)|(tail[j+3]<<24));md5cycle(state,k);tail.length=0;while(tail.length<56)tail.push(0);}
+  else{while(tail.length<56)tail.push(0);}
+  tail.push(n*8&0xFF,(n*8>>8)&0xFF,(n*8>>16)&0xFF,(n*8>>24)&0xFF,0,0,0,0);
+  const k=[];for(let j=0;j<64;j+=4)k.push(tail[j]|(tail[j+1]<<8)|(tail[j+2]<<16)|(tail[j+3]<<24));md5cycle(state,k);
+  const hex=[];for(let j=0;j<4;j++)for(let b=0;b<32;b+=8)hex.push("0123456789abcdef".charAt((state[j]>>b+4)&0xF)+"0123456789abcdef".charAt((state[j]>>b)&0xF));
+  return hex.join("");
+}
+
+// ═══════════════════════════ ACTIVE SCANNER ══════════════════════════════════
+
+const SCAN_PAYLOADS = {
+  sqli: [
+    { payload: "'", detect: /(sql|syntax|mysql|postgresql|oracle|sqlite|unclosed|unterminated)/i, label: "SQL error (single quote)" },
+    { payload: "' OR '1'='1", detect: /(sql|syntax|mysql|postgresql)/i, label: "SQL OR bypass" },
+    { payload: "1 AND 1=1--", detect: null, label: "Boolean SQLi (true)", compare: "1 AND 1=2--" },
+    { payload: "'; WAITFOR DELAY '0:0:5'--", detect: null, label: "Time-based SQLi (MSSQL)", timing: 4000 },
+    { payload: "' AND SLEEP(5)--", detect: null, label: "Time-based SQLi (MySQL)", timing: 4000 },
+  ],
+  xss: [
+    { payload: '<script>alert(1)</script>', detect: /<script>alert\(1\)<\/script>/i, label: "Reflected XSS (unescaped)" },
+    { payload: '"><img src=x onerror=alert(1)>', detect: /onerror=alert/i, label: "XSS via img onerror" },
+    { payload: "'-alert(1)-'", detect: /'-alert\(1\)-'/i, label: "XSS in JS string context" },
+    { payload: '{{7*7}}', detect: /49/, label: "SSTI (template eval)" },
+    { payload: "${7*7}", detect: /49/, label: "SSTI (expression eval)" },
+  ],
+  pathtraversal: [
+    { payload: "../../../../etc/passwd", detect: /root:.*:0:0/i, label: "Path traversal (Linux)" },
+    { payload: "..\\..\\..\\..\\windows\\win.ini", detect: /\[fonts\]/i, label: "Path traversal (Windows)" },
+    { payload: "....//....//....//etc/passwd", detect: /root:.*:0:0/i, label: "Path traversal (filter bypass)" },
+  ],
+  ssrf: [
+    { payload: "INTERACTSH_URL", detect: null, label: "SSRF (OOB callback)", oob: true },
+    { payload: "http://127.0.0.1:80", detect: /(localhost|127\.0\.0\.1|admin|dashboard)/i, label: "SSRF to localhost" },
+  ],
+  ssti: [
+    { payload: "{{7*7}}", detect: /49/, label: "SSTI (Jinja2/Twig)" },
+    { payload: "${7*7}", detect: /49/, label: "SSTI (Freemarker/EL)" },
+    { payload: "<%=7*7%>", detect: /49/, label: "SSTI (ERB)" },
+  ],
+  cmdi: [
+    { payload: ";id", detect: /uid=\d+/i, label: "Command injection (;id)" },
+    { payload: "|id", detect: /uid=\d+/i, label: "Command injection (|id)" },
+    { payload: "$(id)", detect: /uid=\d+/i, label: "Command injection ($(id))" },
+    { payload: "`id`", detect: /uid=\d+/i, label: "Command injection (`id`)" },
+  ],
+  openredirect: [
+    { payload: "https://evil.com", detect: /location.*evil\.com/i, label: "Open redirect" },
+    { payload: "//evil.com", detect: /location.*evil\.com/i, label: "Open redirect (protocol-relative)" },
+  ],
+  headerinject: [
+    { payload: "test\r\nInjected-Header: true", detect: /Injected-Header/i, label: "CRLF / Header injection" },
+    { payload: "test%0d%0aInjected: true", detect: /Injected/i, label: "CRLF (URL-encoded)" },
+  ],
+};
+
+let scanRunning = false;
+let scanAbort = null;
+let scanFindings = [];
+
+async function scanStart() {
+  const url = document.getElementById("scan-url").value.trim();
+  if (!url) return;
+  const method = document.getElementById("scan-method").value;
+  const rawHeaders = document.getElementById("scan-headers").value;
+  const body = document.getElementById("scan-body").value;
+  const threads = parseInt(document.getElementById("scan-threads").value) || 3;
+
+  // Determine which modules are enabled
+  const modules = [];
+  if (document.getElementById("scan-sqli").checked) modules.push("sqli");
+  if (document.getElementById("scan-xss").checked) modules.push("xss");
+  if (document.getElementById("scan-pathtraversal").checked) modules.push("pathtraversal");
+  if (document.getElementById("scan-ssrf").checked) modules.push("ssrf");
+  if (document.getElementById("scan-ssti").checked) modules.push("ssti");
+  if (document.getElementById("scan-cmdi").checked) modules.push("cmdi");
+  if (document.getElementById("scan-openredirect").checked) modules.push("openredirect");
+  if (document.getElementById("scan-headerinject").checked) modules.push("headerinject");
+  if (!modules.length) { document.getElementById("scan-status").textContent = "Select at least one module"; return; }
+
+  // Identify injection points from body params and URL params
+  const injectionPoints = [];
+  const urlObj = new URL(url);
+  for (const [k] of urlObj.searchParams) injectionPoints.push({ location: "url-param", name: k });
+  if (body) {
+    for (const p of body.split("&")) {
+      const eq = p.indexOf("=");
+      if (eq > 0) injectionPoints.push({ location: "body-param", name: p.slice(0, eq) });
+    }
+  }
+  if (!injectionPoints.length) injectionPoints.push({ location: "body-append", name: "(body)" });
+
+  // Build payload queue
+  const queue = [];
+  for (const mod of modules) {
+    const payloads = SCAN_PAYLOADS[mod] || [];
+    for (const pl of payloads) {
+      for (const ip of injectionPoints) {
+        queue.push({ module: mod, payload: pl, injectionPoint: ip });
+      }
+    }
+  }
+
+  scanRunning = true;
+  scanAbort = new AbortController();
+  scanFindings = [];
+  document.getElementById("scan-start").disabled = true;
+  document.getElementById("scan-stop").disabled = false;
+  document.getElementById("scan-progress").classList.remove("hidden");
+  document.getElementById("scan-results-empty").classList.add("hidden");
+
+  let completed = 0;
+  const total = queue.length;
+
+  // Process queue with concurrency limit
+  async function processItem(item) {
+    if (!scanRunning) return;
+    const { module, payload, injectionPoint } = item;
+    let testUrl = url;
+    let testBody = body;
+    const pl = payload.oob ? payload.payload.replace("INTERACTSH_URL", oobUrl || "oob.test") : payload.payload;
+
+    if (injectionPoint.location === "url-param") {
+      const u = new URL(url);
+      u.searchParams.set(injectionPoint.name, pl);
+      testUrl = u.toString();
+    } else if (injectionPoint.location === "body-param") {
+      testBody = body.split("&").map(p => {
+        const eq = p.indexOf("=");
+        return eq > 0 && decodeURIComponent(p.slice(0, eq)) === injectionPoint.name ? `${p.slice(0, eq + 1)}${encodeURIComponent(pl)}` : p;
+      }).join("&");
+    } else {
+      testBody = (body ? body + "&" : "") + encodeURIComponent(pl);
+    }
+
+    try {
+      const t0 = Date.now();
+      const res = await bg({ type: "SEND_REQUEST", url: testUrl, method, rawHeaders, body: testBody || undefined });
+      const elapsed = Date.now() - t0;
+      if (!res) return;
+
+      let found = false;
+      const respText = (res.body || "") + "\n" + Object.entries(res.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+
+      if (payload.detect && payload.detect.test(respText)) found = true;
+      if (payload.timing && elapsed >= payload.timing) found = true;
+
+      if (found) {
+        scanFindings.push({
+          id: scanFindings.length + 1,
+          module,
+          severity: module === "sqli" || module === "cmdi" ? "high" : module === "xss" || module === "ssti" ? "medium" : "low",
+          type: payload.label,
+          param: injectionPoint.name,
+          payload: pl.slice(0, 60),
+          evidence: (respText.match(payload.detect) || [""])[0].slice(0, 80),
+        });
+        scanRenderFindings();
+      }
+    } catch {}
+
+    completed++;
+    document.getElementById("scan-progress-fill").style.width = `${(completed / total) * 100}%`;
+    document.getElementById("scan-progress-text").textContent = `${completed} / ${total}`;
+  }
+
+  // Run with concurrency
+  const running = [];
+  for (const item of queue) {
+    if (!scanRunning) break;
+    const p = processItem(item);
+    running.push(p);
+    if (running.length >= threads) { await Promise.race(running); running.splice(running.findIndex(r => r), 1); }
+  }
+  await Promise.all(running);
+
+  scanRunning = false;
+  document.getElementById("scan-start").disabled = false;
+  document.getElementById("scan-stop").disabled = true;
+  document.getElementById("scan-status").textContent = `Done \u2014 ${scanFindings.length} findings`;
+  scanRenderFindings();
+}
+
+function scanStop() {
+  scanRunning = false;
+  if (scanAbort) { scanAbort.abort(); scanAbort = null; }
+  document.getElementById("scan-start").disabled = false;
+  document.getElementById("scan-stop").disabled = true;
+}
+
+function scanRenderFindings() {
+  const tbody = document.getElementById("scan-results-tbody");
+  const empty = document.getElementById("scan-results-empty");
+  tbody.replaceChildren();
+  if (!scanFindings.length) { empty.classList.remove("hidden"); return; }
+  empty.classList.add("hidden");
+  for (const f of scanFindings) {
+    const tr = document.createElement("tr");
+    const sevCls = f.severity === "high" ? "hist-td-status-err" : f.severity === "medium" ? "hist-td-status-rdir" : "";
+    tr.appendChild(txt("td", "hist-td-num", String(f.id)));
+    tr.appendChild(txt("td", sevCls, f.severity.toUpperCase()));
+    tr.appendChild(txt("td", "", f.type));
+    tr.appendChild(txt("td", "", f.param));
+    tr.appendChild(txt("td", "", f.evidence));
+    tr.appendChild(txt("td", "", f.payload));
+    tbody.appendChild(tr);
+  }
+}
+
+function scanFromHistory() {
+  if (!historyData.length) return;
+  const e = historyData[historyData.length - 1];
+  document.getElementById("scan-url").value = e.url;
+  document.getElementById("scan-method").value = e.method || "GET";
+  document.getElementById("scan-headers").value = headersToRaw(e.headers || {});
+  document.getElementById("scan-body").value = e.body || "";
+}
+
+// ═══════════════════════════ INTERACTSH OOB ══════════════════════════════════
+
+let oobUrl = "";
+let oobToken = "";
+let oobCorrelationId = "";
+let oobPollTimer = null;
+
+async function oobRegister() {
+  const server = document.getElementById("oob-server").value.trim() || "oast.fun";
+  try {
+    // Generate a random correlation ID
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    oobCorrelationId = Array.from(arr, b => b.toString(16).padStart(2, "0")).join("").slice(0, 20);
+    oobUrl = `${oobCorrelationId}.${server}`;
+    document.getElementById("oob-url").value = oobUrl;
+    document.getElementById("oob-poll-status").textContent = "URL generated — use it in payloads, then poll for interactions";
+  } catch (e) {
+    document.getElementById("oob-poll-status").textContent = "Error: " + e.message;
+  }
+}
+
+function oobCopy() {
+  navigator.clipboard.writeText(oobUrl || "");
+}
+
+async function oobPollOnce() {
+  if (!oobUrl) { document.getElementById("oob-poll-status").textContent = "Generate a URL first"; return; }
+  const server = document.getElementById("oob-server").value.trim() || "oast.fun";
+  try {
+    const res = await fetch(`https://${server}/poll?id=${oobCorrelationId}&secret=`);
+    const data = await res.json();
+    if (data.data && data.data.length) {
+      const container = document.getElementById("oob-interactions");
+      document.getElementById("oob-empty").classList.add("hidden");
+      for (const interaction of data.data) {
+        const div = el("div", "oob-interaction");
+        const typeCls = interaction.protocol === "dns" ? "oob-type-dns" : interaction.protocol === "http" ? "oob-type-http" : "oob-type-smtp";
+        const typeSpan = txt("span", `oob-type ${typeCls}`, (interaction.protocol || "?").toUpperCase());
+        div.appendChild(typeSpan);
+        div.appendChild(document.createTextNode(`${interaction["remote-address"] || ""} — ${new Date(interaction.timestamp || 0).toLocaleString()}`));
+        if (interaction["raw-request"]) {
+          const pre = el("pre");
+          try { pre.textContent = atob(interaction["raw-request"]); } catch { pre.textContent = interaction["raw-request"]; }
+          pre.style.fontSize = "10px"; pre.style.marginTop = "4px"; pre.style.maxHeight = "100px"; pre.style.overflow = "auto";
+          div.appendChild(pre);
+        }
+        container.appendChild(div);
+      }
+      document.getElementById("oob-poll-status").textContent = `${data.data.length} new interaction(s)`;
+    } else {
+      document.getElementById("oob-poll-status").textContent = "No new interactions";
+    }
+  } catch (e) {
+    document.getElementById("oob-poll-status").textContent = "Poll error: " + e.message;
+  }
+}
+
+function oobStartAutoPoll() {
+  if (oobPollTimer) { clearInterval(oobPollTimer); oobPollTimer = null; return; }
+  oobPollTimer = setInterval(oobPollOnce, 10000);
+  oobPollOnce();
+}
+
+// ═══════════════════════════ INTRUDER: CLUSTER BOMB + PAYLOAD PROCESSING ════
+
+function intrProcessPayload(payload) {
+  const proc = document.getElementById("intr-proc").value;
+  const val = document.getElementById("intr-proc-val").value;
+  switch (proc) {
+    case "url-encode": return encodeURIComponent(payload);
+    case "url-decode": try { return decodeURIComponent(payload); } catch { return payload; }
+    case "base64-encode": try { return btoa(payload); } catch { return payload; }
+    case "base64-decode": try { return atob(payload); } catch { return payload; }
+    case "hex-encode": return Array.from(payload).map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+    case "md5": return md5(payload);
+    case "sha1": case "sha256": return payload; // async crypto not practical inline; use Decoder tab
+    case "lowercase": return payload.toLowerCase();
+    case "uppercase": return payload.toUpperCase();
+    case "prefix": return val + payload;
+    case "suffix": return payload + val;
+    default: return payload;
+  }
+}
+
+function intrGrepResult(respBody) {
+  const matchPattern = document.getElementById("intr-grep-match").value.trim();
+  const extractPattern = document.getElementById("intr-grep-extract").value.trim();
+  let grepMatch = false, grepExtract = "";
+  if (matchPattern) {
+    try { grepMatch = new RegExp(matchPattern, "i").test(respBody); } catch {}
+  }
+  if (extractPattern) {
+    try {
+      const m = respBody.match(new RegExp(extractPattern, "i"));
+      grepExtract = m ? (m[1] || m[0]) : "";
+    } catch {}
+  }
+  return { grepMatch, grepExtract };
+}
+
+// ═══════════════════════════ SESSION HANDLING ════════════════════════════════
+
+async function sessionCheckAndRenew(res) {
+  if (!settings?.sessionEnabled) return;
+  const detect = settings.sessionDetect || "status";
+  const match = settings.sessionMatch || "401";
+  let expired = false;
+
+  if (detect === "status" && String(res.status) === match) expired = true;
+  else if (detect === "body" && (res.body || "").includes(match)) expired = true;
+  else if (detect === "header") {
+    const allHdrs = Object.entries(res.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+    if (allHdrs.includes(match)) expired = true;
+  }
+
+  if (!expired) return;
+
+  // Replay login macro
+  const loginRes = await bg({
+    type: "SEND_REQUEST",
+    url: settings.sessionUrl,
+    method: settings.sessionMethod || "POST",
+    rawHeaders: "",
+    body: settings.sessionBody,
+  });
+  if (!loginRes) return;
+
+  // Extract new token
+  if (settings.sessionExtract === "cookie") {
+    const setCookie = Object.entries(loginRes.headers || {}).find(([k]) => k.toLowerCase() === "set-cookie")?.[1] || "";
+    const m = setCookie.match(new RegExp(`${settings.sessionTokenName}=([^;]+)`));
+    if (m) {
+      // Update the repeater/intruder cookie
+      const cookieHdr = `${settings.sessionTokenName}=${m[1]}`;
+      // Store for reuse
+      settings._lastSessionCookie = cookieHdr;
+    }
+  }
+}
+
 // ═══════════════════════════ INIT ════════════════════════════════════════════
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -6279,6 +6910,79 @@ document.addEventListener("DOMContentLoaded", () => {
       if (sel && sel._intrResult) pocLoadEntry(sel._intrResult);
     });
   });
+
+  // ── Response interception ───────────────────────────────────────────────
+  initBlock("resp-intercept", () => {
+    document.getElementById("resp-ed-back").addEventListener("click", closeRespEditor);
+    document.getElementById("resp-ed-forward").addEventListener("click", forwardResp);
+    document.getElementById("resp-ed-drop").addEventListener("click", dropResp);
+    startRespPoll();
+  });
+
+  // ── Copy as / Render ──────────────────────────────────────────────────
+  initBlock("copy-render", () => {
+    document.getElementById("hist-detail-curl").addEventListener("click", () => { if (histDetailEntry) copyAsCurl(histDetailEntry); });
+    document.getElementById("hist-detail-fetch").addEventListener("click", () => { if (histDetailEntry) copyAsFetch(histDetailEntry); });
+    document.getElementById("hist-detail-python").addEventListener("click", () => { if (histDetailEntry) copyAsPython(histDetailEntry); });
+    document.getElementById("hist-detail-render").addEventListener("click", () => { if (histDetailEntry) renderResponse(histDetailEntry); });
+  });
+
+  // ── Active Scanner ────────────────────────────────────────────────────
+  initBlock("active-scanner", () => {
+    document.getElementById("scan-start").addEventListener("click", scanStart);
+    document.getElementById("scan-stop").addEventListener("click", scanStop);
+    document.getElementById("scan-from-hist").addEventListener("click", scanFromHistory);
+  });
+
+  // ── Interactsh ────────────────────────────────────────────────────────
+  initBlock("interactsh", () => {
+    document.getElementById("oob-register").addEventListener("click", oobRegister);
+    document.getElementById("oob-copy").addEventListener("click", oobCopy);
+    document.getElementById("oob-poll").addEventListener("click", oobPollOnce);
+    document.getElementById("oob-auto-poll").addEventListener("change", (e) => {
+      if (e.target.checked) oobStartAutoPoll(); else { clearInterval(oobPollTimer); oobPollTimer = null; }
+    });
+  });
+
+  // ── Intruder payload processing ───────────────────────────────────────
+  initBlock("intr-processing", () => {
+    document.getElementById("intr-proc").addEventListener("change", () => {
+      const v = document.getElementById("intr-proc").value;
+      document.getElementById("intr-proc-val").style.display = (v === "prefix" || v === "suffix") ? "" : "none";
+    });
+  });
+
+  // ── WS Replay ─────────────────────────────────────────────────────────
+  initBlock("ws-replay", () => {
+    document.getElementById("ws-detail-replay").addEventListener("click", () => {
+      if (!wsDetailFrame) return;
+      // Open the WS URL in Repeater as a regular request (conceptual — WS replay needs a WS client)
+      sendToRepeater({ method: "GET", url: wsDetailFrame.url.replace(/^ws/, "http"), headers: { Upgrade: "websocket", Connection: "Upgrade" }, body: wsDetailFrame.data });
+    });
+  });
+
+  // ── Theme ─────────────────────────────────────────────────────────────
+  initBlock("theme", () => {
+    chrome.storage.local.get("voidTheme", r => { if (r.voidTheme) { applyTheme(r.voidTheme); document.getElementById("cfg-theme").value = r.voidTheme; } });
+    document.getElementById("cfg-theme").addEventListener("change", e => {
+      applyTheme(e.target.value);
+      chrome.storage.local.set({ voidTheme: e.target.value });
+    });
+  });
+
+  // ── HAR export + scope auto-detect ────────────────────────────────────
+  initBlock("har-scope", () => {
+    document.getElementById("cfg-export-har").addEventListener("click", exportHar);
+    document.getElementById("cfg-scope-auto").addEventListener("click", autoDetectScope);
+  });
+
+  // ── Session handling settings ─────────────────────────────────────────
+  initBlock("session-handling", () => {
+    // These are saved/loaded with the main settings
+  });
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────
+  initBlock("shortcuts", () => { initKeyboardShortcuts(); });
 
   // ── Sequencer ──────────────────────────────────────────────────────────
   initBlock("sequencer", () => {

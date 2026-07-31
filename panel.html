@@ -17,7 +17,7 @@
     <button class="tab"        data-tab="ws"       >WebSocket <span class="bdg" id="bdg-ws">0</span></button>
     <button class="tab"        data-tab="repeater" >Repeater <span class="bdg hidden" id="bdg-repeater">0</span></button>
     <button class="tab"        data-tab="intruder" >Intruder <span class="bdg hidden" id="bdg-intruder">0</span></button>
-    <button class="tab"        data-tab="probe"    >Probe <span class="bdg" id="bdg-probe">0</span></button>
+    <button class="tab"        data-tab="probe"    >Scan <span class="bdg" id="bdg-probe">0</span></button>
     <button class="tab"        data-tab="logger"    >Logger <span class="bdg" id="bdg-logger">0</span></button>
     <button class="tab"        data-tab="containers">Containers</button>
     <button class="tab"        data-tab="headers"  >Headers</button>
@@ -272,7 +272,7 @@
       </div>
       <!-- Resize handle -->
       <div class="ic-resizer" id="ic-resizer"></div>
-      <!-- Right: Inline editor -->
+      <!-- Right: Inline editor (request) -->
       <div id="ic-editor" class="ic-editor hidden">
         <div class="editor-topbar">
           <button id="ed-back"    class="btn btn-sm btn-ghost">✕</button>
@@ -290,6 +290,27 @@
           <div class="split-pane">
             <div class="pane-label">Body</div>
             <textarea id="ed-body" class="raw-ta" spellcheck="false" placeholder="(empty)"></textarea>
+          </div>
+        </div>
+      </div>
+      <!-- Right: Response editor (for intercepted responses) -->
+      <div id="ic-resp-editor" class="ic-editor hidden">
+        <div class="editor-topbar">
+          <button id="resp-ed-back" class="btn btn-sm btn-ghost">✕</button>
+          <span class="resp-ed-label">RESPONSE</span>
+          <input id="resp-ed-status" class="settings-inp settings-inp-sm" type="text" placeholder="200" style="width:50px" spellcheck="false">
+          <input id="resp-ed-url" class="url-inp" type="text" readonly style="opacity:.6">
+          <button id="resp-ed-forward" class="btn btn-sm btn-success">Forward →</button>
+          <button id="resp-ed-drop" class="btn btn-sm btn-danger">Drop ✕</button>
+        </div>
+        <div class="split-v">
+          <div class="split-pane">
+            <div class="pane-label">Response Headers</div>
+            <textarea id="resp-ed-headers" class="raw-ta" spellcheck="false"></textarea>
+          </div>
+          <div class="split-pane">
+            <div class="pane-label">Response Body</div>
+            <textarea id="resp-ed-body" class="raw-ta" spellcheck="false" placeholder="(empty)"></textarea>
           </div>
         </div>
       </div>
@@ -373,6 +394,10 @@
           <button id="hist-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">↗ Open</button>
           <button id="hist-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
           <button id="hist-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">→ Notes</button>
+          <button id="hist-detail-render" class="btn btn-sm btn-ghost" title="Render response HTML">Render</button>
+          <button id="hist-detail-curl" class="btn btn-sm btn-ghost" title="Copy as curl command">curl</button>
+          <button id="hist-detail-fetch" class="btn btn-sm btn-ghost" title="Copy as fetch()">fetch</button>
+          <button id="hist-detail-python" class="btn btn-sm btn-ghost" title="Copy as Python requests">py</button>
         </div>
         <div class="reflect-bar" id="hist-reflect-bar">
           <label class="reflect-bar-toggle" title="Highlight values reflected from the request into the response — one colour per distinct value">
@@ -399,6 +424,7 @@
                 <span id="hist-reflect-badge" class="reflect-badge hidden">Reflections</span>
               </div>
               <div id="hist-resp-pane" class="hist-sub-pane"><pre id="hist-resp-pre" class="raw-pre"></pre></div>
+              <div id="hist-render-pane" class="hist-sub-pane hidden"><iframe id="hist-render-frame" class="render-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer"></iframe></div>
             <div class="detail-search-bar">
               <input id="hist-resp-search" type="text" class="detail-search-inp" placeholder="Search response…" spellcheck="false">
               <span id="hist-resp-search-count" class="detail-search-count"></span>
@@ -461,6 +487,7 @@
           <span id="ws-detail-title" class="hist-detail-title"></span>
           <button id="ws-detail-cmp-l" class="btn btn-sm btn-ghost" title="Send to Comparer Left">→ Cmp L</button>
           <button id="ws-detail-cmp-r" class="btn btn-sm btn-ghost" title="Send to Comparer Right">→ Cmp R</button>
+          <button id="ws-detail-replay" class="btn btn-sm btn-ghost" title="Replay this message to the same WebSocket URL">Replay</button>
         </div>
         <div class="ws-detail-body">
           <pre id="ws-detail-pre" class="raw-pre"></pre>
@@ -573,6 +600,7 @@
               <option value="sniper">Sniper</option>
               <option value="battering-ram">Battering Ram</option>
               <option value="pitchfork">Pitchfork</option>
+              <option value="cluster-bomb">Cluster Bomb</option>
             </select>
             <label class="settings-label-sm">Threads</label>
             <input id="intr-threads" type="number" class="settings-inp settings-inp-sm" value="1" min="1" max="20">
@@ -586,6 +614,33 @@
           </div>
           <textarea id="intr-payloads" class="raw-ta intr-payload-ta" spellcheck="false"
                     placeholder="admin&#10;test&#10;guest&#10;{{0-100}}&#10;{{file:wordlist.txt}}"></textarea>
+
+          <div class="pane-label" style="margin-top:4px">PAYLOAD PROCESSING</div>
+          <div class="intr-processing">
+            <select id="intr-proc" class="filter-sel">
+              <option value="">None</option>
+              <option value="url-encode">URL encode</option>
+              <option value="url-decode">URL decode</option>
+              <option value="base64-encode">Base64 encode</option>
+              <option value="base64-decode">Base64 decode</option>
+              <option value="hex-encode">Hex encode</option>
+              <option value="md5">MD5 hash</option>
+              <option value="sha1">SHA-1 hash</option>
+              <option value="sha256">SHA-256 hash</option>
+              <option value="lowercase">Lowercase</option>
+              <option value="uppercase">Uppercase</option>
+              <option value="prefix">Add prefix</option>
+              <option value="suffix">Add suffix</option>
+            </select>
+            <input id="intr-proc-val" type="text" class="settings-inp" placeholder="prefix/suffix value" spellcheck="false" style="width:120px;display:none">
+          </div>
+          <div class="pane-label" style="margin-top:4px">GREP</div>
+          <div class="intr-grep-bar">
+            <label class="settings-label-sm">Match</label>
+            <input id="intr-grep-match" type="text" class="settings-inp" placeholder="Regex to flag in responses" spellcheck="false" style="flex:1">
+            <label class="settings-label-sm">Extract</label>
+            <input id="intr-grep-extract" type="text" class="settings-inp" placeholder="Regex capture group" spellcheck="false" style="flex:1">
+          </div>
 
           <div class="intr-toolbar">
             <label class="rep-autocookie"><input type="checkbox" id="intr-autocookie"> Cookie sync</label>
@@ -607,6 +662,8 @@
                 <th class="hist-th-sortable colfilter-th" data-intrsort="status" data-colfilter="status" style="width:48px">Status <span class="colfilter-ico">▼</span></th>
                 <th class="hist-th-sortable" data-intrsort="length" style="width:56px">Length</th>
                 <th class="hist-th-sortable" data-intrsort="elapsed" style="width:48px">Ms</th>
+                <th class="hist-th-sortable" data-intrsort="grep" style="width:40px">Grep</th>
+                <th class="hist-th-sortable" data-intrsort="extract" style="width:120px">Extract</th>
                 <th>Response (preview)</th>
               </tr>
             </thead>
@@ -702,6 +759,8 @@
     <div class="probe-sub-bar">
       <button class="sub-tab active" data-probesub="findings">Findings</button>
       <button class="sub-tab" data-probesub="testing">Active Testing</button>
+      <button class="sub-tab" data-probesub="activescan">Active Scan</button>
+      <button class="sub-tab" data-probesub="interactsh">Interactsh</button>
     </div>
 
     <!-- ════════ FINDINGS SUB-PANEL ════════ -->
@@ -883,6 +942,102 @@
           <label class="probe-toggle"><input type="checkbox" id="probe-autoscroll" checked> Auto-scroll</label>
         </div>
         <div id="probe-console" class="probe-console"></div>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <!-- ════════ ACTIVE SCAN SUB-PANEL ════════ -->
+    <div id="probe-activescan" class="probe-sub-panel hidden">
+      <div class="scan-config">
+        <div class="settings-section">
+          <div class="settings-section-title">Active Vulnerability Scanner</div>
+          <div class="settings-section-desc">Select a request from History, configure scan parameters, and launch active probes for common vulnerability classes.</div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Target URL</label>
+            <input id="scan-url" type="text" class="settings-inp" placeholder="Select a request from History or paste URL" spellcheck="false">
+          </div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Method</label>
+            <select id="scan-method" class="method-sel" style="width:80px">
+              <option>GET</option><option selected>POST</option><option>PUT</option>
+            </select>
+            <button id="scan-from-hist" class="btn btn-xs btn-ghost">From History</button>
+          </div>
+          <div class="settings-row"><label class="settings-label-sm">Headers</label></div>
+          <textarea id="scan-headers" class="raw-ta settings-ta" rows="2" spellcheck="false" placeholder="Cookie: session=abc"></textarea>
+          <div class="settings-row"><label class="settings-label-sm">Body</label></div>
+          <textarea id="scan-body" class="raw-ta settings-ta" rows="2" spellcheck="false" placeholder="user=admin&pass=test"></textarea>
+          <div class="pane-label" style="margin-top:6px">SCAN MODULES</div>
+          <div class="poc-evasions">
+            <label class="probe-toggle"><input type="checkbox" id="scan-sqli" checked> SQL Injection (error + blind)</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-xss" checked> Reflected XSS</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-pathtraversal" checked> Path Traversal</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-ssrf"> SSRF (requires Interactsh)</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-ssti"> Server-Side Template Injection</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-cmdi"> Command Injection</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-openredirect"> Open Redirect</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-headerinject"> Header Injection / CRLF</label>
+          </div>
+          <div class="settings-row" style="margin-top:6px">
+            <label class="settings-label-sm">Threads</label>
+            <input id="scan-threads" type="number" class="settings-inp settings-inp-sm" value="3" min="1" max="10">
+          </div>
+          <div class="settings-actions">
+            <button id="scan-start" class="btn btn-accent">Start Scan</button>
+            <button id="scan-stop" class="btn btn-sm btn-danger" disabled>Stop</button>
+            <span id="scan-status" class="settings-status"></span>
+          </div>
+          <div id="scan-progress" class="crawl-bar hidden">
+            <div class="crawl-progress-wrap"><div id="scan-progress-fill" class="crawl-fill" style="width:0%"></div></div>
+            <span id="scan-progress-text" class="crawl-status-text">0 / 0</span>
+          </div>
+        </div>
+      </div>
+      <!-- Scan results -->
+      <div id="scan-results-wrap" class="scan-results-wrap">
+        <div class="hist-table-wrap">
+          <table class="hist-table" id="scan-results-table">
+            <thead>
+              <tr>
+                <th style="width:30px">#</th>
+                <th style="width:70px">Severity</th>
+                <th style="width:100px">Type</th>
+                <th style="width:140px">Parameter</th>
+                <th>Evidence</th>
+                <th style="width:80px">Payload</th>
+              </tr>
+            </thead>
+            <tbody id="scan-results-tbody"></tbody>
+          </table>
+        </div>
+        <div id="scan-results-empty" class="empty">No vulnerabilities found yet. Configure and start a scan.</div>
+      </div>
+    </div>
+
+    <!-- ════════ INTERACTSH SUB-PANEL ════════ -->
+    <div id="probe-interactsh" class="probe-sub-panel hidden">
+      <div class="settings-section" style="padding:10px">
+        <div class="settings-section-title">Interactsh — Out-of-Band Testing</div>
+        <div class="settings-section-desc">Generate unique OOB callback URLs for blind SSRF, blind XXE, blind SQLi detection. Uses the public interact.sh service.</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Server</label>
+          <input id="oob-server" type="text" class="settings-inp" value="oast.fun" spellcheck="false">
+          <button id="oob-register" class="btn btn-sm btn-accent">Generate URL</button>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Your OOB URL</label>
+          <input id="oob-url" type="text" class="settings-inp" readonly placeholder="Click Generate to get a URL" spellcheck="false">
+          <button id="oob-copy" class="btn btn-xs btn-ghost">Copy</button>
+        </div>
+        <div class="settings-row">
+          <button id="oob-poll" class="btn btn-sm btn-ghost">Poll for interactions</button>
+          <label class="probe-toggle"><input type="checkbox" id="oob-auto-poll"> Auto-poll (10s)</label>
+          <span id="oob-poll-status" class="settings-status"></span>
+        </div>
+        <div class="pane-label" style="margin-top:8px">INTERACTIONS</div>
+        <div id="oob-interactions" class="oob-interactions">
+          <div id="oob-empty" class="empty">No interactions received yet.</div>
+        </div>
       </div>
     </div>
 
@@ -1712,6 +1867,72 @@
         <div class="settings-row">
           <label class="settings-label-sm">Timeout (ms)</label>
           <input id="cfg-timeout" type="text" class="settings-inp settings-inp-sm" value="30000" spellcheck="false">
+        </div>
+      </div>
+
+      <!-- ── Upstream Proxy ──────────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Upstream Proxy</div>
+        <div class="settings-section-desc">Chain requests through a corporate or SOCKS proxy (applies to void-proxy-server.js).</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Proxy URL</label>
+          <input id="cfg-upstream-proxy" type="text" class="settings-inp" placeholder="http://proxy.corp:8080 or socks5://127.0.0.1:1080" spellcheck="false">
+        </div>
+      </div>
+
+      <!-- ── Session Handling ──────────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Session Handling</div>
+        <div class="settings-section-desc">Define a login macro that auto-replays when a session expires. Void detects expiry by status code or response content match.</div>
+        <div class="settings-row">
+          <label class="settings-label"><input type="checkbox" id="cfg-session-enabled"> Enable session auto-renewal</label>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Detect expiry by</label>
+          <select id="cfg-session-detect" class="filter-sel">
+            <option value="status">Status code</option>
+            <option value="body">Response body contains</option>
+            <option value="header">Response header contains</option>
+          </select>
+          <input id="cfg-session-match" type="text" class="settings-inp" placeholder="401 or 'login_required'" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row"><label class="settings-label-sm">Login URL</label></div>
+        <input id="cfg-session-url" type="text" class="settings-inp" placeholder="https://target.com/login" spellcheck="false">
+        <div class="settings-row">
+          <label class="settings-label-sm">Method</label>
+          <select id="cfg-session-method" class="filter-sel" style="width:80px"><option>GET</option><option selected>POST</option></select>
+        </div>
+        <div class="settings-row"><label class="settings-label-sm">Login body</label></div>
+        <textarea id="cfg-session-body" class="raw-ta settings-ta" rows="2" spellcheck="false" placeholder="username=admin&password=secret"></textarea>
+        <div class="settings-row"><label class="settings-label-sm">Extract token</label></div>
+        <div class="settings-row">
+          <select id="cfg-session-extract" class="filter-sel">
+            <option value="cookie">Set-Cookie name</option>
+            <option value="header">Response header</option>
+            <option value="body-regex">Body regex</option>
+          </select>
+          <input id="cfg-session-token-name" type="text" class="settings-inp" placeholder="session_id" spellcheck="false" style="flex:1">
+        </div>
+      </div>
+
+      <!-- ── Appearance ──────────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Appearance</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Theme</label>
+          <select id="cfg-theme" class="filter-sel">
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- ── Export ──────────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Export</div>
+        <div class="settings-actions">
+          <button id="cfg-export-har" class="btn btn-sm btn-ghost">Export HAR 1.2</button>
+          <button id="cfg-scope-auto" class="btn btn-sm btn-ghost" title="Auto-detect scope from current tab">Auto-detect scope</button>
         </div>
       </div>
 

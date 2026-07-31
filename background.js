@@ -306,6 +306,7 @@ function getTab(id) {
       historyMap:   {},   // Network.requestId → history index (for matching responses)
       wsConnections: {},  // requestId → { url, status, time }
       wsFrames:      [],  // { requestId, url, direction, opcode, data, length, time, mask }
+      pendingResponses: {},  // requestId → paused response for editing
     });
   }
   return tabs.get(id);
@@ -431,6 +432,60 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
   }
 
   if (method === "Fetch.requestPaused") {
+    // ── Response-stage pause: the request already went out, response came back ──
+    if (params.responseStatusCode !== undefined) {
+      if (!t.intercepting) {
+        // Apply response Match & Replace then continue
+        const respHdrs = {};
+        (params.responseHeaders || []).forEach(h => { respHdrs[h.name] = h.value; });
+        // Fetch the body so we can apply M&R
+        chrome.debugger.sendCommand({ tabId: src.tabId }, "Fetch.getResponseBody", { requestId: params.requestId }, (bodyRes) => {
+          void chrome.runtime.lastError;
+          let respBody = "";
+          if (bodyRes) {
+            respBody = bodyRes.base64Encoded ? atob(bodyRes.body || "") : (bodyRes.body || "");
+          }
+          const mr = applyMatchReplace(params.request?.url || "", respHdrs, respBody, "resp");
+          const modified = JSON.stringify(mr.headers) !== JSON.stringify(respHdrs) || mr.body !== respBody;
+          if (modified) {
+            const encBody = btoa(unescape(encodeURIComponent(mr.body)));
+            chrome.debugger.sendCommand({ tabId: src.tabId }, "Fetch.fulfillRequest", {
+              requestId: params.requestId,
+              responseCode: params.responseStatusCode,
+              responseHeaders: Object.entries(mr.headers).map(([name, value]) => ({ name, value: String(value) })),
+              body: encBody,
+            }, () => { void chrome.runtime.lastError; });
+          } else {
+            chrome.debugger.sendCommand({ tabId: src.tabId }, "Fetch.continueResponse", { requestId: params.requestId }, () => { void chrome.runtime.lastError; });
+          }
+        });
+        return;
+      }
+      // Intercepting: hold the response for user editing
+      chrome.debugger.sendCommand({ tabId: src.tabId }, "Fetch.getResponseBody", { requestId: params.requestId }, (bodyRes) => {
+        void chrome.runtime.lastError;
+        let respBody = "";
+        if (bodyRes) {
+          respBody = bodyRes.base64Encoded ? atob(bodyRes.body || "") : (bodyRes.body || "");
+        }
+        const respHdrs = {};
+        (params.responseHeaders || []).forEach(h => { respHdrs[h.name] = h.value; });
+        t.pendingResponses = t.pendingResponses || {};
+        t.pendingResponses[params.requestId] = {
+          requestId:    params.requestId,
+          url:          params.request?.url || "",
+          status:       params.responseStatusCode,
+          statusText:   params.responseStatusText || "",
+          headers:      respHdrs,
+          body:         respBody,
+          resourceType: params.resourceType || "other",
+          _isResponse:  true,
+        };
+      });
+      return;
+    }
+
+    // ── Request-stage pause ──────────────────────────────────────────────
     const reqUrl = params.request.url;
     const reqHeaders = params.request.headers || {};
     const reqBody = params.request.postData || "";
@@ -653,6 +708,7 @@ const ALLOWED = new Set([
   "RESTORE_HISTORY","RESTORE_ENDPOINTS",
   "CNT_LAUNCH","CNT_AUTO_EXPORT","GET_EXT_PATH","PROXY_TXN",
   "LOOKUP","CRAWL_START","CRAWL_STOP","UPDATE_SETTINGS","GET_COOKIES","GET_WS_HISTORY",
+  "GET_INTERCEPTED_RESPONSES","FORWARD_RESPONSE","DROP_RESPONSE",
   "PROBE_INJECT","PROBE_CMD","PROBE_STATUS","PROBE_FINDINGS",
 ]);
 
@@ -1127,7 +1183,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         chrome.debugger.sendCommand({ tabId }, "Network.enable", {}, () => {
           void chrome.runtime.lastError;
           chrome.debugger.sendCommand({ tabId }, "Fetch.enable", {
-            patterns: [{ urlPattern: "*", requestStage: "Request" }],
+            patterns: [
+              { urlPattern: "*", requestStage: "Request" },
+              { urlPattern: "*", requestStage: "Response" },
+            ],
           }, () => {
             if (chrome.runtime.lastError) {
               sendResponse({ ok: false, error: chrome.runtime.lastError.message });
@@ -1168,6 +1227,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
       });
       t.pending = {};
+      // Release pending responses too
+      Object.keys(t.pendingResponses || {}).forEach(id => {
+        chrome.debugger.sendCommand({ tabId }, "Fetch.continueResponse", { requestId: id }, () => {
+          void chrome.runtime.lastError;
+        });
+      });
+      t.pendingResponses = {};
       chrome.debugger.sendCommand({ tabId }, "Fetch.disable", {}, () => {
         void chrome.runtime.lastError;
         sendResponse({ ok: true });
@@ -1211,6 +1277,51 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         { requestId, errorReason: "BlockedByClient" }, () => {
           void chrome.runtime.lastError;
           delete t.pending[requestId];
+          sendResponse({ ok: true });
+        });
+      return true;
+    }
+
+    // ── Response interception ──────────────────────────────────────────────
+    case "GET_INTERCEPTED_RESPONSES": {
+      if (!tabId) { sendResponse({ responses: [] }); break; }
+      const t = getTab(tabId);
+      sendResponse({ responses: Object.values(t.pendingResponses || {}) });
+      break;
+    }
+
+    case "FORWARD_RESPONSE": {
+      if (!tabId) { sendResponse({ ok: false }); break; }
+      const t = getTab(tabId);
+      const { requestId, overrides } = msg;
+      const pr = (t.pendingResponses || {})[requestId];
+      if (!pr) { sendResponse({ ok: false, error: "not found" }); break; }
+      const status = overrides?.status ?? pr.status;
+      const hdrs = overrides?.headers ?? pr.headers;
+      const body = overrides?.body ?? pr.body;
+      let encBody;
+      try { encBody = btoa(unescape(encodeURIComponent(body))); } catch { encBody = btoa(body || ""); }
+      chrome.debugger.sendCommand({ tabId }, "Fetch.fulfillRequest", {
+        requestId,
+        responseCode: status,
+        responseHeaders: Object.entries(hdrs).map(([name, value]) => ({ name, value: String(value) })),
+        body: encBody,
+      }, () => {
+        void chrome.runtime.lastError;
+        delete t.pendingResponses[requestId];
+        sendResponse({ ok: true });
+      });
+      return true;
+    }
+
+    case "DROP_RESPONSE": {
+      if (!tabId) { sendResponse({ ok: false }); break; }
+      const t = getTab(tabId);
+      const { requestId } = msg;
+      chrome.debugger.sendCommand({ tabId }, "Fetch.failRequest",
+        { requestId, errorReason: "BlockedByClient" }, () => {
+          void chrome.runtime.lastError;
+          delete (t.pendingResponses || {})[requestId];
           sendResponse({ ok: true });
         });
       return true;
