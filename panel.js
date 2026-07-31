@@ -7435,13 +7435,24 @@ document.addEventListener("DOMContentLoaded", () => {
   // JA3 Fingerprint
   document.getElementById("cfg-ja3-fetch").addEventListener("click", async () => {
     document.getElementById("cfg-ja3-status").textContent = "Fetching…";
-    const res = await bg({ type: "FETCH_JA3" });
-    if (!res || !res.ok) {
-      document.getElementById("cfg-ja3-status").textContent = "Error: " + (res?.error || "fetch failed");
-      return;
+    let tls = {};
+    try {
+      // Try direct fetch first (CSP allows https:)
+      const resp = await fetch("https://tls.peet.ws/api/all");
+      const d = await resp.json();
+      tls = d.tls || {};
+    } catch {
+      // Fallback: fetch via background service worker
+      try {
+        await wakeSW();
+        const res = await bg({ type: "FETCH_JA3" }, 5);
+        if (res?.ok) tls = res.data?.tls || {};
+        else throw new Error(res?.error || "SW fetch failed");
+      } catch (e2) {
+        document.getElementById("cfg-ja3-status").textContent = "Error: " + e2.message;
+        return;
+      }
     }
-    const d = res.data;
-    const tls = d.tls || {};
     document.getElementById("cfg-ja3-hash").value = tls.ja3_hash || "—";
     document.getElementById("cfg-ja4").value = tls.ja4 || "—";
     document.getElementById("cfg-tls-ver").value = tls.tls_version_negotiated || "—";
