@@ -523,14 +523,6 @@
   <!-- ═══════════════════════════ REPEATER ═══════════════════════════════════ -->
   <div id="tab-repeater" class="tab-panel hidden">
 
-    <!-- Global toolbar: Compare toggle + Diff -->
-    <div class="rep-global-bar">
-      <button id="rep-compare-toggle" class="btn btn-xs btn-ghost" title="Toggle second Repeater for comparison">Compare</button>
-      <button id="rep-diff" class="btn btn-xs btn-accent hidden">Diff</button>
-      <label class="rep-autocookie hidden" id="rep-diff-case-wrap"><input type="checkbox" id="cmp-ignore-case"><span class="toggle-track"></span> Case-insensitive</label>
-      <span id="rep-diff-status" class="settings-status"></span>
-    </div>
-
     <!-- Side-by-side container -->
     <div class="rep-dual">
 
@@ -553,6 +545,10 @@
           <button id="rep-to-notes" class="btn btn-xs btn-ghost">→ Notes</button>
           <button id="rep-open" class="btn btn-xs btn-ghost">↗</button>
           <label class="rep-autocookie"><input type="checkbox" id="rep-autocookie"><span class="toggle-track"></span> Cookie sync</label>
+          <button id="rep-compare-toggle" class="btn btn-xs btn-ghost" title="Toggle second Repeater for comparison">Compare</button>
+          <button id="rep-diff" class="btn btn-xs btn-accent hidden">Diff</button>
+          <label class="rep-autocookie hidden" id="rep-diff-case-wrap"><input type="checkbox" id="cmp-ignore-case"><span class="toggle-track"></span> Ignore case</label>
+          <span id="rep-diff-status" class="settings-status"></span>
         </div>
         <input id="rep-url" type="hidden">
         <div id="rep-target-bar" class="rep-target-bar hidden">
