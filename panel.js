@@ -1163,6 +1163,15 @@ function openHistDetail(entry) {
   document.getElementById("hist-req-pre").textContent  = rawRequestText(entry);
   document.getElementById("hist-resp-pre").textContent = rawResponseText(entry);
 
+  // Reset render view when switching entries
+  const renderPane = document.getElementById("hist-render-pane");
+  const respPane = document.getElementById("hist-resp-pane");
+  if (renderPane && !renderPane.classList.contains("hidden")) {
+    renderPane.classList.add("hidden");
+    respPane.classList.remove("hidden");
+    document.getElementById("hist-render-frame").srcdoc = "";
+  }
+
   detail.classList.remove("hidden");
   detail.classList.add("visible");
   document.getElementById("hist-resizer").classList.add("visible");
@@ -7106,10 +7115,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ── Copy as / Render ──────────────────────────────────────────────────
   initBlock("copy-render", () => {
-    document.getElementById("hist-detail-curl").addEventListener("click", () => { if (histDetailEntry) copyAsCurl(histDetailEntry); });
-    document.getElementById("hist-detail-fetch").addEventListener("click", () => { if (histDetailEntry) copyAsFetch(histDetailEntry); });
-    document.getElementById("hist-detail-python").addEventListener("click", () => { if (histDetailEntry) copyAsPython(histDetailEntry); });
-    document.getElementById("hist-detail-render").addEventListener("click", () => { if (histDetailEntry) renderResponse(histDetailEntry); });
+    // Helper: wire up action-bar buttons for a detail pane
+    function wireActionBar(prefix, getEntry) {
+      const curl = document.getElementById(prefix + "-detail-curl") || document.getElementById(prefix + "-curl");
+      const fetch_ = document.getElementById(prefix + "-detail-fetch") || document.getElementById(prefix + "-fetch");
+      const py = document.getElementById(prefix + "-detail-python") || document.getElementById(prefix + "-python");
+      const render = document.getElementById(prefix + "-detail-render") || document.getElementById(prefix + "-render");
+      if (curl) curl.addEventListener("click", () => { const e = getEntry(); if (e) copyAsCurl(e); });
+      if (fetch_) fetch_.addEventListener("click", () => { const e = getEntry(); if (e) copyAsFetch(e); });
+      if (py) py.addEventListener("click", () => { const e = getEntry(); if (e) copyAsPython(e); });
+      if (render) render.addEventListener("click", () => { const e = getEntry(); if (e) renderResponse(e); });
+    }
+    wireActionBar("hist", () => histDetailEntry);
+    wireActionBar("log", () => logDetailEntry);
+    wireActionBar("sens", () => sensDetailEntry);
+    wireActionBar("tgt", () => tgtDetailEntry);
+    wireActionBar("ep", () => { if (!epDetailEntry) return null; return historyData.find(h => h.url === epDetailEntry.url) || epDetailEntry; });
+    wireActionBar("intr", () => {
+      const sel = document.querySelector("#intr-results tr.hist-selected");
+      return sel?._intrResult || null;
+    });
   });
 
   // ── Active Scanner ────────────────────────────────────────────────────

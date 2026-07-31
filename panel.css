@@ -2379,6 +2379,17 @@ body {
 
 /* ── Response editor label ──────────────────────────────────────────── */
 .resp-ed-label { font-weight: 600; font-size: 11px; color: var(--yellow); margin-right: 4px; }
+
+/* ── Detail action bar (bottom of every detail pane) ────────────────── */
+.detail-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
 .method-pill.m-resp { background: rgba(232,168,56,.18); color: #e8a838; }
 
 /* ── Intruder processing + grep ─────────────────────────────────────── */
