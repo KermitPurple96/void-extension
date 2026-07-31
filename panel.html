@@ -646,10 +646,22 @@
           <div class="settings-row">
             <label class="settings-label-sm">Attack</label>
             <select id="intr-attack" class="filter-sel">
-              <option value="sniper">Sniper</option>
-              <option value="battering-ram">Battering Ram</option>
-              <option value="pitchfork">Pitchfork</option>
-              <option value="cluster-bomb">Cluster Bomb</option>
+              <optgroup label="Fuzzing">
+                <option value="sniper">Sniper</option>
+                <option value="battering-ram">Battering Ram</option>
+                <option value="pitchfork">Pitchfork</option>
+                <option value="cluster-bomb">Cluster Bomb</option>
+              </optgroup>
+              <optgroup label="Specialized">
+                <option value="auth-idor">Auth / IDOR Tester</option>
+                <option value="race">Race Condition</option>
+                <option value="param-miner">Param Miner</option>
+                <option value="jwt-attack">JWT Attacker</option>
+                <option value="cors-scan">CORS Scanner</option>
+                <option value="smuggling">Request Smuggling</option>
+                <option value="graphql">GraphQL Explorer</option>
+                <option value="upload-scan">Upload Scanner</option>
+              </optgroup>
             </select>
             <label class="settings-label-sm">Threads</label>
             <input id="intr-threads" type="number" class="settings-inp settings-inp-sm" value="1" min="1" max="20">
@@ -691,10 +703,120 @@
             <input id="intr-grep-extract" type="text" class="settings-inp" placeholder="Regex capture group" spellcheck="false" style="flex:1">
           </div>
 
+          <!-- Specialized attack configs (shown based on selected mode) -->
+          <div id="intr-spec-config" class="intr-spec-config hidden">
+            <!-- Auth/IDOR -->
+            <div id="intr-cfg-auth" class="intr-spec hidden">
+              <div class="pane-label">AUTH / IDOR CONFIG</div>
+              <div class="settings-row">
+                <label class="settings-label-sm">User A cookies</label>
+                <input id="intr-auth-a" type="text" class="settings-inp" placeholder="session=user1_token" spellcheck="false">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label-sm">User B cookies</label>
+                <input id="intr-auth-b" type="text" class="settings-inp" placeholder="session=user2_token" spellcheck="false">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label-sm">Unauthenticated</label>
+                <label class="rep-autocookie"><input type="checkbox" id="intr-auth-unauth"><span class="toggle-track"></span> Also test without cookies</label>
+              </div>
+            </div>
+            <!-- Race Condition -->
+            <div id="intr-cfg-race" class="intr-spec hidden">
+              <div class="pane-label">RACE CONDITION CONFIG</div>
+              <div class="settings-row">
+                <label class="settings-label-sm">Parallel requests</label>
+                <input id="intr-race-count" type="number" class="settings-inp settings-inp-sm" value="20" min="2" max="50">
+              </div>
+              <div class="settings-section-desc">Sends N identical requests simultaneously. Compares response status/body for inconsistencies indicating race windows.</div>
+            </div>
+            <!-- Param Miner -->
+            <div id="intr-cfg-param" class="intr-spec hidden">
+              <div class="pane-label">PARAM MINER CONFIG</div>
+              <div class="settings-row">
+                <label class="settings-label-sm">Inject in</label>
+                <select id="intr-param-location" class="filter-sel">
+                  <option value="query">URL query params</option>
+                  <option value="body">POST body params</option>
+                  <option value="headers">HTTP headers</option>
+                  <option value="cookies">Cookies</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label-sm">Wordlist</label>
+                <select id="intr-param-wordlist" class="filter-sel">
+                  <option value="builtin-params">Common params (built-in)</option>
+                  <option value="builtin-headers">Common headers (built-in)</option>
+                  <option value="custom">Custom (use payloads)</option>
+                </select>
+              </div>
+            </div>
+            <!-- JWT Attacker -->
+            <div id="intr-cfg-jwt" class="intr-spec hidden">
+              <div class="pane-label">JWT ATTACKER CONFIG</div>
+              <div class="settings-row">
+                <label class="settings-label-sm">Attack</label>
+                <select id="intr-jwt-attack" class="filter-sel">
+                  <option value="none-alg">alg: none (remove signature)</option>
+                  <option value="hs256-brute">HS256 brute-force (weak secrets)</option>
+                  <option value="key-confusion">RS256 → HS256 key confusion</option>
+                  <option value="claim-tamper">Claim tampering</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label-sm">Token header</label>
+                <input id="intr-jwt-header" type="text" class="settings-inp" value="Authorization" spellcheck="false">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label-sm">Public key (for key confusion)</label>
+              </div>
+              <textarea id="intr-jwt-pubkey" class="raw-ta settings-ta" rows="2" spellcheck="false" placeholder="-----BEGIN PUBLIC KEY-----"></textarea>
+            </div>
+            <!-- CORS Scanner -->
+            <div id="intr-cfg-cors" class="intr-spec hidden">
+              <div class="pane-label">CORS SCANNER CONFIG</div>
+              <div class="settings-section-desc">Tests common CORS misconfigurations by varying Origin header values.</div>
+            </div>
+            <!-- Request Smuggling -->
+            <div id="intr-cfg-smuggling" class="intr-spec hidden">
+              <div class="pane-label">REQUEST SMUGGLING CONFIG</div>
+              <div class="settings-row">
+                <label class="settings-label-sm">Techniques</label>
+              </div>
+              <div class="poc-evasions">
+                <label class="probe-toggle"><input type="checkbox" id="intr-smug-clte" checked><span class="toggle-track"></span> CL.TE</label>
+                <label class="probe-toggle"><input type="checkbox" id="intr-smug-tecl" checked><span class="toggle-track"></span> TE.CL</label>
+                <label class="probe-toggle"><input type="checkbox" id="intr-smug-tete"><span class="toggle-track"></span> TE.TE (obfuscated)</label>
+              </div>
+            </div>
+            <!-- GraphQL -->
+            <div id="intr-cfg-graphql" class="intr-spec hidden">
+              <div class="pane-label">GRAPHQL EXPLORER</div>
+              <div class="settings-row">
+                <label class="settings-label-sm">Endpoint</label>
+                <input id="intr-gql-endpoint" type="text" class="settings-inp" placeholder="/graphql" spellcheck="false">
+              </div>
+              <div class="settings-row">
+                <button id="intr-gql-introspect" class="btn btn-xs btn-accent">Run Introspection</button>
+                <span id="intr-gql-status" class="settings-status"></span>
+              </div>
+              <div class="settings-row"><label class="settings-label-sm">Schema</label></div>
+              <textarea id="intr-gql-schema" class="raw-ta settings-ta" rows="4" readonly spellcheck="false" placeholder="Run introspection to discover schema…"></textarea>
+            </div>
+            <!-- Upload Scanner -->
+            <div id="intr-cfg-upload" class="intr-spec hidden">
+              <div class="pane-label">UPLOAD SCANNER CONFIG</div>
+              <div class="settings-section-desc">Tests file upload endpoints with polyglot files, SVG XSS, path traversal filenames, and content-type bypass.</div>
+              <div class="settings-row">
+                <label class="settings-label-sm">File param name</label>
+                <input id="intr-upload-param" type="text" class="settings-inp" value="file" spellcheck="false" style="width:100px">
+              </div>
+            </div>
+          </div>
+
           <div class="intr-toolbar">
             <label class="rep-autocookie"><input type="checkbox" id="intr-autocookie"><span class="toggle-track"></span> Cookie sync</label>
             <label class="rep-autocookie" title="Only show results whose response reflects a request value"><input type="checkbox" id="intr-reflect-only"><span class="toggle-track"></span> Reflections</label>
-            <div class="tabbar-gap"></div>
             <button id="intr-start" class="btn btn-accent">Start Attack</button>
             <button id="intr-stop"  class="btn btn-sm btn-danger" disabled>Stop</button>
             <span id="intr-status" class="intr-status"></span>
@@ -1028,6 +1150,7 @@
             <label class="probe-toggle"><input type="checkbox" id="scan-cmdi"><span class="toggle-track"></span> Command Injection</label>
             <label class="probe-toggle"><input type="checkbox" id="scan-openredirect"><span class="toggle-track"></span> Open Redirect</label>
             <label class="probe-toggle"><input type="checkbox" id="scan-headerinject"><span class="toggle-track"></span> Header Injection / CRLF</label>
+            <label class="probe-toggle"><input type="checkbox" id="scan-dirbrute"><span class="toggle-track"></span> Content Discovery (directory brute)</label>
           </div>
           <div class="settings-row" style="margin-top:6px">
             <label class="settings-label-sm">Threads</label>
