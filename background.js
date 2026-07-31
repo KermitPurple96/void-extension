@@ -307,6 +307,7 @@ function getTab(id) {
       wsConnections: {},  // requestId → { url, status, time }
       wsFrames:      [],  // { requestId, url, direction, opcode, data, length, time, mask }
       pendingResponses: {},  // requestId → paused response for editing
+      interceptResponses: false,  // whether to pause responses for editing
     });
   }
   return tabs.get(id);
@@ -434,7 +435,7 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
   if (method === "Fetch.requestPaused") {
     // ── Response-stage pause: the request already went out, response came back ──
     if (params.responseStatusCode !== undefined) {
-      if (!t.intercepting) {
+      if (!t.intercepting || !t.interceptResponses) {
         // Apply response Match & Replace then continue
         const respHdrs = {};
         (params.responseHeaders || []).forEach(h => { respHdrs[h.name] = h.value; });
@@ -708,7 +709,7 @@ const ALLOWED = new Set([
   "RESTORE_HISTORY","RESTORE_ENDPOINTS",
   "CNT_LAUNCH","CNT_AUTO_EXPORT","GET_EXT_PATH","PROXY_TXN",
   "LOOKUP","CRAWL_START","CRAWL_STOP","UPDATE_SETTINGS","GET_COOKIES","GET_WS_HISTORY",
-  "GET_INTERCEPTED_RESPONSES","FORWARD_RESPONSE","DROP_RESPONSE",
+  "GET_INTERCEPTED_RESPONSES","FORWARD_RESPONSE","DROP_RESPONSE","SET_INTERCEPT_RESPONSES",
   "PROBE_INJECT","PROBE_CMD","PROBE_STATUS","PROBE_FINDINGS",
 ]);
 
@@ -1182,12 +1183,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       function doFetchEnable() {
         chrome.debugger.sendCommand({ tabId }, "Network.enable", {}, () => {
           void chrome.runtime.lastError;
-          chrome.debugger.sendCommand({ tabId }, "Fetch.enable", {
-            patterns: [
-              { urlPattern: "*", requestStage: "Request" },
-              { urlPattern: "*", requestStage: "Response" },
-            ],
-          }, () => {
+          const patterns = [{ urlPattern: "*", requestStage: "Request" }];
+          if (t.interceptResponses) patterns.push({ urlPattern: "*", requestStage: "Response" });
+          chrome.debugger.sendCommand({ tabId }, "Fetch.enable", { patterns }, () => {
             if (chrome.runtime.lastError) {
               sendResponse({ ok: false, error: chrome.runtime.lastError.message });
               return;
@@ -1283,6 +1281,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     // ── Response interception ──────────────────────────────────────────────
+    case "SET_INTERCEPT_RESPONSES": {
+      if (!tabId) { sendResponse({ ok: false }); break; }
+      const t = getTab(tabId);
+      t.interceptResponses = !!msg.enabled;
+      // Re-enable Fetch with updated patterns if currently intercepting
+      if (t.intercepting && t.attached) {
+        chrome.debugger.sendCommand({ tabId }, "Fetch.disable", {}, () => {
+          void chrome.runtime.lastError;
+          const patterns = [{ urlPattern: "*", requestStage: "Request" }];
+          if (t.interceptResponses) patterns.push({ urlPattern: "*", requestStage: "Response" });
+          chrome.debugger.sendCommand({ tabId }, "Fetch.enable", { patterns }, () => {
+            void chrome.runtime.lastError;
+            sendResponse({ ok: true });
+          });
+        });
+        return true;
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+
     case "GET_INTERCEPTED_RESPONSES": {
       if (!tabId) { sendResponse({ responses: [] }); break; }
       const t = getTab(tabId);

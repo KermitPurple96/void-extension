@@ -166,26 +166,34 @@ function showTab(name) {
 
 // ── Polling for paused requests + responses ─────────────────────────────────
 let _lastInterceptSnapshot = "";
+let interceptResponses = false; // user toggle: intercept responses globally
 
 function startPoll() {
   if (pollTimer) return;
-  pollTimer = setInterval(async () => {
-    const [reqRes, respRes] = await Promise.all([
-      bg({ type: "GET_INTERCEPTED" }),
-      bg({ type: "GET_INTERCEPTED_RESPONSES" }),
-    ]);
-    if (reqRes) intercepted = reqRes.requests || [];
-    if (respRes) interceptedResponses = respRes.responses || [];
-    // Only re-render if the queue actually changed (prevents hover-destroying DOM thrash)
-    const snapshot = JSON.stringify(intercepted.map(r => r.requestId)) + "|" + JSON.stringify(interceptedResponses.map(r => r.requestId));
-    if (snapshot !== _lastInterceptSnapshot) {
-      _lastInterceptSnapshot = snapshot;
-      renderInterceptList();
-    }
-    updateInterceptBadge();
-  }, 600);
+  doPollTick(); // immediate first tick — don't wait 600ms
+  pollTimer = setInterval(doPollTick, 600);
 }
 function stopPoll() { clearInterval(pollTimer); pollTimer = null; }
+
+async function doPollTick() {
+  const fetches = [bg({ type: "GET_INTERCEPTED" })];
+  if (interceptResponses) fetches.push(bg({ type: "GET_INTERCEPTED_RESPONSES" }));
+  const [reqRes, respRes] = await Promise.all(fetches);
+  if (reqRes) intercepted = reqRes.requests || [];
+  if (respRes) interceptedResponses = respRes.responses || [];
+  else if (!interceptResponses) interceptedResponses = [];
+  // Only re-render if the queue actually changed (prevents hover-destroying DOM thrash)
+  const snapshot = JSON.stringify(intercepted.map(r => r.requestId)) + "|" + JSON.stringify(interceptedResponses.map(r => r.requestId));
+  if (snapshot !== _lastInterceptSnapshot) {
+    _lastInterceptSnapshot = snapshot;
+    renderInterceptList();
+  }
+  updateInterceptBadge();
+}
+
+function interceptListChanged() {
+  _lastInterceptSnapshot = ""; // force re-render on next tick
+}
 
 function startHistPoll() {
   if (histTimer) return;
@@ -252,6 +260,8 @@ async function loadAll() {
   renderHeaders();
   updateBadges();
   startBgSync();
+  // Start intercept poll immediately (Intercept is the default active tab)
+  startPoll();
 }
 
 // ── Badges ────────────────────────────────────────────────────────────────────
@@ -282,6 +292,7 @@ function renderInterceptStatus() {
   const label = document.getElementById("dbg-label");
   const btnA  = document.getElementById("btn-attach");
   const btnI  = document.getElementById("btn-intercept");
+  const btnR  = document.getElementById("btn-intercept-resp");
   const btnF  = document.getElementById("btn-fwd-all");
   const warn  = document.getElementById("warn-bar");
 
@@ -293,6 +304,7 @@ function renderInterceptStatus() {
     btnA.className    = "btn";
     btnI.textContent  = "Intercept: OFF";
     btnI.disabled     = true;
+    btnR.disabled     = true;
     btnF.disabled     = true;
     warn.classList.add("hidden");
   } else if (!state.intercepting) {
@@ -302,16 +314,19 @@ function renderInterceptStatus() {
     btnA.className    = "btn btn-danger";
     btnI.textContent  = "Intercept: OFF";
     btnI.disabled     = false;
+    btnR.disabled     = true;
     btnF.disabled     = true;
     warn.classList.remove("hidden");
   } else {
     dot.classList.add("dot-intercepting");
-    label.textContent = `Intercepting — ${intercepted.length} paused`;
+    const respCount = interceptedResponses.length;
+    label.textContent = `Intercepting — ${intercepted.length} req${respCount ? `, ${respCount} resp` : ""} paused`;
     btnA.textContent  = "Detach";
     btnA.className    = "btn btn-danger";
     btnI.textContent  = "Intercept: ON";
     btnI.disabled     = false;
-    btnF.disabled     = intercepted.length === 0;
+    btnR.disabled     = false;
+    btnF.disabled     = intercepted.length === 0 && respCount === 0;
     warn.classList.remove("hidden");
   }
 }
@@ -569,6 +584,7 @@ async function doForward(requestId, overrides) {
   }
   intercepted = intercepted.filter(r => r.requestId !== requestId);
   await bg({ type: "FORWARD", requestId, overrides: overrides || {} });
+  interceptListChanged();
   renderInterceptList();
 }
 
@@ -581,6 +597,7 @@ async function doDrop(requestId) {
   }
   intercepted = intercepted.filter(r => r.requestId !== requestId);
   await bg({ type: "DROP", requestId });
+  interceptListChanged();
   renderInterceptList();
 }
 
@@ -5320,6 +5337,7 @@ async function forwardResp() {
   await bg({ type: "FORWARD_RESPONSE", requestId: editingResp.requestId, overrides });
   interceptedResponses = interceptedResponses.filter(r => r.requestId !== editingResp.requestId);
   closeRespEditor();
+  interceptListChanged();
   renderInterceptList();
 }
 
@@ -5328,6 +5346,7 @@ async function dropResp() {
   await bg({ type: "DROP_RESPONSE", requestId: editingResp.requestId });
   interceptedResponses = interceptedResponses.filter(r => r.requestId !== editingResp.requestId);
   closeRespEditor();
+  interceptListChanged();
   renderInterceptList();
 }
 
@@ -6110,6 +6129,15 @@ document.addEventListener("DOMContentLoaded", () => {
       state.intercepting = !!(res?.ok);
     }
     renderInterceptStatus();
+  });
+
+  // Toggle response interception
+  document.getElementById("btn-intercept-resp").addEventListener("click", async () => {
+    interceptResponses = !interceptResponses;
+    await bg({ type: "SET_INTERCEPT_RESPONSES", enabled: interceptResponses });
+    const btn = document.getElementById("btn-intercept-resp");
+    btn.textContent = interceptResponses ? "Responses: ON" : "Responses: OFF";
+    btn.classList.toggle("btn-success", interceptResponses);
   });
 
   // Forward all
