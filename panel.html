@@ -2048,6 +2048,38 @@
         </div>
       </div>
 
+      <!-- ── TLS Fingerprint ────────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">TLS Fingerprint</div>
+        <div class="settings-section-desc">Your browser's TLS ClientHello fingerprint as seen by remote servers. Useful for checking if you're being fingerprinted by WAFs or bot detection.</div>
+        <div class="settings-actions">
+          <button id="cfg-ja3-fetch" class="btn btn-sm btn-accent">Fetch Fingerprint</button>
+          <span id="cfg-ja3-status" class="settings-status"></span>
+        </div>
+        <div id="cfg-ja3-results" class="cfg-ja3-results hidden">
+          <div class="settings-row">
+            <label class="settings-label-sm">JA3 Hash</label>
+            <input id="cfg-ja3-hash" type="text" class="settings-inp" readonly spellcheck="false">
+            <button id="cfg-ja3-hash-copy" class="btn btn-xs btn-ghost">Copy</button>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label-sm">JA4</label>
+            <input id="cfg-ja4" type="text" class="settings-inp" readonly spellcheck="false">
+            <button id="cfg-ja4-copy" class="btn btn-xs btn-ghost">Copy</button>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label-sm">TLS Version</label>
+            <input id="cfg-tls-ver" type="text" class="settings-inp" readonly spellcheck="false" style="max-width:120px">
+          </div>
+          <div class="settings-row"><label class="settings-label-sm">JA3 Full</label></div>
+          <textarea id="cfg-ja3-full" class="raw-ta settings-ta" rows="2" readonly spellcheck="false" style="font-size:10px"></textarea>
+          <div class="settings-row"><label class="settings-label-sm">Cipher Suites</label></div>
+          <textarea id="cfg-ja3-ciphers" class="raw-ta settings-ta" rows="3" readonly spellcheck="false" style="font-size:10px"></textarea>
+          <div class="settings-row"><label class="settings-label-sm">Extensions</label></div>
+          <textarea id="cfg-ja3-exts" class="raw-ta settings-ta" rows="3" readonly spellcheck="false" style="font-size:10px"></textarea>
+        </div>
+      </div>
+
       <!-- ── Settings Profiles ──────────────────────────────────── -->
       <div class="settings-section">
         <div class="settings-section-title">Settings Profiles</div>

@@ -6906,6 +6906,35 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   cfgRefreshProfiles();
 
+  // JA3 Fingerprint
+  document.getElementById("cfg-ja3-fetch").addEventListener("click", async () => {
+    document.getElementById("cfg-ja3-status").textContent = "Fetching…";
+    const res = await bg({ type: "FETCH_JA3" });
+    if (!res || !res.ok) {
+      document.getElementById("cfg-ja3-status").textContent = "Error: " + (res?.error || "fetch failed");
+      return;
+    }
+    const d = res.data;
+    const tls = d.tls || {};
+    document.getElementById("cfg-ja3-hash").value = tls.ja3_hash || "—";
+    document.getElementById("cfg-ja4").value = tls.ja4 || "—";
+    document.getElementById("cfg-tls-ver").value = tls.tls_version_negotiated || "—";
+    document.getElementById("cfg-ja3-full").value = tls.ja3 || "—";
+    document.getElementById("cfg-ja3-ciphers").value = (tls.ciphers || []).map(c => c.name || c).join("\n");
+    document.getElementById("cfg-ja3-exts").value = (tls.extensions || []).map(e => `${e.name || e} (${e.id || ""})`).join("\n");
+    document.getElementById("cfg-ja3-results").classList.remove("hidden");
+    document.getElementById("cfg-ja3-status").textContent = "";
+    showToast("TLS fingerprint loaded");
+  });
+  document.getElementById("cfg-ja3-hash-copy").addEventListener("click", () => {
+    navigator.clipboard.writeText(document.getElementById("cfg-ja3-hash").value);
+    showToast("JA3 hash copied");
+  });
+  document.getElementById("cfg-ja4-copy").addEventListener("click", () => {
+    navigator.clipboard.writeText(document.getElementById("cfg-ja4").value);
+    showToast("JA4 copied");
+  });
+
   // Session management (Project → Session tab)
   initBlock("session", () => {
     document.getElementById("session-save").addEventListener("click", saveSessionToBrowser);

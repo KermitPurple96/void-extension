@@ -710,7 +710,7 @@ const ALLOWED = new Set([
   "CNT_LAUNCH","CNT_AUTO_EXPORT","GET_EXT_PATH","PROXY_TXN",
   "LOOKUP","CRAWL_START","CRAWL_STOP","UPDATE_SETTINGS","GET_COOKIES","GET_WS_HISTORY",
   "GET_INTERCEPTED_RESPONSES","FORWARD_RESPONSE","DROP_RESPONSE","SET_INTERCEPT_RESPONSES",
-  "PROBE_INJECT","PROBE_CMD","PROBE_STATUS","PROBE_FINDINGS",
+  "PROBE_INJECT","PROBE_CMD","PROBE_STATUS","PROBE_FINDINGS","FETCH_JA3",
 ]);
 
 // ── Probe (DOM XSS Hunter) ─────────────────────────────────────────────────
@@ -1105,6 +1105,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const t = getTab(tabId);
       sendResponse({ frames: t.wsFrames, connections: t.wsConnections });
       break;
+    }
+
+    case "FETCH_JA3": {
+      fetch("https://tls.peet.ws/api/all")
+        .then(r => r.json())
+        .then(data => sendResponse({ ok: true, data }))
+        .catch(e => sendResponse({ ok: false, error: e.message }));
+      return true;
     }
 
     case "GET_COOKIES": {
