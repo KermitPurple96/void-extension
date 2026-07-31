@@ -5510,6 +5510,21 @@ async function dropResp() {
 
 // ═══════════════════════════ COPY AS (curl/fetch/Python) ═════════════════════
 
+// Toast notification for clipboard actions
+function showToast(msg) {
+  let toast = document.getElementById("void-toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "void-toast";
+    toast.className = "void-toast";
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.classList.add("visible");
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => toast.classList.remove("visible"), 1500);
+}
+
 function copyAsCurl(entry) {
   if (!entry) return;
   const method = entry.method || "GET";
@@ -5523,7 +5538,7 @@ function copyAsCurl(entry) {
   }
   if (body) cmd += ` \\\n  -d '${body.replace(/'/g, "'\\''")}'`;
   cmd += ` \\\n  '${url}'`;
-  navigator.clipboard.writeText(cmd);
+  navigator.clipboard.writeText(cmd).then(() => showToast("Copied as curl"));
 }
 
 function copyAsFetch(entry) {
@@ -5536,7 +5551,7 @@ function copyAsFetch(entry) {
   let code = `fetch('${entry.url}', {\n  method: '${method}',\n  headers: {\n${hdrs}\n  }`;
   if (body) code += `,\n  body: '${body.replace(/'/g, "\\'")}'`;
   code += `\n});`;
-  navigator.clipboard.writeText(code);
+  navigator.clipboard.writeText(code).then(() => showToast("Copied as fetch"));
 }
 
 function copyAsPython(entry) {
@@ -5549,7 +5564,7 @@ function copyAsPython(entry) {
   let code = `import requests\n\nresponse = requests.${method.toLowerCase()}(\n    '${entry.url}',\n    headers={\n${hdrs}\n    }`;
   if (body) code += `,\n    data='${body.replace(/'/g, "\\'")}'`;
   code += `\n)\nprint(response.status_code, response.text)`;
-  navigator.clipboard.writeText(code);
+  navigator.clipboard.writeText(code).then(() => showToast("Copied as Python"));
 }
 
 // ═══════════════════════════ RESPONSE RENDER ═════════════════════════════════
@@ -5564,10 +5579,12 @@ function renderResponse(entry) {
     pane.classList.remove("hidden");
     respPane.classList.add("hidden");
     frame.srcdoc = body;
+    showToast("Rendering response");
   } else {
     pane.classList.add("hidden");
     respPane.classList.remove("hidden");
     frame.srcdoc = "";
+    showToast("Raw view");
   }
 }
 
@@ -6260,6 +6277,10 @@ document.addEventListener("DOMContentLoaded", () => {
       body:       intrDetailEntry.reqBody || "",
     });
   });
+  document.getElementById("intr-detail-cmp-l").addEventListener("click", () => { if (intrDetailEntry) cmpSendTo("left", intrDetailEntry); });
+  document.getElementById("intr-detail-cmp-r").addEventListener("click", () => { if (intrDetailEntry) cmpSendTo("right", intrDetailEntry); });
+  document.getElementById("intr-detail-notes").addEventListener("click", () => { if (intrDetailEntry) notesFromEntry(intrDetailEntry); });
+  document.getElementById("intr-detail-open").addEventListener("click", () => { if (intrDetailEntry?.reqUrl) chrome.tabs.create({ url: intrDetailEntry.reqUrl }); });
 
   document.getElementById("hist-detail-to-intr").addEventListener("click", () => {
     if (!histDetailEntry) return;
@@ -6350,6 +6371,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     closeEditor();
   });
+  document.getElementById("ed-to-intr").addEventListener("click", () => {
+    if (!editingReq) return;
+    intrSendToIntruder({ ...editingReq, method: document.getElementById("ed-method").value, url: document.getElementById("ed-url").value, headers: rawToHeaders(document.getElementById("ed-headers").value), body: document.getElementById("ed-body").value });
+    closeEditor();
+  });
+  document.getElementById("ed-cmp-l").addEventListener("click", () => { if (editingReq) cmpSendTo("left", editingReq); });
+  document.getElementById("ed-cmp-r").addEventListener("click", () => { if (editingReq) cmpSendTo("right", editingReq); });
+  document.getElementById("ed-to-poc").addEventListener("click", () => { if (editingReq) pocLoadEntry(editingReq); });
+  document.getElementById("ed-to-notes").addEventListener("click", () => { if (editingReq) notesFromEntry(editingReq); });
 
   // Endpoint filters
   document.getElementById("ep-filter").addEventListener("input", e => {

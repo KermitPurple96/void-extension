@@ -119,7 +119,6 @@
                     <div class="detail-action-bar" id="tgt-reflect-bar">
             <label class="reflect-bar-toggle"><input type="checkbox" id="tgt-reflect-hl"><span class="toggle-track"></span> Reflections</label>
             <span class="reflect-chips hidden" id="tgt-reflect-chips"></span>
-            <div class="tabbar-gap"></div>
             <button id="tgt-detail-render" class="btn btn-xs btn-ghost">Render</button>
             <button id="tgt-detail-curl" class="btn btn-xs btn-ghost">curl</button>
             <button id="tgt-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
@@ -190,7 +189,6 @@
                     <div class="detail-action-bar" id="ep-reflect-bar">
             <label class="reflect-bar-toggle"><input type="checkbox" id="ep-reflect-hl"><span class="toggle-track"></span> Reflections</label>
             <span class="reflect-chips hidden" id="ep-reflect-chips"></span>
-            <div class="tabbar-gap"></div>
             <button id="ep-detail-render" class="btn btn-xs btn-ghost">Render</button>
             <button id="ep-detail-curl" class="btn btn-xs btn-ghost">curl</button>
             <button id="ep-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
@@ -294,6 +292,11 @@
           <select id="ed-httpver" class="httpver-sel"><option>HTTP/1.1</option><option>HTTP/2</option><option>HTTP/1.0</option></select>
           <button id="ed-forward" class="btn btn-sm btn-success">Forward →</button>
           <button id="ed-to-rep"  class="btn btn-sm btn-ghost">→ Repeater</button>
+          <button id="ed-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+          <button id="ed-cmp-l"   class="btn btn-sm btn-ghost">→ Cmp L</button>
+          <button id="ed-cmp-r"   class="btn btn-sm btn-ghost">→ Cmp R</button>
+          <button id="ed-to-poc"  class="btn btn-sm btn-ghost">→ PoC</button>
+          <button id="ed-to-notes" class="btn btn-sm btn-ghost">→ Notes</button>
           <button id="ed-drop"    class="btn btn-sm btn-danger">Drop ✕</button>
         </div>
         <input id="ed-url" type="hidden">
@@ -421,7 +424,6 @@
                 <div class="detail-action-bar" id="hist-reflect-bar">
           <label class="reflect-bar-toggle"><input type="checkbox" id="hist-reflect-hl"><span class="toggle-track"></span> Reflections</label>
           <span class="reflect-chips hidden" id="hist-reflect-chips"></span>
-          <div class="tabbar-gap"></div>
           <button id="hist-detail-render" class="btn btn-xs btn-ghost">Render</button>
           <button id="hist-detail-curl" class="btn btn-xs btn-ghost">curl</button>
           <button id="hist-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
@@ -553,7 +555,6 @@
         <div class="detail-action-bar" id="rep-reflect-bar">
       <label class="reflect-bar-toggle"><input type="checkbox" id="rep-reflect-hl"><span class="toggle-track"></span> Reflections</label>
       <span class="reflect-chips hidden" id="rep-reflect-chips"></span>
-      <div class="tabbar-gap"></div>
       <button id="rep-detail-render" class="btn btn-xs btn-ghost">Render</button>
       <button id="rep-detail-curl" class="btn btn-xs btn-ghost">curl</button>
       <button id="rep-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
@@ -711,12 +712,15 @@
             <button id="intr-detail-close" class="btn btn-sm btn-ghost">✕</button>
             <span id="intr-detail-title" class="hist-detail-title"></span>
             <button id="intr-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
+            <button id="intr-detail-cmp-l" class="btn btn-sm btn-ghost">→ Cmp L</button>
+            <button id="intr-detail-cmp-r" class="btn btn-sm btn-ghost">→ Cmp R</button>
             <button id="intr-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
+            <button id="intr-detail-notes" class="btn btn-sm btn-ghost">→ Notes</button>
+            <button id="intr-detail-open" class="btn btn-sm btn-ghost">↗ Open</button>
           </div>
                     <div class="detail-action-bar" id="intr-reflect-bar">
             <label class="reflect-bar-toggle"><input type="checkbox" id="intr-reflect-hl"><span class="toggle-track"></span> Reflections</label>
             <span class="reflect-chips hidden" id="intr-reflect-chips"></span>
-            <div class="tabbar-gap"></div>
             <button id="intr-detail-render" class="btn btn-xs btn-ghost">Render</button>
             <button id="intr-detail-curl" class="btn btn-xs btn-ghost">curl</button>
             <button id="intr-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
@@ -1150,7 +1154,6 @@
                 <div class="detail-action-bar" id="log-reflect-bar">
           <label class="reflect-bar-toggle"><input type="checkbox" id="log-reflect-hl"><span class="toggle-track"></span> Reflections</label>
           <span class="reflect-chips hidden" id="log-reflect-chips"></span>
-          <div class="tabbar-gap"></div>
           <button id="log-detail-render" class="btn btn-xs btn-ghost">Render</button>
           <button id="log-detail-curl" class="btn btn-xs btn-ghost">curl</button>
           <button id="log-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
@@ -1761,7 +1764,6 @@
                 <div class="detail-action-bar" id="sens-reflect-bar">
           <label class="reflect-bar-toggle"><input type="checkbox" id="sens-reflect-hl"><span class="toggle-track"></span> Reflections</label>
           <span class="reflect-chips hidden" id="sens-reflect-chips"></span>
-          <div class="tabbar-gap"></div>
           <button id="sens-detail-render" class="btn btn-xs btn-ghost">Render</button>
           <button id="sens-detail-curl" class="btn btn-xs btn-ghost">curl</button>
           <button id="sens-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>

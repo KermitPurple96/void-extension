@@ -510,11 +510,11 @@ body {
   padding: 8px 10px;
   background: var(--bg2);
 }
-.rep-topbar .url-inp {
-  flex: 0 1 50%;
-  max-width: 50%;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+.rep-topbar .url-inp,
+.rep-topbar .path-inp {
+  flex: 0 1 auto;
+  min-width: 100px;
+  max-width: 40%;
 }
 
 .rep-body {
@@ -2447,6 +2447,26 @@ body {
 
 /* ── Response editor label ──────────────────────────────────────────── */
 .resp-ed-label { font-weight: 600; font-size: 11px; color: var(--yellow); margin-right: 4px; }
+
+/* ── Toast notification ─────────────────────────────────────────────── */
+.void-toast {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%) translateY(40px);
+  background: var(--bg4);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s, transform .15s;
+  z-index: 9999;
+}
+.void-toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* ── Detail action bar (bottom of every detail pane) ────────────────── */
 .detail-action-bar {
