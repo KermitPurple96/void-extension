@@ -368,6 +368,31 @@ body {
 }
 .url-inp:focus { border-color: var(--accent); }
 
+.path-inp {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--text);
+  font: 12px var(--mono);
+  padding: 4px 8px;
+  outline: none;
+  min-width: 120px;
+  flex: 1;
+}
+.path-inp:focus { border-color: var(--accent); }
+
+.httpver-sel {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--muted);
+  font: 11px var(--mono);
+  padding: 4px 6px;
+  outline: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 /* Hidden sizer for auto-width URL inputs */
 .url-sizer {
   position: fixed;

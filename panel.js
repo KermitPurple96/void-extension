@@ -407,11 +407,17 @@ function openEditor(req) {
     mSel.appendChild(o);
   });
 
-  const edUrl = document.getElementById("ed-url");
-  edUrl.value     = req.url;
-  autoSizeUrlInput(edUrl);
-  document.getElementById("ed-headers").value = headersToRaw(req.headers || {});
+  // Decompose URL into path + Host header
+  const { scheme, host, path } = decomposeUrl(req.url);
+  document.getElementById("ed-url").value = req.url;
+  document.getElementById("ed-path").value = path || "/";
+  editingReq._scheme = scheme;
+
+  const headersRaw = ensureHostHeader(headersToRaw(req.headers || {}), host);
+  document.getElementById("ed-headers").value = headersRaw;
   document.getElementById("ed-body").value    = req.body || "";
+
+  applyEditorViewMode();
 
   const editor = document.getElementById("ic-editor");
   editor.classList.remove("hidden");
@@ -603,14 +609,21 @@ async function doDrop(requestId) {
 
 async function forwardFromEditor() {
   if (!editingReq) return;
+  syncRawToSplit("ed");
+  const headers = rawToHeaders(document.getElementById("ed-headers").value);
+  const host = extractHostFromHeaders(document.getElementById("ed-headers").value);
+  const scheme = editingReq._scheme || "https";
+  const path = document.getElementById("ed-path").value || "/";
+  const url = recomposeUrl(scheme, host, path);
   const overrides = {
-    url:     document.getElementById("ed-url").value.trim(),
+    url,
     method:  document.getElementById("ed-method").value,
-    headers: rawToHeaders(document.getElementById("ed-headers").value),
+    headers,
     body:    document.getElementById("ed-body").value,
   };
   const id = editingReq.requestId;
   editingReq = null;
+  closeEditor();
   await doForward(id, overrides);
 }
 
@@ -1195,8 +1208,12 @@ function histDetailToRepeater() {
 function sendToRepeater(req) {
   const method  = req.method || "GET";
   const url     = req.url    || "";
-  const rawHdrs = req.rawHeaders || headersToRaw(req.headers || {});
+  let rawHdrs = req.rawHeaders || headersToRaw(req.headers || {});
   const body    = req.body   || "";
+
+  // Ensure Host header is present
+  const { host } = decomposeUrl(url);
+  rawHdrs = ensureHostHeader(rawHdrs, host);
 
   // Save current tab state before switching
   saveRepTabState();
@@ -1228,8 +1245,15 @@ function sendToRepeater(req) {
 function saveRepTabState() {
   const tab = repTabs.find(t => t.id === repActiveTab);
   if (!tab) return;
+  syncRawToSplit("rep");
   tab.method     = document.getElementById("rep-method").value;
-  tab.url        = document.getElementById("rep-url").value;
+  // Reconstruct URL from path + Host header
+  const host = extractHostFromHeaders(document.getElementById("rep-headers").value);
+  const path = document.getElementById("rep-path").value || "/";
+  const oldUrl = document.getElementById("rep-url").value;
+  const { scheme } = decomposeUrl(oldUrl);
+  tab.url        = host ? recomposeUrl(scheme, host, path) : oldUrl;
+  document.getElementById("rep-url").value = tab.url;
   tab.headers    = document.getElementById("rep-headers").value;
   tab.body       = document.getElementById("rep-body-ta").value;
   tab.autoCookie = document.getElementById("rep-autocookie").checked;
@@ -1296,9 +1320,15 @@ function loadRepTab(tab) {
   mSel.value = tab.method;
   const repUrl = document.getElementById("rep-url");
   setFieldValue(repUrl, tab.url);
-  setFieldValue(document.getElementById("rep-headers"), tab.headers);
+
+  // Decompose URL into path, ensure Host in headers
+  const { host, path } = decomposeUrl(tab.url);
+  document.getElementById("rep-path").value = path || "/";
+  let hdrs = tab.headers || "";
+  hdrs = ensureHostHeader(hdrs, host);
+  setFieldValue(document.getElementById("rep-headers"), hdrs);
   setFieldValue(document.getElementById("rep-body-ta"), tab.body);
-  autoSizeUrlInput(repUrl);
+  applyRepeaterViewMode();
   document.getElementById("rep-autocookie").checked = !!tab.autoCookie;
   document.getElementById("rep-target-host").value  = tab.targetHost || "";
   document.getElementById("rep-target-port").value  = tab.targetPort || "";
@@ -3342,6 +3372,7 @@ const DEFAULT_SETTINGS = {
   scopeExclude: "",
   followRedirects: true,
   timeout: "30000",
+  reqView: "split",  // "split" or "raw"
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -3362,6 +3393,7 @@ function saveSettings() {
   settings.scopeExclude   = document.getElementById("cfg-scope-exclude").value;
   settings.followRedirects = document.getElementById("cfg-follow-redirects").checked;
   settings.timeout        = document.getElementById("cfg-timeout").value;
+  settings.reqView        = document.getElementById("cfg-req-view").value;
   settings.matchReplace   = readMRRules();
 
   chrome.storage.local.set({ voidSettings: settings });
@@ -3380,6 +3412,7 @@ function loadSettingsUI() {
   document.getElementById("cfg-scope-exclude").value    = settings.scopeExclude;
   document.getElementById("cfg-follow-redirects").checked = settings.followRedirects;
   document.getElementById("cfg-timeout").value          = settings.timeout;
+  document.getElementById("cfg-req-view").value         = settings.reqView || "split";
   renderMRRules();
 }
 
@@ -5292,6 +5325,118 @@ function cmpClear() {
   cmpLeft = null; cmpRight = null;
   cmpRenderSide("left");
   cmpRenderSide("right");
+}
+
+// ═══════════════════════════ REQUEST VIEW MODE (Split / Raw) ═════════════════
+
+function getReqView() { return settings.reqView || "split"; }
+
+// Decompose a full URL into { scheme, host, path }
+function decomposeUrl(url) {
+  try {
+    const u = new URL(url);
+    return { scheme: u.protocol.replace(":", ""), host: u.host, path: u.pathname + u.search };
+  } catch {
+    return { scheme: "https", host: "", path: url || "/" };
+  }
+}
+
+// Reconstruct full URL from parts
+function recomposeUrl(scheme, host, path) {
+  if (!host) return path || "/";
+  return `${scheme || "https"}://${host}${path || "/"}`;
+}
+
+// Ensure Host header is in the headers string; extract from URL if missing
+function ensureHostHeader(headersRaw, host) {
+  const lines = headersRaw.split("\n");
+  const hasHost = lines.some(l => /^host\s*:/i.test(l));
+  if (!hasHost && host) return `Host: ${host}\n${headersRaw}`;
+  return headersRaw;
+}
+
+// Extract Host from headers string
+function extractHostFromHeaders(headersRaw) {
+  for (const line of headersRaw.split("\n")) {
+    if (/^host\s*:/i.test(line)) return line.split(":").slice(1).join(":").trim();
+  }
+  return "";
+}
+
+// Build raw request text from parts
+function buildRawRequest(method, path, httpVer, headersRaw, body) {
+  let raw = `${method} ${path || "/"} ${httpVer || "HTTP/1.1"}\n`;
+  raw += headersRaw;
+  if (body) raw += "\n\n" + body;
+  return raw;
+}
+
+// Parse raw request text into parts
+function parseRawRequest(raw) {
+  const lines = raw.split("\n");
+  const firstLine = lines[0] || "";
+  const parts = firstLine.split(/\s+/);
+  const method = parts[0] || "GET";
+  const path = parts[1] || "/";
+  const httpVer = parts[2] || "HTTP/1.1";
+  // Find blank line separating headers from body
+  let blankIdx = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === "") { blankIdx = i; break; }
+  }
+  const headersRaw = blankIdx > 0 ? lines.slice(1, blankIdx).join("\n") : lines.slice(1).join("\n");
+  const body = blankIdx > 0 ? lines.slice(blankIdx + 1).join("\n") : "";
+  return { method, path, httpVer, headersRaw, body };
+}
+
+// Apply the view mode to Intercept editor
+function applyEditorViewMode() {
+  const mode = getReqView();
+  const splitEl = document.getElementById("ed-split");
+  const rawEl = document.getElementById("ed-raw");
+  if (mode === "raw") {
+    splitEl.classList.add("hidden"); rawEl.classList.remove("hidden");
+    // Sync split → raw
+    const method = document.getElementById("ed-method").value;
+    const path = document.getElementById("ed-path").value;
+    const httpVer = document.getElementById("ed-httpver").value;
+    const headers = document.getElementById("ed-headers").value;
+    const body = document.getElementById("ed-body").value;
+    document.getElementById("ed-raw-ta").value = buildRawRequest(method, path, httpVer, headers, body);
+  } else {
+    splitEl.classList.remove("hidden"); rawEl.classList.add("hidden");
+  }
+}
+
+// Apply the view mode to Repeater
+function applyRepeaterViewMode() {
+  const mode = getReqView();
+  const splitEl = document.getElementById("rep-split-view");
+  const rawEl = document.getElementById("rep-raw-view");
+  if (mode === "raw") {
+    splitEl.classList.add("hidden"); rawEl.classList.remove("hidden"); rawEl.style.display = "flex";
+    const method = document.getElementById("rep-method").value;
+    const path = document.getElementById("rep-path").value;
+    const httpVer = document.getElementById("rep-httpver").value;
+    const headers = document.getElementById("rep-headers").value;
+    const body = document.getElementById("rep-body-ta").value;
+    document.getElementById("rep-raw-ta").value = buildRawRequest(method, path, httpVer, headers, body);
+  } else {
+    splitEl.classList.remove("hidden"); rawEl.classList.add("hidden"); rawEl.style.display = "none";
+  }
+}
+
+// Sync raw → split fields (call before sending)
+function syncRawToSplit(prefix) {
+  if (getReqView() !== "raw") return;
+  const rawTa = document.getElementById(prefix + "-raw-ta");
+  if (!rawTa) return;
+  const parsed = parseRawRequest(rawTa.value);
+  document.getElementById(prefix === "ed" ? "ed-method" : "rep-method").value = parsed.method;
+  document.getElementById(prefix === "ed" ? "ed-path" : "rep-path").value = parsed.path;
+  document.getElementById(prefix === "ed" ? "ed-httpver" : "rep-httpver").value = parsed.httpVer;
+  document.getElementById(prefix === "ed" ? "ed-headers" : "rep-headers").value = parsed.headersRaw;
+  document.getElementById(prefix === "ed" ? "ed-body" : "rep-body-ta").value = parsed.body;
 }
 
 // ═══════════════════════════ RESPONSE INTERCEPTION ═══════════════════════════
