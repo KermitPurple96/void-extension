@@ -3363,6 +3363,10 @@ function decOp(op, input) {
       case "sha1":   return cryptoHash("SHA-1", input);
       case "sha256": return cryptoHash("SHA-256", input);
 
+      // Transform
+      case "lowercase": return input.toLowerCase();
+      case "uppercase": return input.toUpperCase();
+
       default: return input;
     }
   } catch (e) { return `Error: ${e.message}`; }
