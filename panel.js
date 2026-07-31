@@ -43,6 +43,7 @@ let histColFilters = {};
 // ── Repeater tabs state ──────────────────────────────────────────────────────
 let repTabs = [{ id: 0, label: "1", method: "GET", url: "", headers: "", body: "", response: null, autoCookie: false, targetHost: "", targetPort: "", targetTls: true, history: [], histIdx: -1 }];
 let repActiveTab = 0;
+let rep2ActiveTab = 0; // right Repeater's independently selected tab
 let repNextId = 1;
 
 // ── Intruder state ───────────────────────────────────────────────────────────
@@ -1239,7 +1240,6 @@ function sendToRepeater(req) {
   repActiveTab = newTab.id;
   renderRepTabs();
   loadRepTab(newTab);
-  loadRep2FromTab(newTab);
 
   // Flash the Repeater badge to notify the user
   const bdg = document.getElementById("bdg-repeater");
@@ -1428,6 +1428,8 @@ function renderRepTabs() {
 
     bar.insertBefore(btn, addBtn);
   });
+  // Keep right side tab bar in sync
+  renderRep2Tabs();
 }
 
 function switchRepTab(id) {
@@ -1436,13 +1438,18 @@ function switchRepTab(id) {
   repActiveTab = id;
   renderRepTabs();
   const tab = repTabs.find(t => t.id === id);
-  if (tab) {
-    loadRepTab(tab);
-    loadRep2FromTab(tab);
-  }
+  if (tab) loadRepTab(tab);
 }
 
-// Load a tab's data into the right Repeater (for comparison editing)
+function switchRep2Tab(id) {
+  if (id === rep2ActiveTab) return;
+  rep2ActiveTab = id;
+  renderRep2Tabs();
+  const tab = repTabs.find(t => t.id === id);
+  if (tab) loadRep2FromTab(tab);
+}
+
+// Load a tab's data into the right Repeater
 function loadRep2FromTab(tab) {
   if (!tab) return;
   const { host, path } = decomposeUrl(tab.url);
@@ -1452,7 +1459,6 @@ function loadRep2FromTab(tab) {
   document.getElementById("rep2-headers").value = hdrs;
   document.getElementById("rep2-body-ta").value = tab.body || "";
   document.getElementById("rep2-url").value = tab.url || "";
-  // Load response if available
   if (tab.response) {
     const r = tab.response;
     let respText = `HTTP/1.1 ${r.status} ${r.statusText || ""}\n`;
@@ -1466,6 +1472,24 @@ function loadRep2FromTab(tab) {
     document.getElementById("resp2-label").textContent = "RESPONSE";
     document.getElementById("resp2-empty").classList.remove("hidden");
   }
+}
+
+// Render the right side's tab bar (same tabs, independent active state)
+function renderRep2Tabs() {
+  const bar = document.getElementById("rep2-tabs-bar");
+  if (!bar) return;
+  bar.replaceChildren();
+  repTabs.forEach(tab => {
+    const btn = document.createElement("button");
+    btn.className = "rep-tab-btn" + (tab.id === rep2ActiveTab ? " active" : "");
+    let label = tab.customLabel || tab.label;
+    if (!tab.customLabel && tab.url) {
+      try { label = new URL(tab.url).pathname.split("/").pop() || tab.label; } catch {}
+    }
+    btn.textContent = label;
+    btn.addEventListener("click", () => switchRep2Tab(tab.id));
+    bar.appendChild(btn);
+  });
 }
 
 function closeRepTab(id) {

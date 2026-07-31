@@ -523,17 +523,15 @@
   <!-- ═══════════════════════════ REPEATER ═══════════════════════════════════ -->
   <div id="tab-repeater" class="tab-panel hidden">
 
-    <!-- Shared tab bar (spans both sides) -->
-    <div class="rep-tabs-bar" id="rep-tabs-bar">
-      <button class="rep-tab-btn active" data-reptab="0">1</button>
-      <button class="rep-tab-add" id="rep-tab-add" title="New tab">+</button>
-    </div>
-
     <!-- Side-by-side container -->
     <div class="rep-dual">
 
       <!-- ════ LEFT Repeater ════ -->
       <div class="rep-side" id="rep-side-left">
+        <div class="rep-tabs-bar" id="rep-tabs-bar">
+          <button class="rep-tab-btn active" data-reptab="0">1</button>
+          <button class="rep-tab-add" id="rep-tab-add" title="New tab">+</button>
+        </div>
         <div class="rep-topbar">
           <button id="rep-hist-back" class="btn btn-xs btn-ghost rep-hist-btn" title="Previous request" disabled>◀</button>
           <button id="rep-hist-fwd"  class="btn btn-xs btn-ghost rep-hist-btn" title="Next request" disabled>▶</button>
@@ -597,6 +595,7 @@
 
       <!-- ════ RIGHT Repeater (hidden by default) ════ -->
       <div class="rep-side rep-side-right hidden" id="rep-side-right">
+        <div class="rep-tabs-bar" id="rep2-tabs-bar"></div>
         <div class="rep-topbar">
           <button id="rep2-hist-back" class="btn btn-xs btn-ghost rep-hist-btn" disabled>◀</button>
           <button id="rep2-hist-fwd"  class="btn btn-xs btn-ghost rep-hist-btn" disabled>▶</button>
