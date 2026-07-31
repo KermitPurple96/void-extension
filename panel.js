@@ -6863,8 +6863,6 @@ document.addEventListener("DOMContentLoaded", () => {
       body:       intrDetailEntry.reqBody || "",
     });
   });
-  document.getElementById("intr-detail-cmp-l").addEventListener("click", () => { if (intrDetailEntry) cmpSendTo("left", intrDetailEntry); });
-  document.getElementById("intr-detail-cmp-r").addEventListener("click", () => { if (intrDetailEntry) cmpSendTo("right", intrDetailEntry); });
   document.getElementById("intr-detail-notes").addEventListener("click", () => { if (intrDetailEntry) notesFromEntry(intrDetailEntry); });
   document.getElementById("intr-detail-open").addEventListener("click", () => { if (intrDetailEntry?.reqUrl) chrome.tabs.create({ url: intrDetailEntry.reqUrl }); });
 
@@ -6962,8 +6960,6 @@ document.addEventListener("DOMContentLoaded", () => {
     intrSendToIntruder({ ...editingReq, method: document.getElementById("ed-method").value, url: document.getElementById("ed-url").value, headers: rawToHeaders(document.getElementById("ed-headers").value), body: document.getElementById("ed-body").value });
     closeEditor();
   });
-  document.getElementById("ed-cmp-l").addEventListener("click", () => { if (editingReq) cmpSendTo("left", editingReq); });
-  document.getElementById("ed-cmp-r").addEventListener("click", () => { if (editingReq) cmpSendTo("right", editingReq); });
   document.getElementById("ed-to-poc").addEventListener("click", () => { if (editingReq) pocLoadEntry(editingReq); });
   document.getElementById("ed-to-notes").addEventListener("click", () => { if (editingReq) notesFromEntry(editingReq); });
   document.getElementById("ed-open").addEventListener("click", () => { if (editingReq) chrome.tabs.create({ url: editingReq.url }); });
@@ -7215,13 +7211,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!tab) return null;
     return { method: tab.method, url: tab.url, headers: rawToHeaders(tab.headers || ""), body: tab.body || "", respBody: tab.response?.body || "", respHeaders: tab.response?.headers || {}, status: tab.response?.status };
   }
-  document.getElementById("rep-cmp-l").addEventListener("click", () => { const e = repCurrentEntry(); if (e) cmpSendTo("left", e); });
-  document.getElementById("rep-cmp-r").addEventListener("click", () => { const e = repCurrentEntry(); if (e) cmpSendTo("right", e); });
   document.getElementById("rep-to-poc").addEventListener("click", () => { const e = repCurrentEntry(); if (e) pocLoadEntry(e); });
   document.getElementById("rep-to-notes").addEventListener("click", () => { const e = repCurrentEntry(); if (e) notesFromEntry(e); });
   document.getElementById("rep-open").addEventListener("click", () => { const tab = repTabs.find(t => t.id === repActiveTab); if (tab?.url) chrome.tabs.create({ url: tab.url }); });
 
-  // Compare toggle
   // Compare toggle — show/hide right Repeater
   document.getElementById("rep-compare-toggle").addEventListener("click", () => {
     const right = document.getElementById("rep-side-right");
@@ -7422,14 +7415,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // Prefer LEFT, fall back to RIGHT
     return (typeof cmpLeft !== "undefined" && cmpLeft) ? cmpLeft : (typeof cmpRight !== "undefined" ? cmpRight : null);
   }
-  document.getElementById("cmp-to-rep").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) sendToRepeater(e); });
-  document.getElementById("cmp-to-intr").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) intrSendToIntruder(e); });
-  document.getElementById("cmp-to-poc").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) pocLoadEntry(e); });
-  document.getElementById("cmp-to-notes").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) notesFromEntry(e); });
-  document.getElementById("cmp-render").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) renderResponse(e); });
-  document.getElementById("cmp-curl").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) copyAsCurl(e); });
-  document.getElementById("cmp-fetch").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) copyAsFetch(e); });
-  document.getElementById("cmp-python").addEventListener("click", () => { const e = cmpSelectedEntry(); if (e) copyAsPython(e); });
 
   // Settings
   document.getElementById("mr-add").addEventListener("click", addMRRule);
@@ -7788,71 +7773,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   }); // end initBlock("probe")
 
-  // ── Comparer ──────────────────────────────────────────────────────────────
-  initBlock("comparer", () => {
-    document.getElementById("cmp-diff").addEventListener("click", cmpDoDiff);
-    document.getElementById("cmp-swap").addEventListener("click", cmpSwap);
-    document.getElementById("cmp-clear").addEventListener("click", cmpClear);
-
-    // Sub-tab switching (left/right × req/resp)
-    document.querySelectorAll(".cmp-sub-tabs .sub-tab[data-cmppane]").forEach(t => {
-      t.addEventListener("click", () => {
-        const pane = t.dataset.cmppane;
-        const side = pane.startsWith("left") ? "left" : "right";
-        const section = pane.includes("resp") ? "resp" : "req";
-        cmpSwitchPane(side, section);
-      });
-    });
-
-    // Resizer
-    (function() {
-      const handle = document.getElementById("cmp-resizer");
-      const left = document.getElementById("cmp-left");
-      let dragging = false, startX = 0, startW = 0;
-      handle.addEventListener("mousedown", e => {
-        dragging = true; startX = e.clientX; startW = left.getBoundingClientRect().width;
-        document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
-      });
-      document.addEventListener("mousemove", e => {
-        if (!dragging) return;
-        left.style.flex = "none";
-        left.style.width = Math.max(200, startW + e.clientX - startX) + "px";
-      });
-      document.addEventListener("mouseup", () => {
-        if (!dragging) return;
-        dragging = false; document.body.style.userSelect = ""; document.body.style.cursor = "";
-      });
-    })();
-
-    // "→ Cmp L/R" buttons from History detail
-    document.getElementById("hist-detail-cmp-l").addEventListener("click", () => { if (histDetailEntry) cmpSendTo("left", histDetailEntry); });
-    document.getElementById("hist-detail-cmp-r").addEventListener("click", () => { if (histDetailEntry) cmpSendTo("right", histDetailEntry); });
-
-    // "→ Cmp L/R" from Logger detail
-    document.getElementById("log-detail-cmp-l").addEventListener("click", () => { if (logDetailEntry) cmpSendTo("left", logDetailEntry); });
-    document.getElementById("log-detail-cmp-r").addEventListener("click", () => { if (logDetailEntry) cmpSendTo("right", logDetailEntry); });
-
-    // "→ Cmp L/R" from Sensitive detail
-    document.getElementById("sens-detail-cmp-l").addEventListener("click", () => { if (sensDetailEntry) cmpSendTo("left", sensDetailEntry); });
-    document.getElementById("sens-detail-cmp-r").addEventListener("click", () => { if (sensDetailEntry) cmpSendTo("right", sensDetailEntry); });
-
-    // "→ Cmp L/R" from Target detail
-    document.getElementById("tgt-detail-cmp-l").addEventListener("click", () => { if (tgtDetailEntry) cmpSendTo("left", tgtDetailEntry); });
-    document.getElementById("tgt-detail-cmp-r").addEventListener("click", () => { if (tgtDetailEntry) cmpSendTo("right", tgtDetailEntry); });
-
-    // "→ Cmp L/R" from Endpoint detail
-    document.getElementById("ep-detail-cmp-l").addEventListener("click", () => {
-      if (!epDetailEntry) return;
-      const h = historyData.find(he => he.url === epDetailEntry.url) || epDetailEntry;
-      cmpSendTo("left", h);
-    });
-    document.getElementById("ep-detail-cmp-r").addEventListener("click", () => {
-      if (!epDetailEntry) return;
-      const h = historyData.find(he => he.url === epDetailEntry.url) || epDetailEntry;
-      cmpSendTo("right", h);
-    });
-  });
-
   // ── WebSocket History ────────────────────────────────────────────────────
   initBlock("ws", () => {
     document.getElementById("ws-filter").addEventListener("input", e => { wsFilterText = e.target.value; renderWsHistory(); });
@@ -7869,14 +7789,6 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
     initSplitResizer("ws-resizer", "ws-split-left", 200, 250);
-    document.getElementById("ws-detail-cmp-l").addEventListener("click", () => {
-      if (!wsDetailFrame) return;
-      cmpSendTo("left", { method: "WS", url: wsDetailFrame.url, host: "", path: "", headers: {}, body: wsDetailFrame.data, status: null, respHeaders: {}, respBody: "" });
-    });
-    document.getElementById("ws-detail-cmp-r").addEventListener("click", () => {
-      if (!wsDetailFrame) return;
-      cmpSendTo("right", { method: "WS", url: wsDetailFrame.url, host: "", path: "", headers: {}, body: wsDetailFrame.data, status: null, respHeaders: {}, respBody: "" });
-    });
   });
 
   // ── PoC Generator ───────────────────────────────────────────────────
