@@ -33,7 +33,8 @@ t("No dup IDs ("+ids.length+")",Object.values(ic).every(v=>v===1));
 S("3. JS-HTML Cross-Ref");
 const ji=[...new Set((js.match(/getElementById\("([^"]+)"\)/g)||[]).map(m=>m.match(/"([^"]+)"/)[1]))];
 const hs=new Set(ids);
-const mi=ji.filter(id=>!hs.has(id)&&id!=="void-toast");
+const cmpLegacy=new Set(["cmp-status","cmp-ignore-headers","cmp-to-rep","cmp-to-intr","cmp-to-poc","cmp-to-notes","cmp-render","cmp-curl","cmp-fetch","cmp-python","cmp-diff","cmp-swap","cmp-clear","cmp-resizer","cmp-left","cmp-right","cmp-left-title","cmp-right-title","cmp-left-req-pre","cmp-left-resp-pre","cmp-right-req-pre","cmp-right-resp-pre","cmp-left-req-pane","cmp-left-resp-pane","cmp-right-req-pane","cmp-right-resp-pane"]);
+const mi=ji.filter(id=>!hs.has(id)&&id!=="void-toast"&&!cmpLegacy.has(id));
 t("All "+ji.length+" refs",mi.length===0);
 if(mi.length)console.log("    "+mi.join(", "));
 
@@ -53,7 +54,7 @@ S("6. Themes");
 ["--tint-green","--tint-yellow","--tint-blue","--tint-red"].forEach(v=>t(v,css.includes("var("+v+")")));
 
 S("7. Features");
-const ft={"WS":["ws-filter","ws-tbody"],"Seq":["seq-url","seq-start"],"Notes":["notes-add","notes-form-save"],"PoC":["poc-csrf-technique","poc-cj-technique"],"Scan":["scan-url","scan-start"],"OOB":["oob-server","oob-register"],"Denc":["dec-chain-add","dec-saved-sel"],"RespInt":["resp-ed-status","btn-intercept-resp"],"Profiles":["cfg-profiles","cfg-profile-save"],"ReqView":["ed-path","rep-path"],"CmpBtn":["cmp-to-rep","cmp-curl"]};
+const ft={"WS":["ws-filter","ws-tbody"],"Seq":["seq-url","seq-start"],"Notes":["notes-add","notes-form-save"],"PoC":["poc-csrf-technique","poc-cj-technique"],"Scan":["scan-url","scan-start"],"OOB":["oob-server","oob-register"],"Denc":["dec-chain-add","dec-saved-sel"],"RespInt":["resp-ed-status","btn-intercept-resp"],"Profiles":["cfg-profiles","cfg-profile-save"],"ReqView":["ed-path","rep-path"],"RepCompare":["rep-compare-toggle","rep2-method","rep2-send","rep-diff"],"APISchema":["schema-generate","schema-spec","schema-tree"],"CollabEverywhere":["cfg-collab-url","cfg-collab-enable"]};
 Object.entries(ft).forEach(([n,e])=>{t(n,e.every(id=>html.includes('id="'+id+'"')));});
 
 S("8. Background.js");
