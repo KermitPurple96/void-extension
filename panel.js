@@ -4269,6 +4269,15 @@ function buildSessionData() {
       extract: document.getElementById("intr-grep-extract").value,
       proc: document.getElementById("intr-proc").value,
     },
+    // Intruder specialized attack configs
+    intrSpecialized: {
+      authA: document.getElementById("intr-auth-a").value,
+      authB: document.getElementById("intr-auth-b").value,
+      authUnauth: document.getElementById("intr-auth-unauth").checked,
+      raceCount: document.getElementById("intr-race-count").value,
+      jwtAttack: document.getElementById("intr-jwt-attack").value,
+      jwtHeader: document.getElementById("intr-jwt-header").value,
+    },
     // Decoder chain
     decoderChain: [...(window._decChain || [])],
   };
@@ -4462,6 +4471,15 @@ async function applySessionData(data) {
     document.getElementById("intr-grep-match").value = data.intrGrep.match || "";
     document.getElementById("intr-grep-extract").value = data.intrGrep.extract || "";
     document.getElementById("intr-proc").value = data.intrGrep.proc || "";
+  }
+  if (data.intrSpecialized) {
+    const s = data.intrSpecialized;
+    document.getElementById("intr-auth-a").value = s.authA || "";
+    document.getElementById("intr-auth-b").value = s.authB || "";
+    document.getElementById("intr-auth-unauth").checked = !!s.authUnauth;
+    document.getElementById("intr-race-count").value = s.raceCount || "20";
+    document.getElementById("intr-jwt-attack").value = s.jwtAttack || "alg-none";
+    document.getElementById("intr-jwt-header").value = s.jwtHeader || "Authorization";
   }
   if (data.decoderChain && window._decChain) {
     window._decChain.length = 0;
@@ -5225,133 +5243,10 @@ function notesExport() {
   a.click(); URL.revokeObjectURL(a.href);
 }
 
-// ═══════════════════════════ COMPARER ════════════════════════════════════
-
-let cmpLeft = null;   // { method, url, host, path, headers, body, status, statusText, respHeaders, respBody }
-let cmpRight = null;
-
-function cmpEntryToText(entry, section) {
-  if (!entry) return "";
-  if (section === "req") {
-    let text = `${entry.method} ${entry.path || "/"} HTTP/1.1\nHost: ${entry.host}\n`;
-    text += Object.entries(entry.headers || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-    if (entry.body) text += "\n\n" + entry.body;
-    return text;
-  } else {
-    let text = entry.status ? `HTTP/1.1 ${entry.status} ${entry.statusText || ""}\n` : "(no response)\n";
-    text += Object.entries(entry.respHeaders || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
-    const ct = entry.respHeaders?.["content-type"] || entry.respHeaders?.["Content-Type"] || "";
-    text += "\n\n" + tryPretty(entry.respBody || "(empty)", ct);
-    return text;
-  }
-}
-
-function cmpSendTo(side, entry) {
-  const data = {
-    method: entry.method || "GET",
-    url: entry.url || "",
-    host: entry.host || "",
-    path: entry.path || "",
-    headers: entry.headers || {},
-    body: entry.body || "",
-    status: entry.status || null,
-    statusText: entry.statusText || "",
-    respHeaders: entry.respHeaders || {},
-    respBody: entry.respBody || "",
-  };
-  if (!data.host || !data.path) {
-    try { const u = new URL(data.url); data.host = u.host; data.path = u.pathname + u.search; } catch {}
-  }
-  if (side === "left") {
-    cmpLeft = data;
-    // Send to Repeater as primary
-    sendToRepeater({ method: data.method, url: data.url, headers: data.headers, body: data.body, rawHeaders: headersToRaw(data.headers) });
-  } else {
-    cmpRight = data;
-    // Populate compare pane
-    document.getElementById("rep2-method").value = data.method || "GET";
-    document.getElementById("rep2-path").value = data.path || "/";
-    const hdrs = typeof data.headers === "object" ? headersToRaw(data.headers) : (data.headers || "");
-    document.getElementById("rep2-headers").value = ensureHostHeader(hdrs, data.host);
-    document.getElementById("rep2-body-ta").value = data.body || "";
-    // Show response if available
-    if (data.respBody || data.status) {
-      let respText = `HTTP/1.1 ${data.status || "?"} ${data.statusText || ""}\n`;
-      respText += Object.entries(data.respHeaders || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
-      respText += "\n\n" + (data.respBody || "");
-      document.getElementById("resp2-body-pre").textContent = respText;
-      document.getElementById("resp2-empty").classList.add("hidden");
-    }
-    document.getElementById("rep-side-right").classList.remove("hidden");
-    document.getElementById("rep-compare-toggle").classList.add("btn-accent");
-    document.getElementById("rep-diff").classList.remove("hidden");
-    document.getElementById("rep-diff-case-wrap").classList.remove("hidden");
-    showTab("repeater");
-    showToast("Loaded into Compare pane");
-  }
-  cmpRenderSide(side);
-}
-
-function cmpRenderSide(side) {
-  const entry = side === "left" ? cmpLeft : cmpRight;
-  const titleEl = document.getElementById(`cmp-${side}-title`);
-  const reqPre = document.getElementById(`cmp-${side}-req-pre`);
-  const respPre = document.getElementById(`cmp-${side}-resp-pre`);
-
-  if (!entry) {
-    titleEl.textContent = `(empty — send a request here with → Cmp ${side === "left" ? "L" : "R"})`;
-    reqPre.textContent = "";
-    respPre.textContent = "";
-    return;
-  }
-
-  titleEl.textContent = `${entry.status || "…"} ${entry.method} ${entry.url}`;
-  reqPre.textContent = cmpEntryToText(entry, "req");
-  respPre.textContent = cmpEntryToText(entry, "resp");
-}
-
-function cmpDoDiff() {
-  if (!cmpLeft || !cmpRight) {
-    document.getElementById("cmp-status").textContent = "Need both Left and Right to diff";
-    setTimeout(() => { document.getElementById("cmp-status").textContent = ""; }, 2000);
-    return;
-  }
-
-  const ignoreCase = document.getElementById("cmp-ignore-case").checked;
-  const ignoreHdrOrder = document.getElementById("cmp-ignore-headers").checked;
-
-  // Diff both request and response
-  const activeLeft = document.querySelector("#cmp-left .cmp-sub-tabs .sub-tab.active");
-  const activeRight = document.querySelector("#cmp-right .cmp-sub-tabs .sub-tab.active");
-  const section = activeLeft?.dataset.cmppane?.includes("resp") ? "resp" : "req";
-
-  // Sync both sides to same view
-  cmpSwitchPane("left", section);
-  cmpSwitchPane("right", section);
-
-  let leftText = cmpEntryToText(cmpLeft, section);
-  let rightText = cmpEntryToText(cmpRight, section);
-
-  if (ignoreHdrOrder) {
-    leftText = cmpSortHeaders(leftText);
-    rightText = cmpSortHeaders(rightText);
-  }
-
-  const leftLines = leftText.split("\n");
-  const rightLines = rightText.split("\n");
-
-  const diff = cmpLineDiff(leftLines, rightLines, ignoreCase);
-
-  document.getElementById(`cmp-left-${section}-pre`).replaceChildren();
-  document.getElementById(`cmp-right-${section}-pre`).replaceChildren();
-
-  cmpRenderDiff(document.getElementById(`cmp-left-${section}-pre`), diff.left);
-  cmpRenderDiff(document.getElementById(`cmp-right-${section}-pre`), diff.right);
-
-  const changes = diff.left.filter(d => d.type !== "same").length + diff.right.filter(d => d.type !== "same").length;
-  document.getElementById("cmp-status").textContent = changes === 0 ? "Identical" : `${changes} differences`;
-  setTimeout(() => { document.getElementById("cmp-status").textContent = ""; }, 4000);
-}
+// ═══════════════════════════ COMPARER (diff utilities) ══════════════════
+// The standalone Comparer tab was removed; these diff utilities remain
+// because the Repeater diff feature (rep-diff button) uses cmpLineDiff,
+// cmpSimpleDiff, cmpRenderDiff, and cmpSortHeaders.
 
 function cmpSortHeaders(text) {
   const parts = text.split("\n\n");
@@ -5466,33 +5361,6 @@ function cmpRenderDiff(pre, lines) {
     frag.appendChild(div);
   }
   pre.appendChild(frag);
-}
-
-function cmpSwitchPane(side, section) {
-  const container = document.getElementById(`cmp-${side}`);
-  container.querySelectorAll(".cmp-sub-tabs .sub-tab").forEach(t => {
-    const paneSection = t.dataset.cmppane.includes("resp") ? "resp" : "req";
-    t.classList.toggle("active", paneSection === section);
-  });
-  container.querySelectorAll(".cmp-pane").forEach(p => {
-    const isTarget = p.id === `cmp-${side}-${section}-pane`;
-    p.classList.toggle("active", isTarget);
-    p.classList.toggle("hidden", !isTarget);
-  });
-}
-
-function cmpSwap() {
-  const tmp = cmpLeft;
-  cmpLeft = cmpRight;
-  cmpRight = tmp;
-  cmpRenderSide("left");
-  cmpRenderSide("right");
-}
-
-function cmpClear() {
-  cmpLeft = null; cmpRight = null;
-  cmpRenderSide("left");
-  cmpRenderSide("right");
 }
 
 // ═══════════════════════════ REQUEST VIEW MODE (Split / Raw) ═════════════════
@@ -6446,14 +6314,17 @@ async function intrRunJwtAttack(url, method, rawHeaders, body) {
   if (!jwt || jwt.split(".").length < 3) return [{ id: 1, payload: "No JWT found", status: 0, length: 0, elapsed: 0, respBody: "", respHeaders: {}, grepMatch: false, grepExtract: "Check token header name" }];
 
   const parts = jwt.split(".");
+  // base64url helpers — JWT uses URL-safe alphabet, not standard base64
+  const b64uDecode = s => atob(s.replace(/-/g, "+").replace(/_/g, "/"));
+  const b64uEncode = s => btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
   const results = [];
 
   if (attackType === "none-alg") {
     // Modify header to alg:none, remove signature
-    const header = JSON.parse(atob(parts[0]));
+    const header = JSON.parse(b64uDecode(parts[0]));
     for (const alg of ["none", "None", "NONE", "nOnE"]) {
       header.alg = alg;
-      const newJwt = btoa(JSON.stringify(header)).replace(/=/g, "") + "." + parts[1] + ".";
+      const newJwt = b64uEncode(JSON.stringify(header)) + "." + parts[1] + ".";
       const hdrs = rawHeaders.replace(jwt, newJwt);
       const res = await bg({ type: "SEND_REQUEST", url, method, rawHeaders: hdrs, body: body || undefined });
       results.push({
@@ -6468,9 +6339,9 @@ async function intrRunJwtAttack(url, method, rawHeaders, body) {
       if (!intrRunning) break;
       // Can't sign HMAC in browser without Web Crypto complexity, but we can test the secret
       // by attempting to use it as a simple check
-      const payload = JSON.parse(atob(parts[1]));
+      const payload = JSON.parse(b64uDecode(parts[1]));
       payload.sub = "admin"; // Try escalation
-      const newPayload = btoa(JSON.stringify(payload)).replace(/=/g, "");
+      const newPayload = b64uEncode(JSON.stringify(payload));
       const newJwt = parts[0] + "." + newPayload + "." + parts[2]; // Keep old sig
       const hdrs = rawHeaders.replace(jwt, newJwt);
       const res = await bg({ type: "SEND_REQUEST", url, method, rawHeaders: hdrs, body: body || undefined });
@@ -6483,7 +6354,7 @@ async function intrRunJwtAttack(url, method, rawHeaders, body) {
       intrUpdateProgress(JWT_WEAK_SECRETS.indexOf(secret) + 1, JWT_WEAK_SECRETS.length);
     }
   } else if (attackType === "claim-tamper") {
-    const payload = JSON.parse(atob(parts[1]));
+    const payload = JSON.parse(b64uDecode(parts[1]));
     const tamperings = [
       { key: "admin", values: [true, 1, "true"] },
       { key: "role", values: ["admin", "root", "superuser"] },
@@ -6494,7 +6365,7 @@ async function intrRunJwtAttack(url, method, rawHeaders, body) {
       for (const v of t.values) {
         if (!intrRunning) break;
         const newPayload = { ...payload, [t.key]: v };
-        const newP = btoa(JSON.stringify(newPayload)).replace(/=/g, "");
+        const newP = b64uEncode(JSON.stringify(newPayload));
         const newJwt = parts[0] + "." + newP + "." + parts[2];
         const hdrs = rawHeaders.replace(jwt, newJwt);
         const res = await bg({ type: "SEND_REQUEST", url, method, rawHeaders: hdrs, body: body || undefined });
@@ -7466,12 +7337,6 @@ document.addEventListener("DOMContentLoaded", () => {
     showToast(`Chain "${name}" deleted`);
   });
   decLoadSaved();
-
-  // Comparer action buttons (apply to selected side)
-  function cmpSelectedEntry() {
-    // Prefer LEFT, fall back to RIGHT
-    return (typeof cmpLeft !== "undefined" && cmpLeft) ? cmpLeft : (typeof cmpRight !== "undefined" ? cmpRight : null);
-  }
 
   // Settings
   document.getElementById("mr-add").addEventListener("click", addMRRule);

@@ -2302,42 +2302,7 @@ body {
 }
 .log-sync-status .dot { width: 7px; height: 7px; }
 
-/* ═══════════════════════════ COMPARER ════════════════════════════════════ */
-.cmp-toolbar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--border);
-}
-.cmp-layout {
-  display: flex; flex: 1; overflow: hidden; height: calc(100% - 38px);
-}
-.cmp-side {
-  flex: 1; display: flex; flex-direction: column; min-width: 200px; overflow: hidden;
-}
-.cmp-side-header {
-  display: flex; align-items: center; gap: 6px;
-  padding: 4px 8px; background: var(--bg2); border-bottom: 1px solid var(--border);
-}
-.cmp-side-label {
-  font-weight: 700; font-size: 10px; text-transform: uppercase;
-  padding: 2px 6px; border-radius: 3px; color: #fff;
-}
-#cmp-left .cmp-side-label  { background: #3a7bd5; }
-#cmp-right .cmp-side-label { background: #d97706; }
-.cmp-side-title {
-  font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.cmp-sub-tabs {
-  display: flex; gap: 0; background: var(--bg2); border-bottom: 1px solid var(--border);
-}
-.cmp-sub-tabs .sub-tab { padding: 3px 10px; font-size: 11px; }
-.cmp-pane { flex: 1; overflow: auto; }
-.cmp-pane.hidden { display: none; }
-.cmp-pre { white-space: pre-wrap; word-break: break-all; font-size: 11px; padding: 6px; }
-.cmp-resizer {
-  width: 5px; cursor: col-resize; background: var(--border); flex-shrink: 0;
-}
-.cmp-resizer:hover { background: var(--accent); }
-/* Diff line highlights */
+/* ═══════════════════════════ DIFF HIGHLIGHTS (used by Repeater diff) ════ */
 .cmp-line-add  { background: rgba(52, 168, 83, 0.18); }
 .cmp-line-del  { background: rgba(234, 67, 53, 0.18); }
 .cmp-line-chg  { background: rgba(251, 188, 4, 0.15); }
