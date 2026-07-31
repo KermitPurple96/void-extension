@@ -5446,7 +5446,8 @@ function initKeyboardShortcuts() {
 // ═══════════════════════════ THEME ═══════════════════════════════════════════
 
 function applyTheme(theme) {
-  document.documentElement.classList.toggle("theme-light", theme === "light");
+  document.documentElement.classList.remove("theme-light", "theme-dracula", "theme-hacker");
+  if (theme && theme !== "dark") document.documentElement.classList.add("theme-" + theme);
 }
 
 // ═══════════════════════════ HAR EXPORT ══════════════════════════════════════
