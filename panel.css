@@ -381,6 +381,16 @@ body {
 }
 .path-inp:focus { border-color: var(--accent); }
 
+/* View pane — stretches inside the flex column parent (.rep-req-side) */
+.rep-view-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+.rep-view-pane.hidden { display: none; }
+.rep-view-pane .raw-ta { flex: 1; }
+
 .httpver-sel {
   background: var(--bg3);
   border: 1px solid var(--border);

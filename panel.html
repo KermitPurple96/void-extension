@@ -547,7 +547,7 @@
       <!-- Request pane (LEFT) -->
       <div class="rep-req rep-req-side" id="rep-req-pane">
         <!-- Split mode -->
-        <div id="rep-split-view">
+        <div id="rep-split-view" class="rep-view-pane">
           <div class="pane-label">REQUEST HEADERS</div>
           <textarea id="rep-headers" class="raw-ta" spellcheck="false"
                     placeholder="Host: target.com&#10;Content-Type: application/json&#10;Authorization: Bearer …"></textarea>
@@ -556,9 +556,9 @@
                     placeholder='{"key": "value"}'></textarea>
         </div>
         <!-- Raw mode -->
-        <div id="rep-raw-view" class="hidden" style="flex:1;display:flex;flex-direction:column">
+        <div id="rep-raw-view" class="rep-view-pane hidden">
           <div class="pane-label">RAW REQUEST</div>
-          <textarea id="rep-raw-ta" class="raw-ta" spellcheck="false" style="flex:1"
+          <textarea id="rep-raw-ta" class="raw-ta" spellcheck="false"
                     placeholder="GET /path HTTP/1.1&#10;Host: target.com&#10;Content-Type: application/json&#10;&#10;{&quot;key&quot;: &quot;value&quot;}"></textarea>
         </div>
         <div class="reflect-bar" id="rep-reflect-bar">

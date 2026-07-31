@@ -5414,7 +5414,8 @@ function applyRepeaterViewMode() {
   const splitEl = document.getElementById("rep-split-view");
   const rawEl = document.getElementById("rep-raw-view");
   if (mode === "raw") {
-    splitEl.classList.add("hidden"); rawEl.classList.remove("hidden"); rawEl.style.display = "flex";
+    splitEl.classList.add("hidden");
+    rawEl.classList.remove("hidden");
     const method = document.getElementById("rep-method").value;
     const path = document.getElementById("rep-path").value;
     const httpVer = document.getElementById("rep-httpver").value;
@@ -5422,7 +5423,8 @@ function applyRepeaterViewMode() {
     const body = document.getElementById("rep-body-ta").value;
     document.getElementById("rep-raw-ta").value = buildRawRequest(method, path, httpVer, headers, body);
   } else {
-    splitEl.classList.remove("hidden"); rawEl.classList.add("hidden"); rawEl.style.display = "none";
+    splitEl.classList.remove("hidden");
+    rawEl.classList.add("hidden");
   }
 }
 
