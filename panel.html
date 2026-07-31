@@ -1325,29 +1325,57 @@
         <textarea id="dec-input" class="raw-ta dec-ta" spellcheck="false" placeholder="Paste text to encode/decode…"></textarea>
       </div>
       <div class="dec-controls">
-        <div class="dec-section-label">Encode →</div>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="b64-enc">Base64</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="url-enc">URL</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="url-enc2">URL (2x)</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="html-enc">HTML Entities</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="hex-enc">Hex</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="unicode-enc">Unicode</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="js-enc">JS Escape</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="ascii-hex">ASCII Hex</button>
+        <div class="dec-section-label">Single operation</div>
+        <div class="dec-btn-grid">
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="b64-enc">B64 Enc</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="b64-dec">B64 Dec</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="url-enc">URL Enc</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="url-dec">URL Dec</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="url-enc2">URL 2x</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="html-enc">HTML Enc</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="html-dec">HTML Dec</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="hex-enc">Hex Enc</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="hex-dec">Hex Dec</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="unicode-enc">Unicode Enc</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="unicode-dec">Unicode Dec</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="js-enc">JS Esc</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="js-dec">JS Unesc</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="ascii-hex">ASCII Hex</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="jwt-dec">JWT Dec</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="md5">MD5</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="sha1">SHA-1</button>
+          <button class="btn btn-xs btn-ghost dec-btn" data-op="sha256">SHA-256</button>
+        </div>
 
-        <div class="dec-section-label" style="margin-top:10px">← Decode</div>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="b64-dec">Base64</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="url-dec">URL</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="html-dec">HTML Entities</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="hex-dec">Hex</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="unicode-dec">Unicode</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="js-dec">JS Unescape</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="jwt-dec">JWT Decode</button>
-
-        <div class="dec-section-label" style="margin-top:10px">Hash</div>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="md5">MD5</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="sha1">SHA-1</button>
-        <button class="btn btn-xs btn-ghost dec-btn" data-op="sha256">SHA-256</button>
+        <div class="dec-section-label" style="margin-top:10px">Chain (add steps, apply in order)</div>
+        <div class="dec-chain-controls">
+          <select id="dec-chain-add" class="filter-sel" style="flex:1">
+            <option value="">+ Add step…</option>
+            <option value="b64-enc">Base64 Encode</option>
+            <option value="b64-dec">Base64 Decode</option>
+            <option value="url-enc">URL Encode</option>
+            <option value="url-dec">URL Decode</option>
+            <option value="url-enc2">URL Encode 2x</option>
+            <option value="html-enc">HTML Encode</option>
+            <option value="html-dec">HTML Decode</option>
+            <option value="hex-enc">Hex Encode</option>
+            <option value="hex-dec">Hex Decode</option>
+            <option value="unicode-enc">Unicode Encode</option>
+            <option value="unicode-dec">Unicode Decode</option>
+            <option value="js-enc">JS Escape</option>
+            <option value="js-dec">JS Unescape</option>
+            <option value="md5">MD5 Hash</option>
+            <option value="sha1">SHA-1 Hash</option>
+            <option value="sha256">SHA-256 Hash</option>
+            <option value="lowercase">Lowercase</option>
+            <option value="uppercase">Uppercase</option>
+          </select>
+        </div>
+        <div id="dec-chain-list" class="dec-chain-list"></div>
+        <div class="dec-chain-actions">
+          <button id="dec-chain-apply" class="btn btn-xs btn-accent">Apply Chain</button>
+          <button id="dec-chain-clear" class="btn btn-xs btn-ghost">Clear Chain</button>
+        </div>
 
         <div style="margin-top:auto">
           <button id="dec-swap" class="btn btn-sm btn-ghost" style="width:100%">↕ Swap Input/Output</button>
@@ -1370,6 +1398,17 @@
       <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-headers" checked><span class="toggle-track"></span> Ignore header order</label>
       <label class="rep-autocookie"><input type="checkbox" id="cmp-ignore-case"><span class="toggle-track"></span> Case-insensitive</label>
       <span id="cmp-status" class="settings-status"></span>
+    </div>
+    <div class="detail-action-bar">
+      <button id="cmp-to-rep" class="btn btn-xs btn-ghost">→ Repeater</button>
+      <button id="cmp-to-intr" class="btn btn-xs btn-ghost">→ Intruder</button>
+      <button id="cmp-to-poc" class="btn btn-xs btn-ghost">→ PoC</button>
+      <button id="cmp-to-notes" class="btn btn-xs btn-ghost">→ Notes</button>
+      <button id="cmp-render" class="btn btn-xs btn-ghost">Render</button>
+      <button id="cmp-curl" class="btn btn-xs btn-ghost">curl</button>
+      <button id="cmp-fetch" class="btn btn-xs btn-ghost">fetch</button>
+      <button id="cmp-python" class="btn btn-xs btn-ghost">py</button>
+      <span class="settings-status" style="font-size:10px;color:var(--muted)">(actions apply to LEFT side)</span>
     </div>
     <div class="cmp-layout">
       <!-- LEFT side -->

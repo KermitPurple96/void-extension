@@ -6683,6 +6683,61 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("dec-output").value = "";
   });
 
+  // Decoder chain
+  const decChain = [];
+  const decChainOpNames = { "b64-enc": "Base64 Enc", "b64-dec": "Base64 Dec", "url-enc": "URL Enc", "url-dec": "URL Dec", "url-enc2": "URL 2x", "html-enc": "HTML Enc", "html-dec": "HTML Dec", "hex-enc": "Hex Enc", "hex-dec": "Hex Dec", "unicode-enc": "Unicode Enc", "unicode-dec": "Unicode Dec", "js-enc": "JS Esc", "js-dec": "JS Unesc", "md5": "MD5", "sha1": "SHA-1", "sha256": "SHA-256", "lowercase": "Lowercase", "uppercase": "Uppercase" };
+
+  function decRenderChain() {
+    const list = document.getElementById("dec-chain-list");
+    list.replaceChildren();
+    decChain.forEach((op, i) => {
+      const step = el("div", "dec-chain-step");
+      step.appendChild(txt("span", "dec-chain-num", String(i + 1)));
+      step.appendChild(document.createTextNode(decChainOpNames[op] || op));
+      const rm = txt("span", "dec-chain-rm", "\u2717");
+      rm.addEventListener("click", () => { decChain.splice(i, 1); decRenderChain(); });
+      step.appendChild(rm);
+      list.appendChild(step);
+    });
+  }
+
+  document.getElementById("dec-chain-add").addEventListener("change", e => {
+    if (!e.target.value) return;
+    decChain.push(e.target.value);
+    e.target.value = "";
+    decRenderChain();
+  });
+
+  document.getElementById("dec-chain-clear").addEventListener("click", () => {
+    decChain.length = 0;
+    decRenderChain();
+  });
+
+  document.getElementById("dec-chain-apply").addEventListener("click", async () => {
+    if (!decChain.length) return;
+    let value = document.getElementById("dec-input").value;
+    for (const op of decChain) {
+      const result = decOp(op, value);
+      value = (result instanceof Promise) ? await result : result;
+    }
+    document.getElementById("dec-output").value = value;
+    showToast(`Chain applied (${decChain.length} steps)`);
+  });
+
+  // Comparer action buttons (apply to LEFT side entry)
+  function cmpLeftEntry() {
+    const l = typeof cmpLeft !== "undefined" ? cmpLeft : null;
+    return l;
+  }
+  document.getElementById("cmp-to-rep").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) sendToRepeater(e); });
+  document.getElementById("cmp-to-intr").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) intrSendToIntruder(e); });
+  document.getElementById("cmp-to-poc").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) pocLoadEntry(e); });
+  document.getElementById("cmp-to-notes").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) notesFromEntry(e); });
+  document.getElementById("cmp-render").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) renderResponse(e); });
+  document.getElementById("cmp-curl").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) copyAsCurl(e); });
+  document.getElementById("cmp-fetch").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) copyAsFetch(e); });
+  document.getElementById("cmp-python").addEventListener("click", () => { const e = cmpLeftEntry(); if (e) copyAsPython(e); });
+
   // Settings
   document.getElementById("mr-add").addEventListener("click", addMRRule);
   // Auto Headers preset dropdown
