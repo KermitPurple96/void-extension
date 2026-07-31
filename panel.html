@@ -2048,6 +2048,28 @@
         </div>
       </div>
 
+      <!-- ── Settings Profiles ──────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Settings Profiles</div>
+        <div class="settings-section-desc">Save, load, and export settings configurations.</div>
+        <div class="settings-row">
+          <select id="cfg-profiles" class="filter-sel" style="flex:1">
+            <option value="">Saved profiles…</option>
+          </select>
+          <button id="cfg-profile-load" class="btn btn-sm btn-ghost">Load</button>
+          <button id="cfg-profile-del" class="btn btn-sm btn-danger">Delete</button>
+        </div>
+        <div class="settings-row">
+          <input id="cfg-profile-name" type="text" class="settings-inp" placeholder="Profile name" spellcheck="false" style="flex:1">
+          <button id="cfg-profile-save" class="btn btn-sm btn-accent">Save Profile</button>
+        </div>
+        <div class="settings-actions">
+          <button id="cfg-profile-export" class="btn btn-sm btn-ghost">Export .json</button>
+          <button id="cfg-profile-import" class="btn btn-sm btn-ghost">Import .json</button>
+          <input type="file" id="cfg-profile-file" accept=".json" hidden>
+        </div>
+      </div>
+
       <div class="settings-actions">
         <button id="cfg-save" class="btn btn-accent">Save Settings</button>
         <button id="cfg-reset" class="btn btn-sm btn-ghost">Reset Defaults</button>

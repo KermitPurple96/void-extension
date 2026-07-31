@@ -4158,6 +4158,27 @@ function buildSessionData() {
     scopeExclude: document.getElementById("tgt-scope-exclude").value,
     // Notes
     notes: notes,
+    // WebSocket frames
+    wsFrames: wsFrames,
+    wsConnections: wsConnections,
+    // Sequencer
+    sequencer: {
+      tokens: seqTokens,
+      url: document.getElementById("seq-url").value,
+      method: document.getElementById("seq-method").value,
+      extract: document.getElementById("seq-extract").value,
+      tokenName: document.getElementById("seq-token-name").value,
+    },
+    // Scan findings
+    scanFindings: scanFindings,
+    // Intruder extras
+    intrGrep: {
+      match: document.getElementById("intr-grep-match").value,
+      extract: document.getElementById("intr-grep-extract").value,
+      proc: document.getElementById("intr-proc").value,
+    },
+    // Decoder chain
+    decoderChain: [...(window._decChain || [])],
   };
 }
 
@@ -4334,6 +4355,25 @@ async function applySessionData(data) {
   if (data.notes) {
     notes = data.notes;
     notesNextId = notes.reduce((max, n) => Math.max(max, n.id), 0) + 1;
+  }
+  if (data.wsFrames) { wsFrames = data.wsFrames; wsConnections = data.wsConnections || {}; }
+  if (data.sequencer) {
+    seqTokens = data.sequencer.tokens || [];
+    document.getElementById("seq-url").value = data.sequencer.url || "";
+    document.getElementById("seq-method").value = data.sequencer.method || "GET";
+    document.getElementById("seq-extract").value = data.sequencer.extract || "cookie";
+    document.getElementById("seq-token-name").value = data.sequencer.tokenName || "";
+    if (seqTokens.length) seqAnalyze();
+  }
+  if (data.scanFindings) { scanFindings = data.scanFindings; scanRenderFindings(); }
+  if (data.intrGrep) {
+    document.getElementById("intr-grep-match").value = data.intrGrep.match || "";
+    document.getElementById("intr-grep-extract").value = data.intrGrep.extract || "";
+    document.getElementById("intr-proc").value = data.intrGrep.proc || "";
+  }
+  if (data.decoderChain && window._decChain) {
+    window._decChain.length = 0;
+    window._decChain.push(...data.decoderChain);
   }
 
   renderHeaders();
@@ -6664,7 +6704,8 @@ document.addEventListener("DOMContentLoaded", () => {
   colFilterInit("intr-table", () => intrResults, (e, f) => String(e[f] ?? ""), intrColFilters, intrRenderResults);
 
   // Dencoder — chain-only with saved presets
-  const decChain = [];
+  window._decChain = [];
+  const decChain = window._decChain;
   const decChainOpNames = { "b64-enc": "Base64 Enc", "b64-dec": "Base64 Dec", "url-enc": "URL Enc", "url-dec": "URL Dec", "url-enc2": "URL 2x", "html-enc": "HTML Enc", "html-dec": "HTML Dec", "hex-enc": "Hex Enc", "hex-dec": "Hex Dec", "unicode-enc": "Unicode Enc", "unicode-dec": "Unicode Dec", "js-enc": "JS Esc", "js-dec": "JS Unesc", "ascii-hex": "ASCII Hex", "jwt-dec": "JWT Dec", "md5": "MD5", "sha1": "SHA-1", "sha256": "SHA-256", "lowercase": "Lowercase", "uppercase": "Uppercase" };
 
   function decRenderChain() {
@@ -6789,6 +6830,77 @@ document.addEventListener("DOMContentLoaded", () => {
     loadSettingsUI();
     saveSettings();
   });
+
+  // Settings profiles
+  async function cfgRefreshProfiles() {
+    const stored = await new Promise(r => chrome.storage.local.get("voidSettingsProfiles", r));
+    const profiles = stored.voidSettingsProfiles || {};
+    const sel = document.getElementById("cfg-profiles");
+    sel.replaceChildren();
+    const def = el("option"); def.value = ""; def.textContent = "Saved profiles\u2026"; sel.appendChild(def);
+    for (const name of Object.keys(profiles).sort()) {
+      const o = el("option"); o.value = name; o.textContent = name; sel.appendChild(o);
+    }
+  }
+  document.getElementById("cfg-profile-save").addEventListener("click", async () => {
+    const name = document.getElementById("cfg-profile-name").value.trim();
+    if (!name) { showToast("Enter a profile name"); return; }
+    saveSettings(); // ensure current UI is captured
+    const stored = await new Promise(r => chrome.storage.local.get("voidSettingsProfiles", r));
+    const profiles = stored.voidSettingsProfiles || {};
+    profiles[name] = { ...settings };
+    await new Promise(r => chrome.storage.local.set({ voidSettingsProfiles: profiles }, r));
+    document.getElementById("cfg-profile-name").value = "";
+    cfgRefreshProfiles();
+    showToast(`Profile "${name}" saved`);
+  });
+  document.getElementById("cfg-profile-load").addEventListener("click", async () => {
+    const name = document.getElementById("cfg-profiles").value;
+    if (!name) return;
+    const stored = await new Promise(r => chrome.storage.local.get("voidSettingsProfiles", r));
+    const profiles = stored.voidSettingsProfiles || {};
+    if (!profiles[name]) return;
+    settings = { ...DEFAULT_SETTINGS, ...profiles[name] };
+    loadSettingsUI();
+    saveSettings();
+    showToast(`Profile "${name}" loaded`);
+  });
+  document.getElementById("cfg-profile-del").addEventListener("click", async () => {
+    const name = document.getElementById("cfg-profiles").value;
+    if (!name) return;
+    const stored = await new Promise(r => chrome.storage.local.get("voidSettingsProfiles", r));
+    const profiles = stored.voidSettingsProfiles || {};
+    delete profiles[name];
+    await new Promise(r => chrome.storage.local.set({ voidSettingsProfiles: profiles }, r));
+    cfgRefreshProfiles();
+    showToast(`Profile "${name}" deleted`);
+  });
+  document.getElementById("cfg-profile-export").addEventListener("click", () => {
+    saveSettings();
+    const blob = new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" });
+    const a = el("a"); a.href = URL.createObjectURL(blob);
+    a.download = `void-settings-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click(); URL.revokeObjectURL(a.href);
+    showToast("Settings exported");
+  });
+  document.getElementById("cfg-profile-import").addEventListener("click", () => {
+    document.getElementById("cfg-profile-file").click();
+  });
+  document.getElementById("cfg-profile-file").addEventListener("change", e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    file.text().then(text => {
+      try {
+        const imported = JSON.parse(text);
+        settings = { ...DEFAULT_SETTINGS, ...imported };
+        loadSettingsUI();
+        saveSettings();
+        showToast("Settings imported");
+      } catch { showToast("Invalid JSON file"); }
+    });
+    e.target.value = "";
+  });
+  cfgRefreshProfiles();
 
   // Session management (Project → Session tab)
   initBlock("session", () => {
