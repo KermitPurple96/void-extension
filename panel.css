@@ -399,7 +399,7 @@ body {
 .method-sel:focus { border-color: var(--accent); }
 
 /* URL input */
-.url-inp {
+.url-inp, .path-inp {
   background: var(--bg3);
   border: 1px solid var(--border);
   border-radius: var(--r);
@@ -410,20 +410,7 @@ body {
   min-width: 120px;
   flex: 1;
 }
-.url-inp:focus { border-color: var(--accent); }
-
-.path-inp {
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  color: var(--text);
-  font: 12px var(--mono);
-  padding: 4px 8px;
-  outline: none;
-  min-width: 120px;
-  flex: 1;
-}
-.path-inp:focus { border-color: var(--accent); }
+.url-inp:focus, .path-inp:focus { border-color: var(--accent); }
 
 /* View pane — stretches inside the flex column parent (.rep-req-side) */
 .rep-view-pane {
@@ -2525,6 +2512,7 @@ body {
 .oob-type-dns { background: rgba(88,166,255,.18); color: var(--accent); }
 .oob-type-http { background: rgba(88,214,141,.18); color: #58d68d; }
 .oob-type-smtp { background: rgba(232,168,56,.18); color: #e8a838; }
+.oob-raw-req { font-size: 10px; margin-top: 4px; max-height: 100px; overflow: auto; }
 
 /* ── Response render frame ──────────────────────────────────────────── */
 .render-frame { width: 100%; height: 100%; border: none; background: #fff; }

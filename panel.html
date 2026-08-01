@@ -10,25 +10,25 @@
 <div id="app">
 
   <!-- ── Tab bar ── -->
-  <div class="tabbar">
-    <button class="tab"        data-tab="target"   >Project</button>
-    <button class="tab active" data-tab="intercept">Intercept <span class="bdg hidden" id="bdg-intercept">0</span></button>
-    <button class="tab"        data-tab="history"  >History <span class="bdg" id="bdg-history">0</span></button>
-    <button class="tab"        data-tab="ws"       >WebSocket <span class="bdg" id="bdg-ws">0</span></button>
-    <button class="tab"        data-tab="repeater" >Repeater <span class="bdg hidden" id="bdg-repeater">0</span></button>
-    <button class="tab"        data-tab="intruder" >Intruder <span class="bdg hidden" id="bdg-intruder">0</span></button>
-    <button class="tab"        data-tab="probe"    >Scan <span class="bdg" id="bdg-probe">0</span></button>
-    <button class="tab"        data-tab="logger"    >Logger <span class="bdg" id="bdg-logger">0</span></button>
-    <button class="tab"        data-tab="containers">Containers</button>
-    <button class="tab"        data-tab="headers"  >Headers</button>
-    <button class="tab"        data-tab="decoder"  >Dencoder</button>
-    <button class="tab"        data-tab="apischema">API Schema</button>
-    <button class="tab"        data-tab="poc"      >PoC</button>
-    <button class="tab"        data-tab="sequencer">Sequencer</button>
-    <button class="tab"        data-tab="notes"    >Notes <span class="bdg" id="bdg-notes">0</span></button>
-    <button class="tab"        data-tab="mr"       >M&amp;R</button>
-    <button class="tab"        data-tab="sensitive">Sensitive <span class="bdg" id="bdg-sensitive">0</span></button>
-    <button class="tab"        data-tab="settings" >Settings</button>
+  <div class="tabbar" role="tablist" aria-label="Main navigation">
+    <button class="tab"        data-tab="target"    role="tab" aria-selected="false">Project</button>
+    <button class="tab active" data-tab="intercept" role="tab" aria-selected="true">Intercept <span class="bdg hidden" id="bdg-intercept">0</span></button>
+    <button class="tab"        data-tab="history"   role="tab" aria-selected="false">History <span class="bdg hidden" id="bdg-history">0</span></button>
+    <button class="tab"        data-tab="ws"        role="tab" aria-selected="false">WebSocket <span class="bdg hidden" id="bdg-ws">0</span></button>
+    <button class="tab"        data-tab="repeater"  role="tab" aria-selected="false">Repeater <span class="bdg hidden" id="bdg-repeater">0</span></button>
+    <button class="tab"        data-tab="intruder"  role="tab" aria-selected="false">Intruder <span class="bdg hidden" id="bdg-intruder">0</span></button>
+    <button class="tab"        data-tab="probe"     role="tab" aria-selected="false">Scan <span class="bdg hidden" id="bdg-probe">0</span></button>
+    <button class="tab"        data-tab="logger"    role="tab" aria-selected="false">Logger <span class="bdg hidden" id="bdg-logger">0</span></button>
+    <button class="tab"        data-tab="containers" role="tab" aria-selected="false">Containers</button>
+    <button class="tab"        data-tab="headers"   role="tab" aria-selected="false">Headers</button>
+    <button class="tab"        data-tab="decoder"   role="tab" aria-selected="false">Dencoder</button>
+    <button class="tab"        data-tab="apischema" role="tab" aria-selected="false">API Schema</button>
+    <button class="tab"        data-tab="poc"       role="tab" aria-selected="false">PoC</button>
+    <button class="tab"        data-tab="sequencer" role="tab" aria-selected="false">Sequencer</button>
+    <button class="tab"        data-tab="notes"     role="tab" aria-selected="false">Notes <span class="bdg hidden" id="bdg-notes">0</span></button>
+    <button class="tab"        data-tab="mr"        role="tab" aria-selected="false">M&amp;R</button>
+    <button class="tab"        data-tab="sensitive" role="tab" aria-selected="false">Sensitive <span class="bdg hidden" id="bdg-sensitive">0</span></button>
+    <button class="tab"        data-tab="settings"  role="tab" aria-selected="false">Settings</button>
     <div class="tabbar-gap"></div>
     <span id="site-host" class="site-host">—</span>
     <button class="ico-btn" id="btn-refresh" title="Refresh recon data">↻</button>
@@ -36,7 +36,7 @@
   </div>
 
   <!-- ═══════════════════════════ TARGET ══════════════════════════════════════ -->
-  <div id="tab-target" class="tab-panel hidden">
+  <div id="tab-target" class="tab-panel hidden" role="tabpanel">
 
     <!-- Sub-tabs: Session | Site Map | Endpoints | Scope -->
     <div class="tgt-sub-bar">
@@ -108,7 +108,7 @@
         <div class="tgt-detail-resizer" id="tgt-detail-resizer"></div>
         <div id="tgt-detail" class="tgt-detail hidden">
           <div class="hist-detail-topbar">
-            <button id="tgt-detail-close" class="btn btn-sm btn-ghost">✕</button>
+            <button id="tgt-detail-close" class="btn btn-sm btn-ghost" aria-label="Close">✕</button>
             <span id="tgt-detail-title" class="hist-detail-title"></span>
             <button id="tgt-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
             <button id="tgt-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
@@ -176,7 +176,7 @@
         <div class="ep-resizer" id="ep-resizer"></div>
         <div id="ep-detail" class="ep-detail hidden">
           <div class="hist-detail-topbar">
-            <button id="ep-detail-close" class="btn btn-sm btn-ghost">✕</button>
+            <button id="ep-detail-close" class="btn btn-sm btn-ghost" aria-label="Close">✕</button>
             <span id="ep-detail-title" class="hist-detail-title"></span>
             <button id="ep-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
             <button id="ep-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
@@ -239,7 +239,7 @@
   </div>
 
   <!-- ═══════════════════════════ INTERCEPT ══════════════════════════════════ -->
-  <div id="tab-intercept" class="tab-panel active">
+  <div id="tab-intercept" class="tab-panel active" role="tabpanel">
 
     <div class="toolbar">
       <div class="status-row">
@@ -282,7 +282,7 @@
       <!-- Right: Inline editor (request) -->
       <div id="ic-editor" class="ic-editor hidden">
         <div class="editor-topbar">
-          <button id="ed-back"    class="btn btn-sm btn-ghost">✕</button>
+          <button id="ed-back"    class="btn btn-sm btn-ghost" aria-label="Close">✕</button>
           <select id="ed-method"  class="method-sel"></select>
           <input  id="ed-path"    class="path-inp" type="text" placeholder="/path?query" spellcheck="false" autocomplete="off">
           <select id="ed-httpver" class="httpver-sel"><option>HTTP/1.1</option><option>HTTP/2</option><option>HTTP/1.0</option></select>
@@ -325,7 +325,7 @@
       <!-- Right: Response editor (for intercepted responses) -->
       <div id="ic-resp-editor" class="ic-editor hidden">
         <div class="editor-topbar">
-          <button id="resp-ed-back" class="btn btn-sm btn-ghost">✕</button>
+          <button id="resp-ed-back" class="btn btn-sm btn-ghost" aria-label="Close">✕</button>
           <span class="resp-ed-label">RESPONSE</span>
           <input id="resp-ed-status" class="settings-inp settings-inp-sm" type="text" placeholder="200" style="width:50px" spellcheck="false">
           <input id="resp-ed-url" class="url-inp" type="text" readonly style="opacity:.6">
@@ -348,9 +348,9 @@
   </div>
 
   <!-- ═══════════════════════════ HISTORY ════════════════════════════════════ -->
-  <div id="tab-history" class="tab-panel hidden">
+  <div id="tab-history" class="tab-panel hidden" role="tabpanel">
     <div class="filter-bar">
-      <input id="hist-filter" type="text" placeholder="Search… (or host:example status:200 method:POST body:password)" spellcheck="false" autocomplete="off">
+      <input id="hist-filter" type="text" placeholder="Search… (or host:example status:200 method:POST body:password)" spellcheck="false" autocomplete="off" aria-label="Filter history">
       <select id="hist-flt-method" class="filter-sel">
         <option value="">All methods</option>
         <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option>
@@ -416,7 +416,7 @@
       <!-- Right: detail pane -->
       <div id="hist-detail" class="hist-detail hidden">
         <div class="hist-detail-topbar">
-          <button id="hist-detail-close" class="btn btn-sm btn-ghost">✕</button>
+          <button id="hist-detail-close" class="btn btn-sm btn-ghost" aria-label="Close">✕</button>
           <span id="hist-detail-title" class="hist-detail-title"></span>
           <button id="hist-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
           <button id="hist-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
@@ -460,9 +460,9 @@
   </div>
 
   <!-- ═══════════════════════════ WEBSOCKET HISTORY ══════════════════════════ -->
-  <div id="tab-ws" class="tab-panel hidden">
+  <div id="tab-ws" class="tab-panel hidden" role="tabpanel">
     <div class="filter-bar">
-      <input id="ws-filter" type="text" placeholder="Filter messages…" spellcheck="false" autocomplete="off">
+      <input id="ws-filter" type="text" placeholder="Filter messages…" spellcheck="false" autocomplete="off" aria-label="Filter WebSocket messages">
       <select id="ws-flt-dir" class="filter-sel">
         <option value="">All directions</option>
         <option value="sent">Sent</option>
@@ -507,7 +507,7 @@
       <div class="hist-resizer" id="ws-resizer"></div>
       <div id="ws-detail" class="hist-detail hidden">
         <div class="hist-detail-topbar">
-          <button id="ws-detail-close" class="btn btn-sm btn-ghost">✕</button>
+          <button id="ws-detail-close" class="btn btn-sm btn-ghost" aria-label="Close">✕</button>
           <span id="ws-detail-title" class="hist-detail-title"></span>
           <button id="ws-detail-replay" class="btn btn-sm btn-ghost" title="Replay this message to the same WebSocket URL">Replay</button>
         </div>
@@ -523,7 +523,7 @@
   </div>
 
   <!-- ═══════════════════════════ REPEATER ═══════════════════════════════════ -->
-  <div id="tab-repeater" class="tab-panel hidden">
+  <div id="tab-repeater" class="tab-panel hidden" role="tabpanel">
 
     <!-- Side-by-side container -->
     <div class="rep-dual">
@@ -655,7 +655,7 @@
   </div>
 
   <!-- ═══════════════════════════ INTRUDER ═══════════════════════════════════ -->
-  <div id="tab-intruder" class="tab-panel hidden">
+  <div id="tab-intruder" class="tab-panel hidden" role="tabpanel">
 
     <div class="intr-layout">
 
@@ -704,9 +704,9 @@
                 <option value="upload-scan">Upload Scanner</option>
               </optgroup>
             </select>
-            <label class="settings-label-sm">Threads</label>
+            <label class="settings-label-sm" for="intr-threads">Threads</label>
             <input id="intr-threads" type="number" class="settings-inp settings-inp-sm" value="1" min="1" max="20">
-            <label class="settings-label-sm">Delay ms</label>
+            <label class="settings-label-sm" for="intr-delay">Delay ms</label>
             <input id="intr-delay" type="number" class="settings-inp settings-inp-sm" value="0" min="0">
           </div>
 
@@ -893,7 +893,7 @@
         <!-- Result detail (opens on row click) -->
         <div id="intr-detail" class="intr-detail hidden">
           <div class="hist-detail-topbar">
-            <button id="intr-detail-close" class="btn btn-sm btn-ghost">✕</button>
+            <button id="intr-detail-close" class="btn btn-sm btn-ghost" aria-label="Close">✕</button>
             <span id="intr-detail-title" class="hist-detail-title"></span>
             <button id="intr-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
             <button id="intr-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">→ PoC</button>
@@ -935,7 +935,7 @@
   </div>
 
   <!-- ═══════════════════════════ PROBE (DOM XSS Hunter) ═══════════════════ -->
-  <div id="tab-probe" class="tab-panel hidden">
+  <div id="tab-probe" class="tab-panel hidden" role="tabpanel">
 
     <!-- Top toolbar -->
     <div class="probe-toolbar">
@@ -1173,7 +1173,7 @@
           <div class="settings-section-desc">Select a request from History, configure scan parameters, and launch active probes for common vulnerability classes.</div>
           <div class="settings-row">
             <label class="settings-label-sm">Target URL</label>
-            <input id="scan-url" type="text" class="settings-inp" placeholder="Select a request from History or paste URL" spellcheck="false">
+            <input id="scan-url" type="text" class="settings-inp" placeholder="Select a request from History or paste URL" spellcheck="false" aria-label="Scan target URL">
           </div>
           <div class="settings-row">
             <label class="settings-label-sm">Method</label>
@@ -1199,7 +1199,7 @@
             <label class="probe-toggle"><input type="checkbox" id="scan-dirbrute"><span class="toggle-track"></span> Content Discovery (directory brute)</label>
           </div>
           <div class="settings-row" style="margin-top:6px">
-            <label class="settings-label-sm">Threads</label>
+            <label class="settings-label-sm" for="scan-threads">Threads</label>
             <input id="scan-threads" type="number" class="settings-inp settings-inp-sm" value="3" min="1" max="10">
           </div>
           <div class="settings-actions">
@@ -1270,9 +1270,9 @@
   </div>
 
   <!-- ═══════════════════════════ LOGGER ═══════════════════════════════════ -->
-  <div id="tab-logger" class="tab-panel hidden">
+  <div id="tab-logger" class="tab-panel hidden" role="tabpanel">
     <div class="filter-bar">
-      <input id="log-filter" type="text" placeholder="host:api status:200 method:POST body:token source:Admin (or plain text)" spellcheck="false" autocomplete="off">
+      <input id="log-filter" type="text" placeholder="host:api status:200 method:POST body:token source:Admin (or plain text)" spellcheck="false" autocomplete="off" aria-label="Filter logger">
       <select id="log-flt-method" class="filter-sel">
         <option value="">All methods</option>
         <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option>
@@ -1324,7 +1324,7 @@
       <div class="hist-resizer" id="log-resizer"></div>
       <div id="log-detail" class="hist-detail hidden">
         <div class="hist-detail-topbar">
-          <button id="log-detail-close" class="btn btn-sm btn-ghost">✕</button>
+          <button id="log-detail-close" class="btn btn-sm btn-ghost" aria-label="Close">✕</button>
           <span id="log-detail-title" class="hist-detail-title"></span>
           <button id="log-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
           <button id="log-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
@@ -1364,7 +1364,7 @@
   </div>
 
   <!-- ═══════════════════════════ CONTAINERS ═════════════════════════════════ -->
-  <div id="tab-containers" class="tab-panel hidden">
+  <div id="tab-containers" class="tab-panel hidden" role="tabpanel">
     <div class="cnt-toolbar">
       <button id="cnt-add" class="btn btn-accent">+ New Container</button>
       <span class="cnt-info">Each container launches an isolated Chrome with its own cookies. Set the extension path once below.</span>
@@ -1449,7 +1449,7 @@
   </div>
 
   <!-- ═══════════════════════════ HEADERS ════════════════════════════════════ -->
-  <div id="tab-headers" class="tab-panel hidden">
+  <div id="tab-headers" class="tab-panel hidden" role="tabpanel">
     <!-- Toolbar -->
     <div class="filter-bar">
       <button id="hdr-rescan" class="btn btn-sm btn-accent" title="Re-scan current page headers">Rescan</button>
@@ -1496,7 +1496,7 @@
   </div>
 
   <!-- ═══════════════════════════ DENCODER ═════════════════════════════════ -->
-  <div id="tab-decoder" class="tab-panel hidden">
+  <div id="tab-decoder" class="tab-panel hidden" role="tabpanel">
     <div class="dec-sub-bar">
       <button class="sub-tab active" data-decsub="chain">Chain</button>
       <button class="sub-tab" data-decsub="regex">Regex Tester</button>
@@ -1606,7 +1606,7 @@
   </div>
 
   <!-- ═══════════════════════════ API SCHEMA ═══════════════════════════════ -->
-  <div id="tab-apischema" class="tab-panel hidden">
+  <div id="tab-apischema" class="tab-panel hidden" role="tabpanel">
     <div class="filter-bar">
       <button id="schema-generate" class="btn btn-accent">Generate from History</button>
       <button id="schema-copy" class="btn btn-sm btn-ghost">Copy</button>
@@ -1629,7 +1629,7 @@
   </div>
 
   <!-- ═══════════════════════════ PoC GENERATOR ═══════════════════════════════ -->
-  <div id="tab-poc" class="tab-panel hidden">
+  <div id="tab-poc" class="tab-panel hidden" role="tabpanel">
 
     <!-- Sub-tabs: CSRF | Clickjacking -->
     <div class="poc-sub-bar">
@@ -1776,7 +1776,7 @@
   </div>
 
   <!-- ═══════════════════════════ SEQUENCER ══════════════════════════════════ -->
-  <div id="tab-sequencer" class="tab-panel hidden">
+  <div id="tab-sequencer" class="tab-panel hidden" role="tabpanel">
     <div class="seq-layout">
       <div class="seq-config">
         <div class="settings-section">
@@ -1859,9 +1859,9 @@
   </div>
 
   <!-- ═══════════════════════════ NOTES ══════════════════════════════════════ -->
-  <div id="tab-notes" class="tab-panel hidden">
+  <div id="tab-notes" class="tab-panel hidden" role="tabpanel">
     <div class="filter-bar">
-      <input id="notes-filter" type="text" placeholder="Search notes…" spellcheck="false" autocomplete="off">
+      <input id="notes-filter" type="text" placeholder="Search notes…" spellcheck="false" autocomplete="off" aria-label="Search notes">
       <select id="notes-flt-sev" class="filter-sel">
         <option value="">All severities</option>
         <option value="critical">Critical</option>
@@ -1912,7 +1912,7 @@
   </div>
 
   <!-- ═══════════════════════════ M&R (Match & Replace) ═══════════════════════ -->
-  <div id="tab-mr" class="tab-panel hidden">
+  <div id="tab-mr" class="tab-panel hidden" role="tabpanel">
     <div class="mr-sub-bar">
       <button class="sub-tab active" data-mrsub="rules">Match &amp; Replace</button>
       <button class="sub-tab" data-mrsub="autoheaders">Auto Headers</button>
@@ -2034,7 +2034,7 @@
   </div>
 
   <!-- ═══════════════════════════ SENSITIVE ═══════════════════════════════════ -->
-  <div id="tab-sensitive" class="tab-panel hidden">
+  <div id="tab-sensitive" class="tab-panel hidden" role="tabpanel">
     <div class="sens-toolbar">
       <button id="sens-scan" class="btn btn-accent">Scan History</button>
       <button id="sens-clear" class="btn btn-sm btn-ghost">Clear</button>
@@ -2059,7 +2059,7 @@
         <option value="medium">Medium</option>
         <option value="low">Low</option>
       </select>
-      <input id="sens-filter" type="text" class="tgt-filter-inp" placeholder="Filter…" spellcheck="false" autocomplete="off">
+      <input id="sens-filter" type="text" class="tgt-filter-inp" placeholder="Filter…" spellcheck="false" autocomplete="off" aria-label="Filter sensitive findings">
       <button id="sens-export" class="btn btn-sm btn-ghost">Export CSV</button>
       <span id="sens-status" class="settings-status"></span>
     </div>
@@ -2112,7 +2112,7 @@
       <div class="hist-resizer" id="sens-resizer"></div>
       <div id="sens-detail" class="hist-detail hidden">
         <div class="hist-detail-topbar">
-          <button id="sens-detail-close" class="btn btn-sm btn-ghost">✕</button>
+          <button id="sens-detail-close" class="btn btn-sm btn-ghost" aria-label="Close">✕</button>
           <span id="sens-detail-title" class="hist-detail-title"></span>
           <button id="sens-detail-to-rep" class="btn btn-sm btn-ghost">→ Repeater</button>
           <button id="sens-detail-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
@@ -2179,7 +2179,7 @@
   </div>
 
   <!-- ═══════════════════════════ SETTINGS ═════════════════════════════════ -->
-  <div id="tab-settings" class="tab-panel hidden">
+  <div id="tab-settings" class="tab-panel hidden" role="tabpanel">
     <div class="settings-scroll">
 
       <!-- ── Scope ──────────────────────────────────────────────── -->
@@ -2223,7 +2223,7 @@
         <div class="settings-section-title">Upstream Proxy</div>
         <div class="settings-section-desc">Chain requests through a corporate or SOCKS proxy (applies to void-proxy-server.js).</div>
         <div class="settings-row">
-          <label class="settings-label-sm">Proxy URL</label>
+          <label class="settings-label-sm" for="cfg-upstream-proxy">Proxy URL</label>
           <input id="cfg-upstream-proxy" type="text" class="settings-inp" placeholder="http://proxy.corp:8080 or socks5://127.0.0.1:1080" spellcheck="false">
         </div>
       </div>
@@ -2236,7 +2236,7 @@
           <label class="settings-label"><input type="checkbox" id="cfg-session-enabled"><span class="toggle-track"></span> Enable session auto-renewal</label>
         </div>
         <div class="settings-row">
-          <label class="settings-label-sm">Detect expiry by</label>
+          <label class="settings-label-sm" for="cfg-session-detect">Detect expiry by</label>
           <select id="cfg-session-detect" class="filter-sel">
             <option value="status">Status code</option>
             <option value="body">Response body contains</option>
@@ -2244,15 +2244,15 @@
           </select>
           <input id="cfg-session-match" type="text" class="settings-inp" placeholder="401 or 'login_required'" spellcheck="false" style="flex:1">
         </div>
-        <div class="settings-row"><label class="settings-label-sm">Login URL</label></div>
+        <div class="settings-row"><label class="settings-label-sm" for="cfg-session-url">Login URL</label></div>
         <input id="cfg-session-url" type="text" class="settings-inp" placeholder="https://target.com/login" spellcheck="false">
         <div class="settings-row">
-          <label class="settings-label-sm">Method</label>
+          <label class="settings-label-sm" for="cfg-session-method">Method</label>
           <select id="cfg-session-method" class="filter-sel" style="width:80px"><option>GET</option><option selected>POST</option></select>
         </div>
-        <div class="settings-row"><label class="settings-label-sm">Login body</label></div>
+        <div class="settings-row"><label class="settings-label-sm" for="cfg-session-body">Login body</label></div>
         <textarea id="cfg-session-body" class="raw-ta settings-ta" rows="2" spellcheck="false" placeholder="username=admin&password=secret"></textarea>
-        <div class="settings-row"><label class="settings-label-sm">Extract token</label></div>
+        <div class="settings-row"><label class="settings-label-sm" for="cfg-session-extract">Extract token</label></div>
         <div class="settings-row">
           <select id="cfg-session-extract" class="filter-sel">
             <option value="cookie">Set-Cookie name</option>
@@ -2267,7 +2267,7 @@
       <div class="settings-section">
         <div class="settings-section-title">Appearance</div>
         <div class="settings-row">
-          <label class="settings-label-sm">Theme</label>
+          <label class="settings-label-sm" for="cfg-theme">Theme</label>
           <select id="cfg-theme" class="filter-sel">
             <option value="dark">Dark (GitHub)</option>
             <option value="light">Light (GitHub)</option>

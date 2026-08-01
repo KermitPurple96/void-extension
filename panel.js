@@ -114,11 +114,15 @@ function sendMsg(msg) {
 }
 
 function stopAllTimers() {
-  clearInterval(pollTimer);   pollTimer = null;
-  clearInterval(histTimer);   histTimer = null;
-  clearInterval(bgSyncTimer); bgSyncTimer = null;
-  clearInterval(logSyncTimer); logSyncTimer = null;
-  clearInterval(wsTimer);     wsTimer = null;
+  clearInterval(pollTimer);      pollTimer = null;
+  clearInterval(histTimer);      histTimer = null;
+  clearInterval(bgSyncTimer);    bgSyncTimer = null;
+  clearInterval(logSyncTimer);   logSyncTimer = null;
+  clearInterval(wsTimer);        wsTimer = null;
+  clearInterval(respPollTimer);  respPollTimer = null;
+  clearInterval(probePollTimer); probePollTimer = null;
+  clearInterval(oobPollTimer);   oobPollTimer = null;
+  if (scanRunning) { scanRunning = false; }
   if (logSyncWs) { logSyncWs.close(); logSyncWs = null; }
 }
 
@@ -151,7 +155,11 @@ function ap(p, ...kids) { kids.forEach(k => p.appendChild(k)); return p; }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function showTab(name) {
-  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+  document.querySelectorAll(".tab").forEach(t => {
+    const isActive = t.dataset.tab === name;
+    t.classList.toggle("active", isActive);
+    t.setAttribute("aria-selected", isActive);
+  });
   document.querySelectorAll(".tab-panel").forEach(p => {
     p.classList.toggle("active",  p.id === `tab-${name}`);
     p.classList.toggle("hidden",  p.id !== `tab-${name}`);
@@ -170,6 +178,7 @@ function showTab(name) {
 let _lastInterceptSnapshot = "";
 let interceptResponses = false; // user toggle: intercept responses globally
 
+let _pollInFlight = false;
 function startPoll() {
   if (pollTimer) return;
   doPollTick(); // immediate first tick — don't wait 600ms
@@ -178,19 +187,23 @@ function startPoll() {
 function stopPoll() { clearInterval(pollTimer); pollTimer = null; }
 
 async function doPollTick() {
-  const fetches = [bg({ type: "GET_INTERCEPTED" })];
-  if (interceptResponses) fetches.push(bg({ type: "GET_INTERCEPTED_RESPONSES" }));
-  const [reqRes, respRes] = await Promise.all(fetches);
-  if (reqRes) intercepted = reqRes.requests || [];
-  if (respRes) interceptedResponses = respRes.responses || [];
-  else if (!interceptResponses) interceptedResponses = [];
-  // Only re-render if the queue actually changed (prevents hover-destroying DOM thrash)
-  const snapshot = JSON.stringify(intercepted.map(r => r.requestId)) + "|" + JSON.stringify(interceptedResponses.map(r => r.requestId));
-  if (snapshot !== _lastInterceptSnapshot) {
-    _lastInterceptSnapshot = snapshot;
-    renderInterceptList();
-  }
-  updateInterceptBadge();
+  if (_pollInFlight) return; // prevent concurrent ticks
+  _pollInFlight = true;
+  try {
+    const fetches = [bg({ type: "GET_INTERCEPTED" })];
+    if (interceptResponses) fetches.push(bg({ type: "GET_INTERCEPTED_RESPONSES" }));
+    const [reqRes, respRes] = await Promise.all(fetches);
+    if (reqRes) intercepted = reqRes.requests || [];
+    if (respRes) interceptedResponses = respRes.responses || [];
+    else if (!interceptResponses) interceptedResponses = [];
+    // Only re-render if the queue actually changed (prevents hover-destroying DOM thrash)
+    const snapshot = JSON.stringify(intercepted.map(r => r.requestId)) + "|" + JSON.stringify(interceptedResponses.map(r => r.requestId));
+    if (snapshot !== _lastInterceptSnapshot) {
+      _lastInterceptSnapshot = snapshot;
+      renderInterceptList();
+    }
+    updateInterceptBadge();
+  } finally { _pollInFlight = false; }
 }
 
 function interceptListChanged() {
@@ -278,7 +291,7 @@ function setBadge(id, n) {
   const b = document.getElementById(id);
   if (!b) return;
   b.textContent = n;
-  b.className   = n > 0 ? "bdg has-data" : "bdg";
+  b.className = n > 0 ? "bdg has-data" : "bdg hidden";
 }
 function updateInterceptBadge() {
   const b = document.getElementById("bdg-intercept");
@@ -650,24 +663,29 @@ let logFilterSource = "";
 let logScopeOnly = false;
 let logNextId = 1;
 
+// Persistent set of known stable keys — avoids rebuilding from logEntries every tick
+const _logKnownKeys = new Set();
+
 // Sync local history into logger (idempotent — uses stable IDs)
 function logSyncLocal() {
-  // Track what's already in the logger from local sources
-  const existingUrls = new Set(logEntries.filter(e => e._logSource === "local").map(e => e._logStableKey));
+  // Rebuild known keys on first call (cold start / session restore)
+  if (_logKnownKeys.size === 0 && logEntries.length > 0) {
+    for (const e of logEntries) if (e._logStableKey) _logKnownKeys.add(e._logStableKey);
+  }
 
   for (const e of historyData) {
     const key = `${e.time}_${e.method}_${e.url}`;
-    if (existingUrls.has(key)) continue;
+    if (_logKnownKeys.has(key)) continue;
+    _logKnownKeys.add(key);
     logEntries.push({ ...e, _logId: logNextId++, _logSource: "local", _logLabel: "Proxy", _logStableKey: key });
-    existingUrls.add(key);
   }
 
   // Add repeater entries (use tab id as stable key)
-  const existingRep = new Set(logEntries.filter(e => e._logSource === "repeater").map(e => e._logStableKey));
   for (const tab of repTabs) {
     if (!tab.response || !tab.url) continue;
     const key = `rep_${tab.id}_${tab.response?.status}_${tab.response?.elapsed}`;
-    if (existingRep.has(key)) continue;
+    if (_logKnownKeys.has(key)) continue;
+    _logKnownKeys.add(key);
     const r = tab.response;
     const entry = {
       method: tab.method, url: tab.url, host: "", path: "",
@@ -724,40 +742,11 @@ function logRender() {
 
   // Advanced text search (same field:value syntax as History)
   if (logFilterText) {
-    const fieldRe = /(\w+):(\S+)/g;
-    const fieldFilters = [];
-    let plain = logFilterText;
-    let fm;
-    while ((fm = fieldRe.exec(logFilterText)) !== null) {
-      fieldFilters.push({ field: fm[1].toLowerCase(), value: fm[2].toLowerCase() });
-      plain = plain.replace(fm[0], "");
-    }
-    plain = plain.trim().toLowerCase();
-    items = items.filter(e => {
-      for (const { field, value } of fieldFilters) {
-        switch (field) {
-          case "host":   if (!(e.host||"").toLowerCase().includes(value)) return false; break;
-          case "path":   if (!(e.path||"").toLowerCase().includes(value)) return false; break;
-          case "url":    if (!(e.url||"").toLowerCase().includes(value)) return false; break;
-          case "method": if ((e.method||"").toLowerCase() !== value) return false; break;
-          case "status": if (!String(e.status||"").startsWith(value)) return false; break;
-          case "body":   if (!(e.body||"").toLowerCase().includes(value) && !(e.respBody||"").toLowerCase().includes(value)) return false; break;
-          case "header": {
-            const h = [...Object.entries(e.headers||{}), ...Object.entries(e.respHeaders||{})].map(([k,v])=>`${k}: ${v}`).join("\n").toLowerCase();
-            if (!h.includes(value)) return false; break;
-          }
-          case "source": if (!(e._logLabel||"").toLowerCase().includes(value) && !(e._logSource||"").toLowerCase().includes(value)) return false; break;
-        }
-      }
-      if (plain) {
-        const hay = [e.url, e.method, e.host, String(e.status||""), e.body||"", e.respBody||"",
-          ...Object.entries(e.headers||{}).map(([k,v])=>`${k}:${v}`),
-          ...Object.entries(e.respHeaders||{}).map(([k,v])=>`${k}:${v}`),
-        ].join("\n").toLowerCase();
-        if (!hay.includes(plain)) return false;
-      }
-      return true;
-    });
+    const { fieldFilters, plain } = parseFieldSearch(logFilterText);
+    items = items.filter(e => matchFieldFilters(e, fieldFilters, plain, (entry, field, value) => {
+      if (field === "source") return (entry._logLabel || "").toLowerCase().includes(value) || (entry._logSource || "").toLowerCase().includes(value);
+      return true; // unknown fields pass in logger
+    }));
   }
 
   // Sort
@@ -817,7 +806,6 @@ function logRender() {
     `;
     tr._logEntry = e;
     if (logDetailEntry === e) tr.classList.add("hist-selected");
-    tr.addEventListener("click", () => logOpenDetail(e));
     tbody.appendChild(tr);
   }
 }
@@ -830,8 +818,9 @@ function logOpenDetail(entry) {
   document.getElementById("log-resp-pre").textContent = rawResponseText(entry);
   detail.classList.remove("hidden"); detail.classList.add("visible");
   document.getElementById("log-resizer").classList.add("visible");
-  document.querySelectorAll("#log-tbody tr").forEach(r => r.classList.remove("hist-selected"));
-  document.querySelectorAll("#log-tbody tr").forEach(r => { if (r._logEntry === entry) r.classList.add("hist-selected"); });
+  for (const r of document.getElementById("log-tbody").children) {
+    r.classList.toggle("hist-selected", r._logEntry === entry);
+  }
   logReflectBar?.update(entry);
 }
 
@@ -845,9 +834,11 @@ function logCloseDetail() {
 function startLogSync() {
   if (logSyncTimer) return;
   logSyncTimer = setInterval(() => {
+    const prevCount = logEntries.length;
     logSyncLocal();
     logPushToSync();
-    logRender();
+    // Only re-render if data actually changed (avoids rebuilding 1000 DOM rows every 3s)
+    if (logEntries.length !== prevCount) logRender();
     // Auto-reconnect if WS dropped while Logger is active
     if (!logSyncWs || logSyncWs.readyState > 1) logSyncConnect();
   }, 3000);
@@ -980,48 +971,12 @@ function renderHistory() {
 
   // Advanced text search — supports field:value syntax AND plain text
   if (filterHist) {
-    const fieldRe = /(\w+):(\S+)/g;
-    const fieldFilters = [];
-    let plainQuery = filterHist;
-    let fm;
-    while ((fm = fieldRe.exec(filterHist)) !== null) {
-      fieldFilters.push({ field: fm[1].toLowerCase(), value: fm[2].toLowerCase() });
-      plainQuery = plainQuery.replace(fm[0], "");
-    }
-    plainQuery = plainQuery.trim().toLowerCase();
-
-    items = items.filter(e => {
-      // Field-specific filters
-      for (const { field, value } of fieldFilters) {
-        switch (field) {
-          case "host":   if (!(e.host || "").toLowerCase().includes(value)) return false; break;
-          case "path":   if (!(e.path || "").toLowerCase().includes(value)) return false; break;
-          case "url":    if (!(e.url || "").toLowerCase().includes(value)) return false; break;
-          case "method": if ((e.method || "").toLowerCase() !== value) return false; break;
-          case "status": if (!String(e.status || "").startsWith(value)) return false; break;
-          case "type":   if (!(e.mimeType || "").toLowerCase().includes(value)) return false; break;
-          case "body":   if (!(e.body || "").toLowerCase().includes(value) && !(e.respBody || "").toLowerCase().includes(value)) return false; break;
-          case "header": {
-            const allHdrs = [...Object.entries(e.headers || {}), ...Object.entries(e.respHeaders || {})].map(([k,v]) => `${k}: ${v}`).join("\n").toLowerCase();
-            if (!allHdrs.includes(value)) return false; break;
-          }
-          case "source": if ((e._source || "").toLowerCase() !== value) return false; break;
-          default:       if (!(e.url || "").toLowerCase().includes(`${field}:${value}`)) return false;
-        }
-      }
-      // Plain text search on everything
-      if (plainQuery) {
-        const haystack = [
-          e.url, e.method, e.host, e.path,
-          String(e.status || ""), e.mimeType || "",
-          ...Object.entries(e.headers || {}).map(([k,v]) => `${k}: ${v}`),
-          ...Object.entries(e.respHeaders || {}).map(([k,v]) => `${k}: ${v}`),
-          e.body || "", e.respBody || "",
-        ].join("\n").toLowerCase();
-        if (!haystack.includes(plainQuery)) return false;
-      }
-      return true;
-    });
+    const { fieldFilters, plain } = parseFieldSearch(filterHist);
+    items = items.filter(e => matchFieldFilters(e, fieldFilters, plain, (entry, field, value) => {
+      if (field === "type") return (entry.mimeType || "").toLowerCase().includes(value);
+      if (field === "source") return (entry._source || "").toLowerCase() === value;
+      return (entry.url || "").toLowerCase().includes(`${field}:${value}`);
+    }));
   }
 
   tbody.replaceChildren();
@@ -1058,11 +1013,17 @@ function renderHistory() {
     return 0;
   });
 
-  // Update sort indicators in headers
+  // Update sort indicators in headers (use data attribute for clean label)
   document.querySelectorAll("#hist-table .hist-th-sortable").forEach(th => {
     const key = th.dataset.sort;
-    const arrow = key === histSortKey ? (histSortAsc ? " ▴" : " ▾") : "";
-    th.textContent = th.textContent.replace(/ [▴▾]$/, "") + arrow;
+    const arrow = key === histSortKey ? (histSortAsc ? " \u25B4" : " \u25BE") : "";
+    if (!th.dataset.label) th.dataset.label = th.textContent.replace(/ [\u25B4\u25BE]+$/, "").trim();
+    // Preserve colfilter icon if present
+    const ico = th.querySelector(".colfilter-ico");
+    const drop = th.querySelector(".colfilter-drop");
+    th.textContent = th.dataset.label + arrow;
+    if (ico) th.appendChild(ico);
+    if (drop) th.appendChild(drop);
   });
 
   for (const entry of indexed) {
@@ -1106,7 +1067,6 @@ function renderHistory() {
     baselineRecord(entry);
     tr._histEntry = entry;
     if (histDetailEntry && entry === histDetailEntry) tr.classList.add("hist-selected");
-    tr.addEventListener("click", () => openHistDetail(entry));
     tbody.appendChild(tr);
   }
 }
@@ -1157,6 +1117,51 @@ function rawResponseText(entry) {
 }
 
 function esc(s) { return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+// Shared field:value search parser used by History and Logger filter inputs
+function parseFieldSearch(query) {
+  const fieldRe = /(\w+):(\S+)/g;
+  const fieldFilters = [];
+  let plain = query;
+  let fm;
+  while ((fm = fieldRe.exec(query)) !== null) {
+    fieldFilters.push({ field: fm[1].toLowerCase(), value: fm[2].toLowerCase() });
+    plain = plain.replace(fm[0], "");
+  }
+  return { fieldFilters, plain: plain.trim().toLowerCase() };
+}
+
+function matchFieldFilters(entry, fieldFilters, plain, extraFields) {
+  for (const { field, value } of fieldFilters) {
+    switch (field) {
+      case "host":   if (!(entry.host || "").toLowerCase().includes(value)) return false; break;
+      case "path":   if (!(entry.path || "").toLowerCase().includes(value)) return false; break;
+      case "url":    if (!(entry.url || "").toLowerCase().includes(value)) return false; break;
+      case "method": if ((entry.method || "").toLowerCase() !== value) return false; break;
+      case "status": if (!String(entry.status || "").startsWith(value)) return false; break;
+      case "body":   if (!(entry.body || "").toLowerCase().includes(value) && !(entry.respBody || "").toLowerCase().includes(value)) return false; break;
+      case "header": {
+        const h = [...Object.entries(entry.headers || {}), ...Object.entries(entry.respHeaders || {})].map(([k, v]) => `${k}: ${v}`).join("\n").toLowerCase();
+        if (!h.includes(value)) return false; break;
+      }
+      default:
+        if (extraFields) { if (!extraFields(entry, field, value)) return false; }
+        else if (!(entry.url || "").toLowerCase().includes(`${field}:${value}`)) return false;
+    }
+  }
+  if (plain) {
+    const haystack = [
+      entry.url, entry.method, entry.host, entry.path || "",
+      String(entry.status || ""), entry.mimeType || "",
+      ...Object.entries(entry.headers || {}).map(([k, v]) => `${k}: ${v}`),
+      ...Object.entries(entry.respHeaders || {}).map(([k, v]) => `${k}: ${v}`),
+      entry.body || "", entry.respBody || "",
+    ].join("\n").toLowerCase();
+    if (!haystack.includes(plain)) return false;
+  }
+  return true;
+}
 function shortMime(m) {
   if (!m) return "";
   return m.replace(/^application\//, "").replace(/^text\//, "").split(";")[0];
@@ -1191,10 +1196,8 @@ function openHistDetail(entry) {
   document.getElementById("hist-resizer").classList.add("visible");
 
   // Highlight selected row
-  document.querySelectorAll("#hist-tbody tr").forEach(r => r.classList.remove("hist-selected"));
-  const rows = document.querySelectorAll("#hist-tbody tr");
-  for (const r of rows) {
-    if (r._histEntry === entry) { r.classList.add("hist-selected"); break; }
+  for (const r of document.getElementById("hist-tbody").children) {
+    r.classList.toggle("hist-selected", r._histEntry === entry);
   }
 
   // Clear search first, then lay down the reflection highlight underneath it
@@ -1214,7 +1217,7 @@ function closeHistDetail() {
   detail.classList.add("hidden");
   detail.classList.remove("visible");
   document.getElementById("hist-resizer").classList.remove("visible");
-  document.querySelectorAll("#hist-tbody tr").forEach(r => r.classList.remove("hist-selected"));
+  for (const r of document.getElementById("hist-tbody").children) r.classList.remove("hist-selected");
 }
 
 function histDetailToRepeater() {
@@ -1840,8 +1843,12 @@ function detectReflections(entry) {
   return vals.filter(v => respText.includes(v));
 }
 
+const _reflectionCache = new WeakMap();
 function hasReflections(entry) {
-  return detectReflections(entry).length > 0;
+  if (_reflectionCache.has(entry)) return _reflectionCache.get(entry);
+  const result = detectReflections(entry).length > 0;
+  _reflectionCache.set(entry, result);
+  return result;
 }
 
 // ── Reusable search within <pre> elements ────────────────────────────────────
@@ -5945,15 +5952,10 @@ let interceptedResponses = [];
 let editingResp = null;
 let respPollTimer = null;
 
-function startRespPoll() {
-  if (respPollTimer) return;
-  respPollTimer = setInterval(async () => {
-    const res = await bg({ type: "GET_INTERCEPTED_RESPONSES" });
-    if (!res) return;
-    interceptedResponses = res.responses || [];
-    renderInterceptList();
-  }, 600);
-}
+// Response polling is now handled by doPollTick (via interceptResponses flag),
+// eliminating the dual-writer race condition. These are kept as no-ops for
+// call-site compatibility.
+function startRespPoll() {}
 function stopRespPoll() { clearInterval(respPollTimer); respPollTimer = null; }
 
 function openRespEditor(resp) {
@@ -6289,32 +6291,10 @@ async function scanStart() {
   }
   if (!injectionPoints.length) injectionPoints.push({ location: "body-append", name: "(body)" });
 
-  // Content Discovery: bruteforce directories (separate from injection-based scans)
-  if (modules.includes("dirbrute")) {
-    const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
-    for (const dir of WORDLIST_DIRS) {
-      if (!scanRunning) break;
-      try {
-        const res = await bg({ type: "SEND_REQUEST", url: baseUrl + dir, method: "GET", rawHeaders: rawHeaders, body: undefined });
-        if (res && res.status && res.status < 404) {
-          scanFindings.push({
-            id: scanFindings.length + 1, module: "dirbrute", severity: res.status < 300 ? "medium" : "low",
-            type: `Found: ${dir}`, param: "path", payload: dir,
-            evidence: `${res.status} (${(res.body || "").length} bytes)`,
-          });
-          scanRenderFindings();
-        }
-      } catch {}
-      completed++;
-      document.getElementById("scan-progress-fill").style.width = `${(completed / (total + WORDLIST_DIRS.length)) * 100}%`;
-      document.getElementById("scan-progress-text").textContent = `${completed} / ${total + WORDLIST_DIRS.length}`;
-    }
-    modules = modules.filter(m => m !== "dirbrute");
-  }
-
-  // Build payload queue for injection-based scans
+  // Build payload queue for injection-based scans (filter dirbrute — handled separately below)
+  const scanModules = modules.filter(m => m !== "dirbrute");
   const queue = [];
-  for (const mod of modules) {
+  for (const mod of scanModules) {
     const payloads = SCAN_PAYLOADS[mod] || [];
     for (const pl of payloads) {
       for (const ip of injectionPoints) {
@@ -6332,7 +6312,29 @@ async function scanStart() {
   document.getElementById("scan-results-empty").classList.add("hidden");
 
   let completed = 0;
-  const total = queue.length;
+  const total = queue.length + (modules.includes("dirbrute") ? WORDLIST_DIRS.length : 0);
+
+  // Content Discovery: bruteforce directories (separate from injection-based scans)
+  if (modules.includes("dirbrute")) {
+    const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
+    for (const dir of WORDLIST_DIRS) {
+      if (!scanRunning) break;
+      try {
+        const res = await bg({ type: "SEND_REQUEST", url: baseUrl + dir, method: "GET", rawHeaders: rawHeaders, body: undefined });
+        if (res && res.status && res.status < 404) {
+          scanFindings.push({
+            id: scanFindings.length + 1, module: "dirbrute", severity: res.status < 300 ? "medium" : "low",
+            type: `Found: ${dir}`, param: "path", payload: dir,
+            evidence: `${res.status} (${(res.body || "").length} bytes)`,
+          });
+          scanRenderFindings();
+        }
+      } catch {}
+      completed++;
+      document.getElementById("scan-progress-fill").style.width = `${(completed / total) * 100}%`;
+      document.getElementById("scan-progress-text").textContent = `${completed} / ${total}`;
+    }
+  }
 
   // Process queue with concurrency limit
   async function processItem(item) {
@@ -6390,9 +6392,12 @@ async function scanStart() {
   const running = [];
   for (const item of queue) {
     if (!scanRunning) break;
-    const p = processItem(item);
+    const p = processItem(item).then(() => p);
     running.push(p);
-    if (running.length >= threads) { await Promise.race(running); running.splice(running.findIndex(r => r), 1); }
+    if (running.length >= threads) {
+      const done = await Promise.race(running);
+      running.splice(running.indexOf(done), 1);
+    }
   }
   await Promise.all(running);
 
@@ -6482,7 +6487,7 @@ async function oobPollOnce() {
         if (interaction["raw-request"]) {
           const pre = el("pre");
           try { pre.textContent = atob(interaction["raw-request"]); } catch { pre.textContent = interaction["raw-request"]; }
-          pre.style.fontSize = "10px"; pre.style.marginTop = "4px"; pre.style.maxHeight = "100px"; pre.style.overflow = "auto";
+          pre.className = "oob-raw-req";
           div.appendChild(pre);
         }
         container.appendChild(div);
@@ -7053,13 +7058,26 @@ document.addEventListener("DOMContentLoaded", () => {
     return String(e[f] ?? "");
   }, histColFilters, renderHistory);
 
+  // Delegated click handler for History rows (avoids O(n) addEventListener per row)
+  document.getElementById("hist-tbody").addEventListener("click", e => {
+    const tr = e.target.closest("tr");
+    if (tr && tr._histEntry) openHistDetail(tr._histEntry);
+  });
+
+  // Delegated click handler for Logger rows
+  document.getElementById("log-tbody").addEventListener("click", e => {
+    const tr = e.target.closest("tr");
+    if (tr && tr._logEntry) logOpenDetail(tr._logEntry);
+  });
+
   // Headers: the two panes are now side by side, so the only control left is
   // whether the All Headers list folds in sub-resource responses.
   document.getElementById("hdr-show-all").addEventListener("change", renderHeaders);
 
   // History filter + dropdowns + clear + detail
+  const _debouncedHistRender = debounce(renderHistory, 150);
   document.getElementById("hist-filter").addEventListener("input", e => {
-    filterHist = e.target.value; renderHistory();
+    filterHist = e.target.value; _debouncedHistRender();
   });
   document.getElementById("hist-flt-method").addEventListener("change", e => {
     filterHistMeth = e.target.value; renderHistory();
@@ -7925,7 +7943,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ── Logger ─────────────────────────────────────────────────────────────────
   initBlock("logger", () => {
-    document.getElementById("log-filter").addEventListener("input", e => { logFilterText = e.target.value; logRender(); });
+    const _debouncedLogRender = debounce(logRender, 150);
+    document.getElementById("log-filter").addEventListener("input", e => { logFilterText = e.target.value; _debouncedLogRender(); });
     document.getElementById("log-flt-method").addEventListener("change", e => { logFilterMeth = e.target.value; logRender(); });
     document.getElementById("log-flt-status").addEventListener("change", e => { logFilterStat = e.target.value; logRender(); });
     document.getElementById("log-flt-source").addEventListener("change", e => { logFilterSource = e.target.value; logRender(); });

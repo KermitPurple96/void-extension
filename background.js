@@ -359,7 +359,11 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
     if (t.history.length > 10000) {
       t.history.splice(0, 1000);
       t.historyMap = {};
-      t.history.forEach((e, i) => { if (e.id) t.historyMap[e.id] = i; });
+      t.history.forEach((e, i) => {
+        // Rebuild index for all keyed entries (debugger uses .id, passive uses ._reqId)
+        const key = e.id || e._reqId;
+        if (key) t.historyMap[key] = i;
+      });
     }
     t.historyMap[params.requestId] = t.history.length - 1;
 
@@ -1020,11 +1024,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case "GET_EXT_PATH": {
-      chrome.management.getSelf(info => {
-        void chrome.runtime.lastError;
-        sendResponse({ path: "", id: info?.id || "", installType: info?.installType || "" });
-      });
-      return true;
+      const extId = chrome.runtime.id || "";
+      const extUrl = chrome.runtime.getURL("/");
+      sendResponse({ path: extUrl, id: extId, installType: "" });
+      break;
     }
 
     // ── Proxy transaction relayed from the panel ───────────────────────────
