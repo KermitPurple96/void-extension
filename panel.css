@@ -1873,6 +1873,17 @@ body {
 .canary-ref-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border); font-size: 11px; cursor: pointer; }
 .canary-ref-item:hover { background: var(--bg3); }
 .canary-badge { background: var(--tint-red); color: var(--red); font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 8px; }
+.canary-sev-crit { background: var(--red); color: var(--btn-send-text); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; }
+.canary-sev-high { background: var(--tint-red); color: var(--red); font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 8px; }
+.canary-sev-med { background: var(--tint-yellow); color: var(--yellow); font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 8px; }
+.canary-sev-safe { background: var(--tint-green); color: var(--green); font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 8px; }
+.canary-ref-url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11px; }
+.canary-char-analysis { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+.canary-char-raw { background: var(--red); color: var(--btn-send-text); font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 6px; font-family: var(--mono); }
+.canary-char-encoded { background: var(--tint-green); color: var(--green); font-size: 9px; padding: 1px 5px; border-radius: 6px; font-family: var(--mono); }
+.canary-char-stripped { background: var(--bg4); color: var(--muted); font-size: 9px; padding: 1px 5px; border-radius: 6px; font-family: var(--mono); }
+.canary-verdict { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.canary-ref-item { flex-wrap: wrap; }
 .hist-canary-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-left: 4px; vertical-align: middle; }
 
 /* ── Dencoder sub-tabs ──────────────────────────────────────────────── */

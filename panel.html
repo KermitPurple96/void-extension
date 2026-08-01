@@ -1963,13 +1963,14 @@
         <div class="settings-section">
           <div class="settings-section-title">Canary Tokens</div>
           <div class="settings-section-desc">
-            Inject a unique canary string into requests. Any time the canary appears in a response, it's flagged in History — revealing reflection points, stored XSS, and second-order injection.
+            Inject the canary into requests. When reflected, each char (<code>&lt; &gt; " '</code>) is checked: <b>RAW</b> = unencoded (XSS likely), <b>encoded</b> = safe, <b>stripped</b> = removed. Use "Copy + chars" to get the canary with test characters appended.
           </div>
           <div class="settings-row">
             <label class="settings-label-sm">Canary</label>
             <input id="canary-value" type="text" class="settings-inp" spellcheck="false" style="font-family:var(--mono)">
             <button id="canary-randomize" class="btn btn-xs btn-ghost">Randomize</button>
             <button id="canary-copy" class="btn btn-xs btn-ghost">Copy</button>
+            <button id="canary-copy-full" class="btn btn-xs btn-accent" title="Copy canary with &lt;&gt;&quot;' appended">Copy + chars</button>
           </div>
           <div class="settings-row">
             <label class="settings-label"><input type="checkbox" id="canary-enabled"><span class="toggle-track"></span> Enable canary tracking in History</label>

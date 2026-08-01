@@ -5723,6 +5723,15 @@ function schemaGenerate() {
 
 // ═══════════════════════════ CANARY TOKENS ════════════════════════════════════
 
+// The canary string includes test chars: <>"' appended to detect encoding
+const CANARY_TEST_CHARS = '<>"\'';
+const CANARY_ENCODED_MAP = {
+  "<": ["&lt;", "&#60;", "&#x3c;", "%3C", "\\u003c", "\\x3c"],
+  ">": ["&gt;", "&#62;", "&#x3e;", "%3E", "\\u003e", "\\x3e"],
+  '"': ["&quot;", "&#34;", "&#x22;", "%22", "\\u0022", "\\x22"],
+  "'": ["&#39;", "&#x27;", "%27", "\\u0027", "\\x27", "&apos;"],
+};
+
 let canaryValue = "void_c" + Math.random().toString(36).slice(2, 10);
 let canaryEnabled = false;
 let canaryAutoInject = false;
@@ -5732,6 +5741,62 @@ let filterHistCanary = false;
 function canaryRandomize() {
   canaryValue = "void_c" + Math.random().toString(36).slice(2, 10);
   document.getElementById("canary-value").value = canaryValue;
+}
+
+// Full canary with test chars appended
+function canaryFull() { return canaryValue + CANARY_TEST_CHARS; }
+
+// Analyze how a response reflects the canary + test chars
+function canaryAnalyze(body) {
+  if (!body || !canaryValue) return null;
+  const base = canaryValue;
+  if (!body.includes(base)) return null;
+
+  // Find the canary in the body and check what follows it
+  const results = { reflected: true, chars: {} };
+
+  for (const ch of CANARY_TEST_CHARS) {
+    const raw = base + ch; // e.g. "void_c8a3f2e1<"
+    if (body.includes(raw)) {
+      results.chars[ch] = "raw"; // char reflected unencoded — XSS likely
+    } else {
+      // Check if the char was encoded
+      let foundEncoded = false;
+      for (const enc of CANARY_ENCODED_MAP[ch] || []) {
+        // Check if canary appears near the encoded char
+        const idx = body.indexOf(base);
+        if (idx >= 0) {
+          const after = body.substring(idx + base.length, idx + base.length + 20);
+          if (after.includes(enc)) { results.chars[ch] = "encoded:" + enc; foundEncoded = true; break; }
+        }
+      }
+      if (!foundEncoded) {
+        // Check if char is just stripped/removed
+        results.chars[ch] = "stripped";
+      }
+    }
+  }
+
+  // Overall severity
+  const rawChars = Object.entries(results.chars).filter(([, v]) => v === "raw").map(([k]) => k);
+  if (rawChars.length >= 2 && rawChars.includes("<") && rawChars.includes(">")) {
+    results.severity = "critical"; // both < and > unencoded = HTML injection
+    results.verdict = "HTML injection — < and > reflected raw";
+  } else if (rawChars.includes("<") || rawChars.includes(">")) {
+    results.severity = "high";
+    results.verdict = "Partial HTML injection — " + rawChars.join("") + " raw";
+  } else if (rawChars.includes('"') || rawChars.includes("'")) {
+    results.severity = "medium";
+    results.verdict = "Attribute breakout — " + rawChars.join("") + " raw";
+  } else if (rawChars.length > 0) {
+    results.severity = "low";
+    results.verdict = rawChars.join("") + " reflected raw";
+  } else {
+    results.severity = "safe";
+    results.verdict = "All chars encoded or stripped";
+  }
+
+  return results;
 }
 
 function canaryCheckResponse(entry) {
@@ -5746,7 +5811,11 @@ function canaryScanHistory() {
   if (!canaryEnabled || !canaryValue) return;
   for (const e of historyData) {
     if (canaryCheckResponse(e)) {
-      canaryReflections.push({ url: e.url, method: e.method, status: e.status, time: e.time, host: e.host });
+      const analysis = canaryAnalyze(e.respBody || "");
+      canaryReflections.push({
+        url: e.url, method: e.method, status: e.status, time: e.time, host: e.host,
+        analysis,
+      });
     }
   }
   setBadge("bdg-canary", canaryReflections.length);
@@ -5762,9 +5831,25 @@ function canaryRenderReflections() {
   empty?.classList.add("hidden");
   for (const r of canaryReflections) {
     const item = el("div", "canary-ref-item");
-    item.appendChild(txt("span", "canary-badge", "REFLECTED"));
+    // Severity badge
+    const sev = r.analysis?.severity || "safe";
+    const sevCls = sev === "critical" ? "canary-sev-crit" : sev === "high" ? "canary-sev-high" : sev === "medium" ? "canary-sev-med" : sev === "safe" ? "canary-sev-safe" : "canary-badge";
+    item.appendChild(txt("span", sevCls, sev.toUpperCase()));
     item.appendChild(txt("span", "method-pill m-" + (r.method||"get").toLowerCase(), r.method || "GET"));
-    item.appendChild(txt("span", "", (r.status || "?") + " " + r.url));
+    item.appendChild(txt("span", "canary-ref-url", (r.status || "?") + " " + r.url));
+    // Char analysis
+    if (r.analysis) {
+      const chars = el("div", "canary-char-analysis");
+      for (const [ch, status] of Object.entries(r.analysis.chars)) {
+        const chip = el("span", status === "raw" ? "canary-char-raw" : status === "stripped" ? "canary-char-stripped" : "canary-char-encoded");
+        chip.textContent = ch + (status === "raw" ? " RAW" : status === "stripped" ? " gone" : " " + status.replace("encoded:", ""));
+        chip.title = `Character "${ch}" is ${status}`;
+        chars.appendChild(chip);
+      }
+      item.appendChild(chars);
+      // Verdict
+      item.appendChild(txt("div", "canary-verdict", r.analysis.verdict));
+    }
     item.addEventListener("click", () => { showTab("history"); });
     container.appendChild(item);
   }
@@ -8279,6 +8364,10 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("canary-copy").addEventListener("click", () => {
       navigator.clipboard.writeText(canaryValue);
       showToast("Canary copied: " + canaryValue);
+    });
+    document.getElementById("canary-copy-full").addEventListener("click", () => {
+      navigator.clipboard.writeText(canaryFull());
+      showToast("Canary + test chars copied: " + canaryFull());
     });
     document.getElementById("canary-enabled").addEventListener("change", e => {
       canaryEnabled = e.target.checked;
