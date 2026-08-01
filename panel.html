@@ -26,6 +26,7 @@
     <button class="tab"        data-tab="poc"      >PoC</button>
     <button class="tab"        data-tab="sequencer">Sequencer</button>
     <button class="tab"        data-tab="notes"    >Notes <span class="bdg" id="bdg-notes">0</span></button>
+    <button class="tab"        data-tab="mr"       >M&amp;R</button>
     <button class="tab"        data-tab="sensitive">Sensitive <span class="bdg" id="bdg-sensitive">0</span></button>
     <button class="tab"        data-tab="settings" >Settings</button>
     <div class="tabbar-gap"></div>
@@ -374,6 +375,7 @@
         <option value="font">Font</option>
       </select>
       <label class="rep-autocookie"><input type="checkbox" id="hist-inscope-only"><span class="toggle-track"></span> In-scope only</label>
+      <label class="rep-autocookie"><input type="checkbox" id="hist-canary-only"><span class="toggle-track"></span> Canary</label>
       <label class="rep-autocookie"><input type="checkbox" id="hist-reflect-only"><span class="toggle-track"></span> Reflections</label>
       <select id="hist-flt-ext" class="filter-sel">
         <option value="">All extensions</option>
@@ -1495,6 +1497,11 @@
 
   <!-- ═══════════════════════════ DENCODER ═════════════════════════════════ -->
   <div id="tab-decoder" class="tab-panel hidden">
+    <div class="dec-sub-bar">
+      <button class="sub-tab active" data-decsub="chain">Chain</button>
+      <button class="sub-tab" data-decsub="regex">Regex Tester</button>
+    </div>
+    <div id="dec-sub-chain" class="dec-sub-panel active">
     <div class="dec-layout">
       <!-- LEFT: Input -->
       <div class="dec-pane">
@@ -1567,6 +1574,33 @@
       <div class="dec-pane">
         <div class="pane-label">OUTPUT</div>
         <textarea id="dec-output" class="raw-ta dec-ta" spellcheck="false" readonly placeholder="Result appears here…"></textarea>
+      </div>
+    </div>
+    </div>
+    <!-- Regex Tester sub-panel -->
+    <div id="dec-sub-regex" class="dec-sub-panel hidden">
+      <div class="dec-layout">
+        <div class="dec-pane">
+          <div class="pane-label">TEST STRING</div>
+          <textarea id="regex-input" class="raw-ta dec-ta" spellcheck="false" placeholder="Paste text to test regex against…"></textarea>
+        </div>
+        <div class="dec-controls" style="width:220px">
+          <div class="pane-label">REGEX</div>
+          <input id="regex-pattern" type="text" class="settings-inp" placeholder="/pattern/flags" spellcheck="false" style="font-family:var(--mono);font-size:12px">
+          <div class="settings-row" style="margin-top:6px">
+            <label class="settings-label-sm">Flags</label>
+            <label class="rep-autocookie"><input type="checkbox" id="regex-flag-g" checked><span class="toggle-track"></span> g</label>
+            <label class="rep-autocookie"><input type="checkbox" id="regex-flag-i"><span class="toggle-track"></span> i</label>
+            <label class="rep-autocookie"><input type="checkbox" id="regex-flag-m"><span class="toggle-track"></span> m</label>
+          </div>
+          <div class="pane-label" style="margin-top:8px">MATCHES</div>
+          <span id="regex-match-count" class="settings-status"></span>
+          <div id="regex-groups" class="regex-groups"></div>
+        </div>
+        <div class="dec-pane">
+          <div class="pane-label">HIGHLIGHTED</div>
+          <div id="regex-output" class="raw-pre dec-ta" style="overflow:auto;padding:8px;white-space:pre-wrap;word-break:break-all"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1874,6 +1908,127 @@
     <div id="notes-list" class="notes-list"></div>
     <div id="notes-empty" class="empty">
       No notes yet. Click <b>+ Add Note</b> or use <b>→ Notes</b> from any request detail pane.
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ M&R (Match & Replace) ═══════════════════════ -->
+  <div id="tab-mr" class="tab-panel hidden">
+    <div class="mr-sub-bar">
+      <button class="sub-tab active" data-mrsub="rules">Match &amp; Replace</button>
+      <button class="sub-tab" data-mrsub="autoheaders">Auto Headers</button>
+      <button class="sub-tab" data-mrsub="canary">Canary Tokens</button>
+      <button class="sub-tab" data-mrsub="collab">Collaborator</button>
+      <button class="sub-tab" data-mrsub="payloads">Payload Generator</button>
+    </div>
+
+    <!-- ════ Match & Replace rules ════ -->
+    <div id="mr-sub-rules" class="mr-sub-panel active">
+      <div class="settings-scroll">
+        <div class="settings-section">
+          <div class="settings-section-desc">Automatically modify requests and responses. Rules apply to intercepted traffic (debugger) and Repeater.</div>
+          <div id="mr-rules-mr" class="mr-rules"></div>
+          <button id="mr-add-mr" class="btn btn-sm btn-accent">+ Add Rule</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════ Auto Headers ════ -->
+    <div id="mr-sub-autoheaders" class="mr-sub-panel hidden">
+      <div class="settings-scroll">
+        <div class="settings-section">
+          <div class="settings-section-desc">Headers injected into every outgoing request (intercepted + Repeater). One per line: <code>Name: Value</code></div>
+          <div class="settings-row">
+            <select id="mr-hdr-preset" class="filter-sel">
+              <option value="">+ Add preset header…</option>
+              <optgroup label="User-Agent">
+                <option value="User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36">Chrome 131</option>
+                <option value="User-Agent: Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)">Googlebot</option>
+                <option value="User-Agent: curl/8.9.0">curl</option>
+              </optgroup>
+              <optgroup label="Security Testing">
+                <option value="X-Forwarded-For: 127.0.0.1">X-Forwarded-For</option>
+                <option value="X-Original-URL: /admin">X-Original-URL</option>
+                <option value="X-Forwarded-Host: evil.com">X-Forwarded-Host</option>
+              </optgroup>
+            </select>
+          </div>
+          <textarea id="mr-auto-headers" class="raw-ta settings-ta" rows="6" spellcheck="false" placeholder="Cookie: session=abc123&#10;X-Custom: value"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════ Canary Tokens ════ -->
+    <div id="mr-sub-canary" class="mr-sub-panel hidden">
+      <div class="settings-scroll">
+        <div class="settings-section">
+          <div class="settings-section-title">Canary Tokens</div>
+          <div class="settings-section-desc">
+            Inject a unique canary string into requests. Any time the canary appears in a response, it's flagged in History — revealing reflection points, stored XSS, and second-order injection.
+          </div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Canary</label>
+            <input id="canary-value" type="text" class="settings-inp" spellcheck="false" style="font-family:var(--mono)">
+            <button id="canary-randomize" class="btn btn-xs btn-ghost">Randomize</button>
+            <button id="canary-copy" class="btn btn-xs btn-ghost">Copy</button>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label"><input type="checkbox" id="canary-enabled"><span class="toggle-track"></span> Enable canary tracking in History</label>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label"><input type="checkbox" id="canary-auto-inject"><span class="toggle-track"></span> Auto-inject canary into URL params</label>
+          </div>
+          <div class="pane-label" style="margin-top:8px">REFLECTIONS <span class="bdg" id="bdg-canary">0</span></div>
+          <div id="canary-reflections" class="canary-reflections">
+            <div id="canary-empty" class="empty">Enable canary tracking and inject the canary into requests. Reflections appear here.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════ Collaborator Everywhere ════ -->
+    <div id="mr-sub-collab" class="mr-sub-panel hidden">
+      <div class="settings-scroll">
+        <div class="settings-section">
+          <div class="settings-section-title">Collaborator Everywhere</div>
+          <div class="settings-section-desc">Auto-inject your Interactsh OOB URL into common headers on every request for blind SSRF/injection detection.</div>
+          <div class="settings-row">
+            <label class="settings-label-sm">OOB URL</label>
+            <input id="mr-collab-url" type="text" class="settings-inp" placeholder="your-id.oast.fun" spellcheck="false">
+          </div>
+          <div class="settings-actions">
+            <button id="mr-collab-enable" class="btn btn-sm btn-accent">Enable (add M&amp;R rules)</button>
+            <button id="mr-collab-disable" class="btn btn-sm btn-danger">Disable (remove rules)</button>
+            <span id="mr-collab-status" class="settings-status"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════ Payload Generator ════ -->
+    <div id="mr-sub-payloads" class="mr-sub-panel hidden">
+      <div class="settings-scroll">
+        <div class="settings-section">
+          <div class="settings-section-title">Payload Generator</div>
+          <div class="settings-section-desc">One-click payloads for common vulnerability classes. Click to copy, or "Send to Intruder" to load as payloads.</div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Category</label>
+            <select id="payload-category" class="filter-sel">
+              <option value="xss">XSS</option>
+              <option value="xss-polyglot">XSS Polyglots</option>
+              <option value="sqli">SQL Injection</option>
+              <option value="ssti">SSTI</option>
+              <option value="cmdi">Command Injection</option>
+              <option value="path">Path Traversal</option>
+              <option value="ssrf">SSRF</option>
+              <option value="xxe">XXE</option>
+              <option value="openredirect">Open Redirect</option>
+            </select>
+            <button id="payload-copy" class="btn btn-xs btn-ghost">Copy All</button>
+            <button id="payload-to-intruder" class="btn btn-xs btn-accent">Send to Intruder</button>
+          </div>
+          <pre id="payload-list" class="raw-pre" style="flex:1;font-size:11px;padding:8px;overflow:auto;max-height:400px"></pre>
+        </div>
+      </div>
     </div>
   </div>
 
