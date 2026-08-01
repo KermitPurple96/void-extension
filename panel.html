@@ -1448,6 +1448,17 @@
 
   <!-- ═══════════════════════════ HEADERS ════════════════════════════════════ -->
   <div id="tab-headers" class="tab-panel hidden">
+    <!-- Toolbar -->
+    <div class="filter-bar">
+      <button id="hdr-rescan" class="btn btn-sm btn-accent" title="Re-scan current page headers">Rescan</button>
+      <input id="hdr-scan-url" type="text" class="settings-inp" placeholder="Scan a URL…" spellcheck="false" style="flex:1;max-width:400px">
+      <button id="hdr-scan-url-go" class="btn btn-sm btn-ghost" title="Fetch and scan headers for this URL">Scan URL</button>
+      <select id="hdr-history-sel" class="filter-sel" style="max-width:250px">
+        <option value="">Scan history…</option>
+      </select>
+      <button id="hdr-history-load" class="btn btn-xs btn-ghost">Load</button>
+      <span id="hdr-scan-status" class="settings-status"></span>
+    </div>
     <!-- What the analysis below is actually describing -->
     <div class="hdr-ref-bar" id="hdr-ref-bar">
       <span class="hdr-ref-label">Reference</span>

@@ -160,7 +160,7 @@ function showTab(name) {
   if (name === "history") startHistPoll(); else stopHistPoll();
   if (name === "logger") { logSyncLocal(); logRender(); startLogSync(); logSyncConnect(); } else stopLogSync();
   if (name === "target") { pollHistory().then(() => renderSiteMap()); renderEndpoints(); }
-  if (name === "headers") pollHistory().then(renderHeaders);
+  if (name === "headers") pollHistory().then(() => { renderHeaders(); hdrAutoScan(); });
   if (name === "ws") startWsPoll(); else stopWsPoll();
   if (name === "notes") { notesRender(); }
   if (name === "probe" && probeInjected) probeStartPoll(); else probeStopPoll();
@@ -2049,6 +2049,113 @@ let logReflectBar = null, sensReflectBar = null, tgtReflectBar = null, epReflect
 
 
 // ═══════════════════════════ HEADERS ═════════════════════════════════════════
+
+// Scan history: { domain: { url, timestamp, results, headers } }
+let hdrScanHistory = {};
+let hdrAutoScanned = new Set(); // domains already auto-scanned this session
+
+function hdrSaveHistory() {
+  chrome.storage.local.set({ voidHdrHistory: hdrScanHistory });
+}
+
+async function hdrLoadHistory() {
+  const stored = await new Promise(r => chrome.storage.local.get("voidHdrHistory", r));
+  hdrScanHistory = stored.voidHdrHistory || {};
+  hdrRenderHistoryDropdown();
+}
+
+function hdrRenderHistoryDropdown() {
+  const sel = document.getElementById("hdr-history-sel");
+  if (!sel) return;
+  sel.replaceChildren();
+  const def = el("option"); def.value = ""; def.textContent = "Scan history\u2026"; sel.appendChild(def);
+  for (const [domain, entry] of Object.entries(hdrScanHistory).sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0))) {
+    const o = el("option"); o.value = domain;
+    const date = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "?";
+    const fails = (entry.results || []).filter(r => r.st === "fail").length;
+    o.textContent = `${domain} — ${fails} missing — ${date}`;
+    sel.appendChild(o);
+  }
+}
+
+function hdrRecordScan(url, headers, results) {
+  let domain = "";
+  try { domain = new URL(url).hostname; } catch { domain = url; }
+  hdrScanHistory[domain] = {
+    url, domain, timestamp: Date.now(),
+    headers: { ...headers },
+    results: results.map(r => ({ name: r.name, label: r.label, st: r.st, note: r.note, value: r.value })),
+  };
+  hdrSaveHistory();
+  hdrRenderHistoryDropdown();
+}
+
+// Auto-scan: called when Headers tab opens, scans current domain if not scanned yet
+async function hdrAutoScan() {
+  const src = headerSources();
+  const hdrs = src.docHdrs && Object.keys(src.docHdrs).length ? src.docHdrs : src.merged;
+  if (!Object.keys(hdrs).length) return;
+  let domain = "";
+  try { domain = new URL(src.docUrl || "").hostname; } catch { return; }
+  if (!domain || hdrAutoScanned.has(domain)) return;
+  hdrAutoScanned.add(domain);
+  const results = SEC_CHECKS.map(h => ({ ...h, value: hdrs[h.name] || null, ...h.check(hdrs[h.name] || null, hdrs) }));
+  hdrRecordScan(src.docUrl || domain, hdrs, results);
+}
+
+// Scan arbitrary URL by fetching its headers via the background SW
+async function hdrScanUrl(url) {
+  if (!url) return;
+  document.getElementById("hdr-scan-status").textContent = "Fetching\u2026";
+  const res = await bg({ type: "SEND_REQUEST", url, method: "GET", rawHeaders: "", body: undefined });
+  if (!res) { document.getElementById("hdr-scan-status").textContent = "Error: no response"; return; }
+  const hdrs = {};
+  Object.entries(res.headers || {}).forEach(([k, v]) => { hdrs[k.toLowerCase()] = v; });
+  const results = SEC_CHECKS.map(h => ({ ...h, value: hdrs[h.name] || null, ...h.check(hdrs[h.name] || null, hdrs) }));
+  hdrRecordScan(url, hdrs, results);
+  // Render this scan
+  hdrRenderCustomScan(url, hdrs, results, res.status);
+  document.getElementById("hdr-scan-status").textContent = "";
+  showToast(`Scanned ${url}`);
+}
+
+function hdrRenderCustomScan(url, hdrs, results, status) {
+  // Update the ref bar
+  document.getElementById("hdr-ref-url").textContent = url;
+  document.getElementById("hdr-ref-status").textContent = status ? `HTTP ${status}` : "";
+  document.getElementById("hdr-ref-warn").classList.add("hidden");
+  // Re-render the grid with these headers
+  const grid = document.getElementById("hdr-sec-grid");
+  const allList = document.getElementById("hdr-all-list");
+  document.getElementById("hdr-empty").classList.add("hidden");
+  grid.replaceChildren();
+  const fails = results.filter(r => r.st === "fail").length;
+  const warns = results.filter(r => r.st === "warn").length;
+  const summary = el("div", "hdr-sec-summary");
+  summary.textContent = `${fails} missing \u00B7 ${warns} warnings \u00B7 ${results.length - fails - warns} OK`;
+  grid.appendChild(summary);
+  const tilesWrap = el("div", "hdr-sec-tiles");
+  results.forEach(r => {
+    const tile = el("div", `hdr-sec-tile hdr-sec-${r.st}`);
+    const top = el("div", "hdr-sec-top");
+    top.appendChild(txt("span", `hdr-sec-badge hdr-sec-badge-${r.st}`, r.st.toUpperCase()));
+    top.appendChild(txt("span", "hdr-sec-note", r.note));
+    tile.appendChild(top);
+    tile.appendChild(txt("div", "hdr-sec-name", r.label));
+    tile.appendChild(txt("div", "hdr-sec-desc", r.desc));
+    if (r.value) tile.appendChild(txt("div", "hdr-sec-val", r.value.length > 120 ? r.value.slice(0, 117) + "\u2026" : r.value));
+    tilesWrap.appendChild(tile);
+  });
+  grid.appendChild(tilesWrap);
+  // All headers
+  allList.replaceChildren();
+  Object.entries(hdrs).forEach(([k, v]) => {
+    const row = el("div", "hdr-row");
+    row.appendChild(txt("span", "hdr-key", k));
+    row.appendChild(txt("span", "hdr-val", v));
+    allList.appendChild(row);
+  });
+}
 
 // ── Security header checks (from BB Security Analyzer) ──────────────────────
 const SEC_CHECKS = [
@@ -4322,6 +4429,8 @@ function buildSessionData() {
     },
     // Decoder chain
     decoderChain: [...(window._decChain || [])],
+    // Header scan history
+    hdrScanHistory: hdrScanHistory,
   };
 }
 
@@ -4526,6 +4635,10 @@ async function applySessionData(data) {
   if (data.decoderChain && window._decChain) {
     window._decChain.length = 0;
     window._decChain.push(...data.decoderChain);
+  }
+  if (data.hdrScanHistory) {
+    hdrScanHistory = data.hdrScanHistory;
+    hdrRenderHistoryDropdown();
   }
 
   renderHeaders();
@@ -8010,6 +8123,32 @@ document.addEventListener("DOMContentLoaded", () => {
       a.download = `void-api-schema-${new Date().toISOString().slice(0, 10)}.yaml`;
       a.click(); URL.revokeObjectURL(a.href);
       showToast("Schema downloaded");
+    });
+  });
+
+  // ── Headers toolbar ────────────────────────────────────────────────────
+  initBlock("headers-toolbar", () => {
+    hdrLoadHistory();
+    document.getElementById("hdr-rescan").addEventListener("click", () => {
+      // Force re-scan current page
+      let domain = "";
+      try { const src = headerSources(); domain = new URL(src.docUrl || "").hostname; } catch {}
+      if (domain) hdrAutoScanned.delete(domain);
+      pollHistory().then(() => { renderHeaders(); hdrAutoScan(); showToast("Headers rescanned"); });
+    });
+    document.getElementById("hdr-scan-url-go").addEventListener("click", () => {
+      const url = document.getElementById("hdr-scan-url").value.trim();
+      if (url) hdrScanUrl(url);
+    });
+    document.getElementById("hdr-scan-url").addEventListener("keydown", e => {
+      if (e.key === "Enter") { const url = e.target.value.trim(); if (url) hdrScanUrl(url); }
+    });
+    document.getElementById("hdr-history-load").addEventListener("click", () => {
+      const domain = document.getElementById("hdr-history-sel").value;
+      if (!domain || !hdrScanHistory[domain]) return;
+      const entry = hdrScanHistory[domain];
+      hdrRenderCustomScan(entry.url, entry.headers, entry.results, null);
+      showToast(`Loaded scan for ${domain}`);
     });
   });
 
