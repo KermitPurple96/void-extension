@@ -41,10 +41,12 @@ let histSortAsc = false; // false = newest first by default
 let histColFilters = {};
 
 // ── Repeater tabs state ──────────────────────────────────────────────────────
-let repTabs = [{ id: 0, label: "1", method: "GET", url: "", headers: "", body: "", response: null, autoCookie: false, targetHost: "", targetPort: "", targetTls: true, history: [], histIdx: -1 }];
+let repTabs = [{ id: 0, label: "1", group: null, method: "GET", url: "", headers: "", body: "", response: null, autoCookie: false, targetHost: "", targetPort: "", targetTls: true, history: [], histIdx: -1 }];
 let repActiveTab = 0;
 let rep2ActiveTab = 0; // right Repeater's independently selected tab
 let repNextId = 1;
+let repGroups = []; // { name, collapsed }
+let repNextGroupId = 1;
 
 // ── Intruder state ───────────────────────────────────────────────────────────
 let intrRunning = false;
@@ -1390,7 +1392,7 @@ function sendToRepeater(req) {
   const newTab = {
     id: repNextId++,
     label: repTabs.length + 1 + "",
-    method, url, headers: rawHdrs, body, response: null, autoCookie: false,
+    method, url, headers: rawHdrs, body, response: null, autoCookie: false, group: null,
     targetHost: "", targetPort: "", targetTls: true, history: [], histIdx: -1,
   };
   repTabs.push(newTab);
@@ -1525,55 +1527,96 @@ function loadRepTab(tab) {
   updateRepHistButtons();
 }
 
+function repTabLabel(tab) {
+  if (tab.customLabel) return tab.customLabel;
+  if (tab.url) { try { return new URL(tab.url).pathname.split("/").pop() || tab.label; } catch {} }
+  return tab.label;
+}
+
+function repMakeTabBtn(tab) {
+  const btn = document.createElement("button");
+  btn.className = "rep-tab-btn" + (tab.id === repActiveTab ? " active" : "");
+  btn.dataset.reptab = tab.id;
+
+  const labelSpan = document.createElement("span");
+  labelSpan.textContent = repTabLabel(tab);
+  btn.appendChild(labelSpan);
+
+  if (repTabs.length > 1) {
+    const x = document.createElement("span");
+    x.className = "rep-tab-close";
+    x.textContent = "\u00D7";
+    x.addEventListener("click", e => { e.stopPropagation(); closeRepTab(tab.id); });
+    btn.appendChild(x);
+  }
+
+  btn.addEventListener("click", () => switchRepTab(tab.id));
+
+  // Double-click to rename
+  btn.addEventListener("dblclick", e => {
+    e.stopPropagation();
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "rep-tab-rename";
+    input.value = tab.customLabel || repTabLabel(tab);
+    input.size = Math.max(4, input.value.length + 1);
+    labelSpan.replaceWith(input);
+    input.focus(); input.select();
+    const finish = () => { const val = input.value.trim(); if (val) tab.customLabel = val; renderRepTabs(); };
+    input.addEventListener("blur", finish);
+    input.addEventListener("keydown", ev => {
+      if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
+      if (ev.key === "Escape") { ev.preventDefault(); input.value = ""; input.blur(); }
+    });
+  });
+
+  // Right-click context menu for grouping
+  btn.addEventListener("contextmenu", e => {
+    e.preventDefault();
+    repShowGroupMenu(tab, e.clientX, e.clientY);
+  });
+
+  return btn;
+}
+
 function renderRepTabs() {
   const bar = document.getElementById("rep-tabs-bar");
   const addBtn = document.getElementById("rep-tab-add");
-  // Remove all tab buttons (keep the + button)
-  bar.querySelectorAll(".rep-tab-btn").forEach(b => b.remove());
+  bar.querySelectorAll(".rep-tab-btn, .rep-group-hdr").forEach(b => b.remove());
 
-  repTabs.forEach(tab => {
-    const btn = document.createElement("button");
-    btn.className = "rep-tab-btn" + (tab.id === repActiveTab ? " active" : "");
-    btn.dataset.reptab = tab.id;
+  // Render grouped tabs first, then ungrouped
+  const usedGroups = new Set();
 
-    // Label — custom name or short path
-    let label = tab.customLabel || tab.label;
-    if (!tab.customLabel && tab.url) {
-      try { const u = new URL(tab.url); label = u.pathname.split("/").pop() || tab.label; } catch {}
-    }
+  // Ungrouped tabs
+  const ungrouped = repTabs.filter(t => !t.group);
+  for (const tab of ungrouped) bar.insertBefore(repMakeTabBtn(tab), addBtn);
 
-    const labelSpan = document.createElement("span");
-    labelSpan.textContent = label;
-    btn.appendChild(labelSpan);
+  // Group headers + their tabs
+  for (const grp of repGroups) {
+    const groupTabs = repTabs.filter(t => t.group === grp.name);
+    if (!groupTabs.length) continue;
+    usedGroups.add(grp.name);
 
-    // Close button (only if more than 1 tab)
-    if (repTabs.length > 1) {
-      const x = document.createElement("span");
-      x.className = "rep-tab-close";
-      x.textContent = "×";
-      x.addEventListener("click", e => {
-        e.stopPropagation();
-        closeRepTab(tab.id);
-      });
-      btn.appendChild(x);
-    }
-
-    btn.addEventListener("click", () => switchRepTab(tab.id));
-
-    // Double-click to rename
-    btn.addEventListener("dblclick", e => {
+    const hdr = document.createElement("div");
+    hdr.className = "rep-group-hdr" + (grp.collapsed ? " collapsed" : "");
+    hdr.innerHTML = `<span class="rep-group-arrow">${grp.collapsed ? "\u25B6" : "\u25BC"}</span><span class="rep-group-name">${esc(grp.name)}</span><span class="rep-group-count">${groupTabs.length}</span>`;
+    hdr.addEventListener("click", () => { grp.collapsed = !grp.collapsed; renderRepTabs(); });
+    // Double-click to rename group
+    hdr.addEventListener("dblclick", e => {
       e.stopPropagation();
+      const nameSpan = hdr.querySelector(".rep-group-name");
       const input = document.createElement("input");
-      input.type = "text";
-      input.className = "rep-tab-rename";
-      input.value = tab.customLabel || label;
+      input.type = "text"; input.className = "rep-tab-rename"; input.value = grp.name;
       input.size = Math.max(4, input.value.length + 1);
-      labelSpan.replaceWith(input);
-      input.focus();
-      input.select();
+      nameSpan.replaceWith(input);
+      input.focus(); input.select();
       const finish = () => {
         const val = input.value.trim();
-        if (val) { tab.customLabel = val; }
+        if (val && val !== grp.name) {
+          const oldName = grp.name;
+          grp.name = val;
+          repTabs.filter(t => t.group === oldName).forEach(t => { t.group = val; });
+        }
         renderRepTabs();
       };
       input.addEventListener("blur", finish);
@@ -1582,11 +1625,65 @@ function renderRepTabs() {
         if (ev.key === "Escape") { ev.preventDefault(); input.value = ""; input.blur(); }
       });
     });
+    bar.insertBefore(hdr, addBtn);
 
-    bar.insertBefore(btn, addBtn);
-  });
-  // Keep right side tab bar in sync
+    if (!grp.collapsed) {
+      for (const tab of groupTabs) bar.insertBefore(repMakeTabBtn(tab), addBtn);
+    }
+  }
+
+  // Clean up empty groups
+  repGroups = repGroups.filter(g => usedGroups.has(g.name) || repTabs.some(t => t.group === g.name));
+
   renderRep2Tabs();
+}
+
+function repShowGroupMenu(tab, x, y) {
+  // Remove existing menu
+  document.getElementById("rep-group-menu")?.remove();
+
+  const menu = document.createElement("div");
+  menu.id = "rep-group-menu";
+  menu.className = "rep-group-menu";
+  menu.style.left = x + "px";
+  menu.style.top = y + "px";
+
+  // "New Group" option
+  const newGrp = document.createElement("div");
+  newGrp.className = "rep-group-menu-item";
+  newGrp.textContent = "+ New Group";
+  newGrp.addEventListener("click", () => {
+    const name = "Group " + repNextGroupId++;
+    repGroups.push({ name, collapsed: false });
+    tab.group = name;
+    menu.remove();
+    renderRepTabs();
+  });
+  menu.appendChild(newGrp);
+
+  // "Remove from group" if in a group
+  if (tab.group) {
+    const ungroup = document.createElement("div");
+    ungroup.className = "rep-group-menu-item";
+    ungroup.textContent = "\u2715 Remove from group";
+    ungroup.addEventListener("click", () => { tab.group = null; menu.remove(); renderRepTabs(); });
+    menu.appendChild(ungroup);
+  }
+
+  // Existing groups
+  for (const grp of repGroups) {
+    if (grp.name === tab.group) continue;
+    const item = document.createElement("div");
+    item.className = "rep-group-menu-item";
+    item.textContent = "\u2192 " + grp.name;
+    item.addEventListener("click", () => { tab.group = grp.name; menu.remove(); renderRepTabs(); });
+    menu.appendChild(item);
+  }
+
+  document.body.appendChild(menu);
+  // Close on click outside
+  const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener("click", close); } };
+  setTimeout(() => document.addEventListener("click", close), 0);
 }
 
 function switchRepTab(id) {
@@ -4509,12 +4606,13 @@ function buildSessionData() {
     // Repeater
     repeater: {
       tabs: repTabs.map(t => ({
-        id: t.id, label: t.label, customLabel: t.customLabel || null,
+        id: t.id, label: t.label, customLabel: t.customLabel || null, group: t.group || null,
         method: t.method, url: t.url, headers: t.headers, body: t.body,
         response: t.response, autoCookie: t.autoCookie,
         targetHost: t.targetHost, targetPort: t.targetPort, targetTls: t.targetTls,
         history: t.history, histIdx: t.histIdx,
       })),
+      groups: repGroups,
       activeTab: repActiveTab,
       nextId: repNextId,
     },
@@ -4687,12 +4785,14 @@ async function applySessionData(data) {
   // Restore repeater
   if (data.repeater && data.repeater.tabs && data.repeater.tabs.length) {
     repTabs = data.repeater.tabs.map(t => ({
-      id: t.id, label: t.label || "1", customLabel: t.customLabel || null,
+      id: t.id, label: t.label || "1", customLabel: t.customLabel || null, group: t.group || null,
       method: t.method || "GET", url: t.url || "", headers: t.headers || "", body: t.body || "",
       response: t.response || null, autoCookie: !!t.autoCookie,
       targetHost: t.targetHost || "", targetPort: t.targetPort || "", targetTls: t.targetTls !== false,
       history: t.history || [], histIdx: t.histIdx ?? -1,
     }));
+    repGroups = data.repeater.groups || [];
+    repNextGroupId = repGroups.length ? Math.max(...repGroups.map((_, i) => i + 1)) + 1 : 1;
     repNextId = data.repeater.nextId || (Math.max(...repTabs.map(t => t.id)) + 1);
     repActiveTab = data.repeater.activeTab;
     if (!repTabs.find(t => t.id === repActiveTab)) repActiveTab = repTabs[0].id;
