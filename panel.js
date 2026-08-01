@@ -3762,8 +3762,8 @@ function loadSettings() {
 function saveSettings() {
   // Read current UI state into settings
   settings.autoHeaders    = (document.getElementById("mr-auto-headers") || document.getElementById("cfg-auto-headers")).value;
-  settings.scopeInclude   = document.getElementById("cfg-scope-include").value;
-  settings.scopeExclude   = document.getElementById("cfg-scope-exclude").value;
+  settings.scopeInclude   = document.getElementById("tgt-scope-include").value;
+  settings.scopeExclude   = document.getElementById("tgt-scope-exclude").value;
   settings.followRedirects = document.getElementById("cfg-follow-redirects").checked;
   settings.timeout        = document.getElementById("cfg-timeout").value;
   settings.reqView        = document.getElementById("cfg-req-view").value;
@@ -3773,14 +3773,6 @@ function saveSettings() {
   // Upstream proxy
   settings.upstreamProxy  = document.getElementById("cfg-upstream-proxy").value;
   // Session handling
-  settings.sessionEnabled = document.getElementById("cfg-session-enabled").checked;
-  settings.sessionDetect  = document.getElementById("cfg-session-detect").value;
-  settings.sessionMatch   = document.getElementById("cfg-session-match").value;
-  settings.sessionUrl     = document.getElementById("cfg-session-url").value;
-  settings.sessionMethod  = document.getElementById("cfg-session-method").value;
-  settings.sessionBody    = document.getElementById("cfg-session-body").value;
-  settings.sessionExtract = document.getElementById("cfg-session-extract").value;
-  settings.sessionTokenName = document.getElementById("cfg-session-token-name").value;
   // Collaborator
   settings.collabUrl      = (document.getElementById("mr-collab-url") || document.getElementById("cfg-collab-url")).value;
   // Dencoder saved chains
@@ -3798,8 +3790,6 @@ function saveSettings() {
 
 function loadSettingsUI() {
   (document.getElementById("mr-auto-headers") || document.getElementById("cfg-auto-headers")).value = settings.autoHeaders || "";
-  document.getElementById("cfg-scope-include").value    = settings.scopeInclude || "";
-  document.getElementById("cfg-scope-exclude").value    = settings.scopeExclude || "";
   document.getElementById("cfg-follow-redirects").checked = !!settings.followRedirects;
   document.getElementById("cfg-timeout").value          = settings.timeout || "30000";
   document.getElementById("cfg-req-view").value         = settings.reqView || "split";
@@ -3811,14 +3801,6 @@ function loadSettingsUI() {
   // Upstream proxy
   document.getElementById("cfg-upstream-proxy").value   = settings.upstreamProxy || "";
   // Session handling
-  document.getElementById("cfg-session-enabled").checked = !!settings.sessionEnabled;
-  document.getElementById("cfg-session-detect").value   = settings.sessionDetect || "status";
-  document.getElementById("cfg-session-match").value    = settings.sessionMatch || "";
-  document.getElementById("cfg-session-url").value      = settings.sessionUrl || "";
-  document.getElementById("cfg-session-method").value   = settings.sessionMethod || "POST";
-  document.getElementById("cfg-session-body").value     = settings.sessionBody || "";
-  document.getElementById("cfg-session-extract").value  = settings.sessionExtract || "cookie";
-  document.getElementById("cfg-session-token-name").value = settings.sessionTokenName || "";
   // Collaborator
   (document.getElementById("mr-collab-url") || document.getElementById("cfg-collab-url")).value = settings.collabUrl || "";
   // Dencoder chains
@@ -4756,11 +4738,9 @@ async function applySessionData(data) {
   // Restore scope
   if (data.scopeInclude !== undefined) {
     document.getElementById("tgt-scope-include").value = data.scopeInclude;
-    document.getElementById("cfg-scope-include").value = data.scopeInclude;
   }
   if (data.scopeExclude !== undefined) {
     document.getElementById("tgt-scope-exclude").value = data.scopeExclude;
-    document.getElementById("cfg-scope-exclude").value = data.scopeExclude;
   }
 
   // Notes
@@ -6304,7 +6284,6 @@ function autoDetectScope() {
     try {
       const u = new URL(tab.url);
       const pattern = `*://${u.hostname}/*`;
-      document.getElementById("cfg-scope-include").value = pattern;
       document.getElementById("tgt-scope-include").value = pattern;
     } catch {}
   });
@@ -7069,61 +7048,6 @@ function intrGrepResult(respBody) {
     } catch {}
   }
   return { grepMatch, grepExtract };
-}
-
-// ═══════════════════════════ SESSION HANDLING ════════════════════════════════
-
-async function sessionCheckAndRenew(res) {
-  if (!settings?.sessionEnabled) return;
-  const detect = settings.sessionDetect || "status";
-  const match = settings.sessionMatch || "401";
-  let expired = false;
-
-  if (detect === "status" && String(res.status) === match) expired = true;
-  else if (detect === "body" && (res.body || "").includes(match)) expired = true;
-  else if (detect === "header") {
-    const allHdrs = Object.entries(res.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
-    if (allHdrs.includes(match)) expired = true;
-  }
-
-  if (!expired) return;
-
-  // Replay login macro
-  const loginRes = await bg({
-    type: "SEND_REQUEST",
-    url: settings.sessionUrl,
-    method: settings.sessionMethod || "POST",
-    rawHeaders: "",
-    body: settings.sessionBody,
-  });
-  if (!loginRes) return;
-
-  // Extract new token and inject into active Repeater/Intruder
-  let newTokenCookie = "";
-  if (settings.sessionExtract === "cookie") {
-    const setCookie = Object.entries(loginRes.headers || {}).find(([k]) => k.toLowerCase() === "set-cookie")?.[1] || "";
-    const m = setCookie.match(new RegExp(`${settings.sessionTokenName}=([^;]+)`));
-    if (m) newTokenCookie = `${settings.sessionTokenName}=${m[1]}`;
-  } else if (settings.sessionExtract === "header") {
-    const val = Object.entries(loginRes.headers || {}).find(([k]) => k.toLowerCase() === (settings.sessionTokenName || "").toLowerCase())?.[1] || "";
-    if (val) newTokenCookie = val; // Not a cookie, but store for reference
-  } else if (settings.sessionExtract === "body-regex") {
-    try {
-      const m = (loginRes.body || "").match(new RegExp(settings.sessionTokenName));
-      if (m) newTokenCookie = m[1] || m[0];
-    } catch {}
-  }
-
-  if (newTokenCookie) {
-    settings._lastSessionCookie = newTokenCookie;
-    // Auto-inject into active Repeater tab's headers
-    const repHdrs = document.getElementById("rep-headers");
-    if (repHdrs && settings.sessionExtract === "cookie") {
-      const { headers: merged } = injectCookieSmart(repHdrs.value, newTokenCookie);
-      repHdrs.value = merged;
-      showToast(`Session renewed: ${settings.sessionTokenName}`);
-    }
-  }
 }
 
 // ═══════════════════════════ INTRUDER PAYLOAD VALIDATION ═════════════════════
@@ -8474,10 +8398,8 @@ document.addEventListener("DOMContentLoaded", () => {
     renderSiteMap();
     renderEndpoints();
   });
+  document.getElementById("tgt-scope-auto").addEventListener("click", autoDetectScope);
   document.getElementById("tgt-scope-save").addEventListener("click", () => {
-    // Sync scope to Settings too
-    document.getElementById("cfg-scope-include").value = document.getElementById("tgt-scope-include").value;
-    document.getElementById("cfg-scope-exclude").value = document.getElementById("tgt-scope-exclude").value;
     saveSettings();
     renderSiteMap();
     const st = document.getElementById("tgt-scope-status");
@@ -9516,12 +9438,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initBlock("har-scope", () => {
     document.getElementById("cfg-export-har").addEventListener("click", exportHar);
-    document.getElementById("cfg-scope-auto").addEventListener("click", autoDetectScope);
-  });
-
-  // ── Session handling settings ─────────────────────────────────────────
-  initBlock("session-handling", () => {
-    // These are saved/loaded with the main settings
   });
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────

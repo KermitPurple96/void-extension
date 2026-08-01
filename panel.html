@@ -163,6 +163,7 @@
                     placeholder="*.google.com*&#10;*fonts.googleapis.com*&#10;*cdn.cloudflare.com*"></textarea>
           <div class="settings-actions" style="margin-top:10px">
             <button id="tgt-scope-save" class="btn btn-accent">Save Scope</button>
+            <button id="tgt-scope-auto" class="btn btn-sm btn-ghost" title="Auto-detect scope from current tab">Auto-detect</button>
             <span id="tgt-scope-status" class="settings-status"></span>
           </div>
         </div>
@@ -1996,22 +1997,6 @@
   <div id="tab-settings" class="tab-panel hidden" role="tabpanel">
     <div class="settings-scroll">
 
-      <!-- ── Scope ──────────────────────────────────────────────── -->
-      <div class="settings-section">
-        <div class="settings-section-title">Scope</div>
-        <div class="settings-section-desc">Limit History capture &amp; Match/Replace to matching URLs. One pattern per line. Supports <code>*</code> wildcard. Leave empty = capture all.</div>
-        <div class="settings-row">
-          <label class="settings-label-sm">Include</label>
-        </div>
-        <textarea id="cfg-scope-include" class="raw-ta settings-ta" rows="3" spellcheck="false"
-                  placeholder="*://api.example.com/*&#10;*://app.example.com/*"></textarea>
-        <div class="settings-row" style="margin-top:6px">
-          <label class="settings-label-sm">Exclude</label>
-        </div>
-        <textarea id="cfg-scope-exclude" class="raw-ta settings-ta" rows="2" spellcheck="false"
-                  placeholder="*.google.com*&#10;*fonts.googleapis.com*"></textarea>
-      </div>
-
       <!-- ── Request Defaults ───────────────────────────────────── -->
       <div class="settings-section">
         <div class="settings-section-title">Request Defaults</div>
@@ -2042,41 +2027,6 @@
         </div>
       </div>
 
-      <!-- ── Session Handling ──────────────────────────────────────── -->
-      <div class="settings-section">
-        <div class="settings-section-title">Session Handling</div>
-        <div class="settings-section-desc">Define a login macro that auto-replays when a session expires. Void detects expiry by status code or response content match.</div>
-        <div class="settings-row">
-          <label class="settings-label"><input type="checkbox" id="cfg-session-enabled"><span class="toggle-track"></span> Enable session auto-renewal</label>
-        </div>
-        <div class="settings-row">
-          <label class="settings-label-sm" for="cfg-session-detect">Detect expiry by</label>
-          <select id="cfg-session-detect" class="filter-sel">
-            <option value="status">Status code</option>
-            <option value="body">Response body contains</option>
-            <option value="header">Response header contains</option>
-          </select>
-          <input id="cfg-session-match" type="text" class="settings-inp" placeholder="401 or 'login_required'" spellcheck="false" style="flex:1">
-        </div>
-        <div class="settings-row"><label class="settings-label-sm" for="cfg-session-url">Login URL</label></div>
-        <input id="cfg-session-url" type="text" class="settings-inp" placeholder="https://target.com/login" spellcheck="false">
-        <div class="settings-row">
-          <label class="settings-label-sm" for="cfg-session-method">Method</label>
-          <select id="cfg-session-method" class="filter-sel" style="width:80px"><option>GET</option><option selected>POST</option></select>
-        </div>
-        <div class="settings-row"><label class="settings-label-sm" for="cfg-session-body">Login body</label></div>
-        <textarea id="cfg-session-body" class="raw-ta settings-ta" rows="2" spellcheck="false" placeholder="username=admin&password=secret"></textarea>
-        <div class="settings-row"><label class="settings-label-sm" for="cfg-session-extract">Extract token</label></div>
-        <div class="settings-row">
-          <select id="cfg-session-extract" class="filter-sel">
-            <option value="cookie">Set-Cookie name</option>
-            <option value="header">Response header</option>
-            <option value="body-regex">Body regex</option>
-          </select>
-          <input id="cfg-session-token-name" type="text" class="settings-inp" placeholder="session_id" spellcheck="false" style="flex:1">
-        </div>
-      </div>
-
       <!-- ── Appearance ──────────────────────────────────────── -->
       <div class="settings-section">
         <div class="settings-section-title">Appearance</div>
@@ -2096,7 +2046,6 @@
         <div class="settings-section-title">Export</div>
         <div class="settings-actions">
           <button id="cfg-export-har" class="btn btn-sm btn-ghost">Export HAR 1.2</button>
-          <button id="cfg-scope-auto" class="btn btn-sm btn-ghost" title="Auto-detect scope from current tab">Auto-detect scope</button>
         </div>
       </div>
 
