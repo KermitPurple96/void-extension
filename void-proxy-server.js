@@ -463,7 +463,7 @@ async function handleAiChat(req, res) {
       if (typeof m.content === "string") conversationText += `${m.role === "user" ? "User" : "Assistant"}: ${m.content}\n\n`;
     }
 
-    const MAX_CLI_TURNS = 10;
+    const MAX_CLI_TURNS = 30;
     for (let turn = 0; turn < MAX_CLI_TURNS; turn++) {
       let response;
       try {
@@ -544,7 +544,7 @@ async function handleAiChat(req, res) {
 
   // Agentic loop — keep calling LLM until it returns text (no more tool calls)
   const conversationMessages = isAnthropic ? [...(messages || [])] : [...(messages || [])];
-  const MAX_TURNS = 15;
+  const MAX_TURNS = 30;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     let llmRes;

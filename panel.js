@@ -8426,38 +8426,83 @@ function aiLoadSessions() {
   });
 }
 
-// Connect to proxy WebSocket for AI messages
+// Connect to proxy WebSocket for AI messages — returns a Promise that
+// resolves when the connection is open (so broadcasts aren't missed)
 function aiConnectProxy() {
-  if (aiProxyWs && aiProxyWs.readyState <= 1) return;
-  try {
-    aiProxyWs = new WebSocket("ws://localhost:8082");
-    aiProxyWs.onmessage = async (ev) => {
-      let msg;
-      try { msg = JSON.parse(ev.data); } catch { return; }
+  if (aiProxyWs && aiProxyWs.readyState === 1) return Promise.resolve(); // already open
+  if (aiProxyWs && aiProxyWs.readyState === 0) {
+    // Still connecting — wait for it
+    return new Promise(r => { aiProxyWs.addEventListener("open", r, { once: true }); });
+  }
+  return new Promise((resolve) => {
+    try {
+      aiProxyWs = new WebSocket("ws://localhost:8082");
+      aiProxyWs.onopen = () => resolve();
+      aiProxyWs.onerror = () => resolve(); // don't block forever
+      aiProxyWs.onmessage = async (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
 
-      // Tool execution request from proxy
-      if (msg.type === "tool_exec") {
-        const result = await aiExecTool(msg.tool, msg.args || {});
-        aiProxyWs.send(JSON.stringify({ type: "tool_result", callId: msg.callId, result }));
-        return;
-      }
+        // Tool execution request from proxy
+        if (msg.type === "tool_exec") {
+          aiRemoveThinking();
+          aiSetStatus(`\u2699 Running tool: ${msg.tool}`);
+          const result = await aiExecTool(msg.tool, msg.args || {});
+          aiProxyWs.send(JSON.stringify({ type: "tool_result", callId: msg.callId, result }));
+          return;
+        }
 
-      // AI response chunks for display
-      if (msg.type === "ai_chunk") {
-        if (msg.text) aiAddMessage("assistant", msg.text);
-        return;
-      }
-      if (msg.type === "ai_tool_start") {
-        aiAddMessage("tool-start", `\u2699 Calling ${msg.name}(${JSON.stringify(msg.args).slice(0, 100)})`);
-        return;
-      }
-      if (msg.type === "ai_tool_done") {
-        const resultStr = typeof msg.result === "string" ? msg.result : JSON.stringify(msg.result);
-        aiAddMessage("tool-result", `\u2713 ${msg.name} \u2192 ${resultStr.slice(0, 300)}`);
-        return;
-      }
-    };
-  } catch {}
+        // AI response chunks for display
+        if (msg.type === "ai_chunk") {
+          aiRemoveThinking();
+          if (msg.text) aiAddMessage("assistant", msg.text);
+          if (msg.toolCalls?.length) {
+            aiSetStatus(`\u2699 AI is calling ${msg.toolCalls.length} tool(s)\u2026`);
+          }
+          return;
+        }
+        if (msg.type === "ai_tool_start") {
+          aiRemoveThinking();
+          const argsStr = JSON.stringify(msg.args || {});
+          aiAddMessage("tool-start", `\u2699 ${msg.name}(${argsStr.length > 80 ? argsStr.slice(0, 77) + "\u2026" : argsStr})`);
+          aiSetStatus(`\u23F3 Waiting for ${msg.name} result\u2026`);
+          return;
+        }
+        if (msg.type === "ai_tool_done") {
+          const resultStr = typeof msg.result === "string" ? msg.result : JSON.stringify(msg.result);
+          const preview = resultStr.length > 200 ? resultStr.slice(0, 197) + "\u2026" : resultStr;
+          aiAddMessage("tool-result", `\u2713 ${msg.name} \u2192 ${preview}`);
+          aiSetStatus("\u2026 AI is analyzing results");
+          return;
+        }
+      };
+    } catch { resolve(); }
+  });
+}
+
+function aiRemoveThinking() {
+  const container = document.getElementById("ai-messages");
+  const el = container.querySelector(".ai-msg-thinking");
+  if (el) el.remove();
+}
+
+function aiSetStatus(text) {
+  // Update or create a status indicator at the bottom of messages
+  const container = document.getElementById("ai-messages");
+  let status = container.querySelector(".ai-msg-status");
+  if (!status) {
+    status = document.createElement("div");
+    status.className = "ai-msg ai-msg-status";
+    container.appendChild(status);
+  }
+  status.textContent = text;
+  container.scrollTop = container.scrollHeight;
+}
+
+function aiClearStatus() {
+  const container = document.getElementById("ai-messages");
+  const status = container.querySelector(".ai-msg-status");
+  if (status) status.remove();
 }
 
 function aiAddMessage(type, text, skipPush) {
@@ -8508,8 +8553,8 @@ async function aiSendMessage() {
   const customUrl = document.getElementById("ai-custom-url").value;
   const cliPath = document.getElementById("ai-cli-path")?.value || "claude";
 
-  // Connect proxy WS for tool execution
-  aiConnectProxy();
+  // Connect proxy WS for tool execution — wait for connection
+  await aiConnectProxy();
 
   try {
     const res = await fetch("http://localhost:8081/api/chat", {
@@ -8527,10 +8572,8 @@ async function aiSendMessage() {
       }),
     });
 
-    // Remove "thinking" indicator
-    const msgs = document.getElementById("ai-messages");
-    const thinking = msgs.querySelector(".ai-msg-thinking:last-child");
-    if (thinking) thinking.remove();
+    aiRemoveThinking();
+    aiClearStatus();
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -8548,9 +8591,8 @@ async function aiSendMessage() {
       }
     }
   } catch (e) {
-    const msgs = document.getElementById("ai-messages");
-    const thinking = msgs.querySelector(".ai-msg-thinking:last-child");
-    if (thinking) thinking.remove();
+    aiRemoveThinking();
+    aiClearStatus();
     aiAddMessage("error", `Connection error: ${e.message}. Is void-proxy-server.js running?`);
   }
 
