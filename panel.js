@@ -8157,9 +8157,12 @@ Keep responses concise and technical. When you find something interesting, use a
 
 let aiMessages = []; // conversation history for display
 let aiLlmMessages = []; // conversation history in LLM format
-let aiConfig = { provider: "anthropic", apiKey: "", model: "", endpoint: "", systemPrompt: AI_SYSTEM_PROMPT };
+let aiConfig = { provider: "claude-cli", apiKey: "", model: "", endpoint: "", systemPrompt: AI_SYSTEM_PROMPT, cliPath: "claude" };
 let aiSending = false;
 let aiProxyWs = null;
+let aiSessions = []; // { id, name, messages, llmMessages }
+let aiActiveSessionId = null;
+let aiNextSessionId = 1;
 
 // Tool executor — runs tools locally in panel.js where all extension state lives
 async function aiExecTool(name, args) {
@@ -8303,6 +8306,126 @@ async function aiExecTool(name, args) {
   }
 }
 
+// ── Chat session management ──────────────────────────────────────────────────
+
+function aiNewSession() {
+  // Save current session state
+  aiSaveCurrentSession();
+  const id = aiNextSessionId++;
+  const session = { id, name: `Chat ${id}`, messages: [], llmMessages: [] };
+  aiSessions.push(session);
+  aiActiveSessionId = id;
+  aiMessages = [];
+  aiLlmMessages = [];
+  document.getElementById("ai-messages").replaceChildren();
+  aiRenderSessions();
+  aiPersistSessions();
+}
+
+function aiSwitchSession(id) {
+  if (id === aiActiveSessionId) return;
+  aiSaveCurrentSession();
+  aiActiveSessionId = id;
+  const session = aiSessions.find(s => s.id === id);
+  if (!session) return;
+  aiMessages = session.messages || [];
+  aiLlmMessages = session.llmMessages || [];
+  // Re-render messages
+  const container = document.getElementById("ai-messages");
+  container.replaceChildren();
+  for (const m of aiMessages) {
+    aiAddMessage(m.type, m.text, true);
+  }
+  aiRenderSessions();
+}
+
+function aiDeleteSession(id) {
+  aiSessions = aiSessions.filter(s => s.id !== id);
+  if (aiActiveSessionId === id) {
+    if (aiSessions.length) {
+      aiSwitchSession(aiSessions[0].id);
+    } else {
+      aiNewSession();
+    }
+  }
+  aiRenderSessions();
+  aiPersistSessions();
+}
+
+function aiSaveCurrentSession() {
+  const session = aiSessions.find(s => s.id === aiActiveSessionId);
+  if (session) {
+    session.messages = [...aiMessages];
+    session.llmMessages = [...aiLlmMessages];
+    // Auto-name from first user message
+    if (session.name.startsWith("Chat ") && aiMessages.length) {
+      const firstUser = aiMessages.find(m => m.type === "user");
+      if (firstUser) session.name = firstUser.text.slice(0, 40) + (firstUser.text.length > 40 ? "\u2026" : "");
+    }
+  }
+}
+
+function aiRenderSessions() {
+  const list = document.getElementById("ai-sessions-list");
+  list.replaceChildren();
+  for (const s of aiSessions) {
+    const item = document.createElement("div");
+    item.className = "ai-session-item" + (s.id === aiActiveSessionId ? " active" : "");
+    const name = document.createElement("span");
+    name.className = "ai-session-name";
+    name.textContent = s.name;
+    name.title = s.name;
+    item.appendChild(name);
+    const del = document.createElement("span");
+    del.className = "ai-session-del";
+    del.textContent = "\u2715";
+    del.addEventListener("click", e => { e.stopPropagation(); aiDeleteSession(s.id); });
+    item.appendChild(del);
+    item.addEventListener("click", () => aiSwitchSession(s.id));
+    // Double-click to rename
+    item.addEventListener("dblclick", e => {
+      e.stopPropagation();
+      const input = document.createElement("input");
+      input.type = "text"; input.className = "rep-tab-rename"; input.value = s.name;
+      input.style.width = "100%";
+      name.replaceWith(input);
+      input.focus(); input.select();
+      const finish = () => { const val = input.value.trim(); if (val) s.name = val; aiRenderSessions(); aiPersistSessions(); };
+      input.addEventListener("blur", finish);
+      input.addEventListener("keydown", ev => {
+        if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
+        if (ev.key === "Escape") { ev.preventDefault(); input.value = s.name; input.blur(); }
+      });
+    });
+    list.appendChild(item);
+  }
+}
+
+function aiPersistSessions() {
+  aiSaveCurrentSession();
+  chrome.storage.local.set({ voidAiSessions: { sessions: aiSessions, nextId: aiNextSessionId, activeId: aiActiveSessionId } });
+}
+
+function aiLoadSessions() {
+  chrome.storage.local.get("voidAiSessions", r => {
+    const data = r.voidAiSessions;
+    if (data && data.sessions && data.sessions.length) {
+      aiSessions = data.sessions;
+      aiNextSessionId = data.nextId || aiSessions.length + 1;
+      aiActiveSessionId = data.activeId || aiSessions[0].id;
+      const session = aiSessions.find(s => s.id === aiActiveSessionId);
+      if (session) { aiMessages = session.messages || []; aiLlmMessages = session.llmMessages || []; }
+      aiRenderSessions();
+      // Render messages for active session
+      const container = document.getElementById("ai-messages");
+      container.replaceChildren();
+      for (const m of aiMessages) aiAddMessage(m.type, m.text, true);
+    } else {
+      aiNewSession();
+    }
+  });
+}
+
 // Connect to proxy WebSocket for AI messages
 function aiConnectProxy() {
   if (aiProxyWs && aiProxyWs.readyState <= 1) return;
@@ -8337,7 +8460,7 @@ function aiConnectProxy() {
   } catch {}
 }
 
-function aiAddMessage(type, text) {
+function aiAddMessage(type, text, skipPush) {
   const container = document.getElementById("ai-messages");
   const div = document.createElement("div");
   if (type === "user") {
@@ -8361,7 +8484,7 @@ function aiAddMessage(type, text) {
   }
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
-  aiMessages.push({ type, text });
+  if (!skipPush) aiMessages.push({ type, text });
 }
 
 async function aiSendMessage() {
@@ -8377,12 +8500,13 @@ async function aiSendMessage() {
   aiLlmMessages.push({ role: "user", content: text });
   aiAddMessage("thinking", "Thinking\u2026");
 
-  // Read current config
+  // Read config from Settings tab
   const provider = document.getElementById("ai-provider").value;
   const apiKey = document.getElementById("ai-apikey").value;
   const model = document.getElementById("ai-model").value;
   const systemPrompt = document.getElementById("ai-system").value || AI_SYSTEM_PROMPT;
   const customUrl = document.getElementById("ai-custom-url").value;
+  const cliPath = document.getElementById("ai-cli-path")?.value || "claude";
 
   // Connect proxy WS for tool execution
   aiConnectProxy();
@@ -8396,6 +8520,7 @@ async function aiSendMessage() {
         apiKey,
         model: model || undefined,
         endpoint: (provider === "custom" || provider === "ollama") ? customUrl : undefined,
+        cliPath: provider === "claude-cli" ? cliPath : undefined,
         messages: aiLlmMessages,
         tools: AI_TOOLS,
         systemPrompt,
@@ -8432,6 +8557,7 @@ async function aiSendMessage() {
   aiSending = false;
   document.getElementById("ai-send").disabled = false;
   input.focus();
+  aiPersistSessions();
 }
 
 // ═══════════════════════════ INIT ════════════════════════════════════════════
@@ -10079,22 +10205,23 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("ai-input").addEventListener("keydown", e => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); aiSendMessage(); }
     });
-    document.getElementById("ai-clear-chat").addEventListener("click", () => {
-      aiMessages = [];
-      aiLlmMessages = [];
-      document.getElementById("ai-messages").replaceChildren();
-    });
+    document.getElementById("ai-new-chat").addEventListener("click", () => aiNewSession());
+
+    // Provider change — show/hide fields
     document.getElementById("ai-provider").addEventListener("change", e => {
       const prov = e.target.value;
-      // Show/hide custom URL field
       document.getElementById("ai-custom-url-wrap").classList.toggle("hidden", prov !== "custom" && prov !== "ollama");
-      // Auto-fill model placeholder
+      document.getElementById("ai-apikey-wrap").classList.toggle("hidden", prov === "claude-cli");
+      document.getElementById("ai-cli-wrap").classList.toggle("hidden", prov !== "claude-cli");
       const modelInp = document.getElementById("ai-model");
-      const defaults = { anthropic: "claude-sonnet-4-20250514", openai: "gpt-4o", openrouter: "anthropic/claude-sonnet-4-20250514", ollama: "llama3.1", custom: "" };
+      const defaults = { "claude-cli": "claude-sonnet-4-20250514", anthropic: "claude-sonnet-4-20250514", openai: "gpt-4o", openrouter: "anthropic/claude-sonnet-4-20250514", ollama: "llama3.1", custom: "" };
       modelInp.placeholder = defaults[prov] || "";
-      // Auto-fill endpoint for ollama
       if (prov === "ollama") document.getElementById("ai-custom-url").value = "http://localhost:11434/v1/chat/completions";
     });
+    // Trigger initial visibility
+    document.getElementById("ai-provider").dispatchEvent(new Event("change"));
+
+    // Save/load config
     document.getElementById("ai-save-config").addEventListener("click", () => {
       aiConfig = {
         provider: document.getElementById("ai-provider").value,
@@ -10102,24 +10229,29 @@ document.addEventListener("DOMContentLoaded", () => {
         model: document.getElementById("ai-model").value,
         endpoint: document.getElementById("ai-custom-url").value,
         systemPrompt: document.getElementById("ai-system").value,
+        cliPath: document.getElementById("ai-cli-path")?.value || "claude",
       };
       chrome.storage.local.set({ voidAiConfig: aiConfig });
-      showToast("AI config saved");
+      const st = document.getElementById("ai-status");
+      st.textContent = "Saved"; setTimeout(() => { st.textContent = ""; }, 1500);
     });
-    // Load saved config
     chrome.storage.local.get("voidAiConfig", r => {
       if (r.voidAiConfig) {
         aiConfig = r.voidAiConfig;
-        document.getElementById("ai-provider").value = aiConfig.provider || "anthropic";
+        document.getElementById("ai-provider").value = aiConfig.provider || "claude-cli";
         document.getElementById("ai-apikey").value = aiConfig.apiKey || "";
         document.getElementById("ai-model").value = aiConfig.model || "";
         document.getElementById("ai-custom-url").value = aiConfig.endpoint || "";
         document.getElementById("ai-system").value = aiConfig.systemPrompt || AI_SYSTEM_PROMPT;
-        document.getElementById("ai-custom-url-wrap").classList.toggle("hidden", aiConfig.provider !== "custom" && aiConfig.provider !== "ollama");
+        if (document.getElementById("ai-cli-path")) document.getElementById("ai-cli-path").value = aiConfig.cliPath || "claude";
+        document.getElementById("ai-provider").dispatchEvent(new Event("change"));
       } else {
         document.getElementById("ai-system").value = AI_SYSTEM_PROMPT;
       }
     });
+
+    // Load chat sessions
+    aiLoadSessions();
   });
 
   // Boot

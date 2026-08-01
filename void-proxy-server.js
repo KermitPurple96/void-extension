@@ -365,6 +365,8 @@ mitm.listen(0, "127.0.0.1");
 // The panel sends tool results back over WebSocket; this endpoint handles
 // the agentic loop (LLM → tool_call → panel → result → LLM → repeat).
 
+const { execFile } = require("child_process");
+
 const AI_ENDPOINTS = {
   anthropic: "https://api.anthropic.com/v1/messages",
   openai: "https://api.openai.com/v1/chat/completions",
@@ -417,12 +419,79 @@ async function llmFetch(url, headers, body) {
   });
 }
 
+// Claude CLI — uses the user's existing Claude Code auth, no API key needed
+function claudeCliExec(cliPath, prompt, model) {
+  return new Promise((resolve, reject) => {
+    const args = ["--print", "--output-format", "text"];
+    if (model) args.push("--model", model);
+    args.push(prompt);
+    const proc = execFile(cliPath || "claude", args, {
+      timeout: 120000,
+      maxBuffer: 10 * 1024 * 1024,
+      env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "void-extension" },
+    }, (err, stdout, stderr) => {
+      if (err) reject(new Error(err.message + (stderr ? ": " + stderr.slice(0, 200) : "")));
+      else resolve(stdout);
+    });
+  });
+}
+
 async function handleAiChat(req, res) {
   const { buf } = await readBody(req);
   let msg;
   try { msg = JSON.parse(buf.toString()); } catch { res.writeHead(400).end('{"error":"Invalid JSON"}'); return; }
 
-  const { provider, apiKey, model, endpoint, messages, tools, systemPrompt } = msg;
+  const { provider, apiKey, model, endpoint, messages, tools, systemPrompt, cliPath } = msg;
+
+  // Claude CLI mode — spawn the CLI process
+  if (provider === "claude-cli") {
+    // Build conversation into a single prompt
+    const toolList = (tools || []).map(t => `- ${t.name}: ${t.description}`).join("\n");
+    const toolInstr = tools?.length ? `\n\nYou have access to these tools. To call a tool, respond with a JSON block:\n<tool_call>{"name": "tool_name", "args": {...}}</tool_call>\n\nAvailable tools:\n${toolList}\n\nAfter I provide tool results, continue your analysis.` : "";
+    const sysBlock = (systemPrompt || "") + toolInstr;
+
+    let conversationText = sysBlock ? `System: ${sysBlock}\n\n` : "";
+    for (const m of (messages || [])) {
+      if (typeof m.content === "string") conversationText += `${m.role === "user" ? "User" : "Assistant"}: ${m.content}\n\n`;
+    }
+
+    const MAX_CLI_TURNS = 10;
+    for (let turn = 0; turn < MAX_CLI_TURNS; turn++) {
+      let response;
+      try {
+        response = await claudeCliExec(cliPath, conversationText.trim(), model);
+      } catch (e) {
+        res.writeHead(502).end(JSON.stringify({ error: `Claude CLI error: ${e.message}` }));
+        return;
+      }
+
+      // Check for tool calls in the response
+      const toolCallMatch = response.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/);
+      if (toolCallMatch) {
+        let parsed;
+        try { parsed = JSON.parse(toolCallMatch[1]); } catch { break; }
+        const textBefore = response.slice(0, response.indexOf("<tool_call>")).trim();
+        if (textBefore) broadcast({ type: "ai_chunk", role: "assistant", text: textBefore, toolCalls: [] });
+
+        broadcast({ type: "ai_tool_start", name: parsed.name, args: parsed.args || {} });
+        const result = await requestToolExec(parsed.name, parsed.args || {});
+        broadcast({ type: "ai_tool_done", name: parsed.name, result });
+
+        const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+        conversationText += `Assistant: ${response}\n\nUser: Tool result for ${parsed.name}:\n${resultStr.slice(0, 5000)}\n\nPlease continue your analysis based on this result.\n\n`;
+        continue;
+      }
+
+      // No tool call — final response
+      broadcast({ type: "ai_chunk", role: "assistant", text: response, toolCalls: [] });
+      res.writeHead(200).end(JSON.stringify({ role: "assistant", content: response, done: true }));
+      return;
+    }
+
+    res.writeHead(200).end(JSON.stringify({ role: "assistant", content: "Max tool turns reached.", done: true }));
+    return;
+  }
+
   const isAnthropic = provider === "anthropic";
   const baseUrl = endpoint || AI_ENDPOINTS[provider] || AI_ENDPOINTS.openai;
 

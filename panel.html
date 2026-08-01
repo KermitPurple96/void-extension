@@ -1998,41 +1998,10 @@
   <!-- ═══════════════════════════ AI CHAT ═══════════════════════════════════ -->
   <div id="tab-aichat" class="tab-panel hidden" role="tabpanel">
     <div class="ai-chat-layout">
-      <!-- Config sidebar -->
-      <div class="ai-config-bar">
-        <div class="pane-label">PROVIDER</div>
-        <select id="ai-provider" class="filter-sel" aria-label="AI provider">
-          <option value="anthropic">Anthropic (Claude)</option>
-          <option value="openai">OpenAI</option>
-          <option value="openrouter">OpenRouter</option>
-          <option value="ollama">Ollama (local)</option>
-          <option value="custom">Custom (OpenAI-compatible)</option>
-        </select>
-        <div class="pane-label">API KEY</div>
-        <input id="ai-apikey" type="password" class="settings-inp" placeholder="sk-… or leave blank for Ollama" spellcheck="false" aria-label="API key">
-        <div class="pane-label">MODEL</div>
-        <input id="ai-model" type="text" class="settings-inp" placeholder="claude-sonnet-4-20250514" spellcheck="false" aria-label="Model name">
-        <div id="ai-custom-url-wrap" class="hidden">
-          <div class="pane-label">ENDPOINT URL</div>
-          <input id="ai-custom-url" type="text" class="settings-inp" placeholder="http://localhost:11434/v1/chat/completions" spellcheck="false" aria-label="Custom endpoint">
-        </div>
-        <div class="pane-label">SYSTEM PROMPT</div>
-        <textarea id="ai-system" class="raw-ta ai-system-ta" rows="4" spellcheck="false" placeholder="You are a security researcher assistant..."></textarea>
-        <div class="ai-config-actions">
-          <button id="ai-save-config" class="btn btn-xs btn-ghost">Save Config</button>
-          <button id="ai-clear-chat" class="btn btn-xs btn-danger">Clear Chat</button>
-          <span id="ai-status" class="settings-status"></span>
-        </div>
-        <details class="ai-tools-ref">
-          <summary class="pane-label" style="cursor:pointer">AVAILABLE TOOLS</summary>
-          <div class="script-api-body" style="font-size:10px">
-            get_history, send_request, get_endpoints, get_technologies,
-            get_cookies, get_storage, send_to_repeater, send_to_intruder,
-            run_scan, run_passive_scan, encode, decode, hash,
-            add_finding, get_scope, check_reflections, get_site_map,
-            get_ws_frames, get_notes, get_sequencer_tokens
-          </div>
-        </details>
+      <!-- Chat sessions sidebar -->
+      <div class="ai-sessions-bar">
+        <button id="ai-new-chat" class="btn btn-sm btn-accent ai-new-chat-btn">+ New Chat</button>
+        <div id="ai-sessions-list" class="ai-sessions-list"></div>
       </div>
       <!-- Chat area -->
       <div class="ai-chat-area">
@@ -2151,6 +2120,52 @@
           <button id="cfg-profile-export" class="btn btn-sm btn-ghost">Export .json</button>
           <button id="cfg-profile-import" class="btn btn-sm btn-ghost">Import .json</button>
           <input type="file" id="cfg-profile-file" accept=".json" hidden>
+        </div>
+      </div>
+
+      <!-- ── AI Chat ──────────────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">AI Chat</div>
+        <div class="settings-section-desc">Configure the AI provider for the Chat tab. Supports API-based providers, local models via Ollama, and Claude CLI (uses your existing Claude Code authentication).</div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="ai-provider">Provider</label>
+          <select id="ai-provider" class="filter-sel" aria-label="AI provider">
+            <option value="claude-cli">Claude CLI (no API key needed)</option>
+            <option value="anthropic">Anthropic API</option>
+            <option value="openai">OpenAI API</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="ollama">Ollama (local)</option>
+            <option value="custom">Custom (OpenAI-compatible)</option>
+          </select>
+        </div>
+        <div id="ai-apikey-wrap">
+          <div class="settings-row">
+            <label class="settings-label-sm" for="ai-apikey">API Key</label>
+            <input id="ai-apikey" type="password" class="settings-inp" placeholder="sk-…" spellcheck="false" aria-label="API key" style="flex:1">
+          </div>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="ai-model">Model</label>
+          <input id="ai-model" type="text" class="settings-inp" placeholder="claude-sonnet-4-20250514" spellcheck="false" aria-label="Model name" style="flex:1">
+        </div>
+        <div id="ai-custom-url-wrap" class="hidden">
+          <div class="settings-row">
+            <label class="settings-label-sm" for="ai-custom-url">Endpoint URL</label>
+            <input id="ai-custom-url" type="text" class="settings-inp" placeholder="http://localhost:11434/v1/chat/completions" spellcheck="false" aria-label="Custom endpoint" style="flex:1">
+          </div>
+        </div>
+        <div id="ai-cli-wrap" class="hidden">
+          <div class="settings-row">
+            <label class="settings-label-sm" for="ai-cli-path">CLI Path</label>
+            <input id="ai-cli-path" type="text" class="settings-inp" placeholder="claude (or full path to binary)" spellcheck="false" style="flex:1">
+          </div>
+          <div class="settings-section-desc">Uses your existing Claude Code authentication. The CLI must be installed and logged in. No API key required.</div>
+        </div>
+        <div class="settings-row"><label class="settings-label-sm" for="ai-system">System Prompt</label></div>
+        <textarea id="ai-system" class="raw-ta settings-ta" rows="3" spellcheck="false" placeholder="You are a security researcher assistant with access to HTTP traffic..."></textarea>
+        <div class="settings-actions">
+          <button id="ai-save-config" class="btn btn-sm btn-accent">Save AI Config</button>
+          <span id="ai-status" class="settings-status"></span>
         </div>
       </div>
 
