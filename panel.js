@@ -7795,42 +7795,153 @@ async function scriptRun() {
   document.getElementById("script-console").replaceChildren();
   scriptLog("[Script started]");
 
+  const _fmtHdrs = (h) => typeof h === "string" ? h : Object.entries(h || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
   const api = {
+    // ── HTTP ──
     request: async (opts) => {
       if (!scriptRunning) throw new Error("Script stopped");
       const res = await bg({
-        type: "SEND_REQUEST",
-        url: opts.url,
-        method: opts.method || "GET",
-        rawHeaders: typeof opts.headers === "string" ? opts.headers :
-          Object.entries(opts.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n"),
-        body: opts.body || undefined,
+        type: "SEND_REQUEST", url: opts.url, method: opts.method || "GET",
+        rawHeaders: _fmtHdrs(opts.headers), body: opts.body || undefined,
       });
-      return {
-        status: res?.status || 0,
-        headers: res?.headers || {},
-        body: res?.body || "",
-        elapsed: res?.elapsed || 0,
-      };
+      return { status: res?.status || 0, headers: res?.headers || {}, body: res?.body || "", elapsed: res?.elapsed || 0 };
     },
     history: async () => [...historyData],
+    cookies: async (url) => {
+      const ck = await bg({ type: "GET_COOKIES", url: url || "" });
+      return parseCookieStr(ck?.cookies || "");
+    },
+
+    // ── Repeater ──
+    sendToRepeater: (opts) => {
+      sendToRepeater({ method: opts.method || "GET", url: opts.url || "", headers: opts.headers || {}, body: opts.body || "" });
+      scriptLog(`[Sent to Repeater: ${opts.method || "GET"} ${opts.url}]`);
+    },
+
+    // ── Intruder ──
+    sendToIntruder: (opts) => {
+      intrSendToIntruder({ method: opts.method || "GET", url: opts.url || "", headers: opts.headers || {}, body: opts.body || "" });
+      scriptLog(`[Sent to Intruder: ${opts.method || "GET"} ${opts.url}]`);
+    },
+    attack: async (opts) => {
+      if (!scriptRunning) throw new Error("Script stopped");
+      const url = opts.url || "";
+      const method = opts.method || "GET";
+      const rawHeaders = _fmtHdrs(opts.headers);
+      const body = opts.body || "";
+      const payloads = opts.payloads || [];
+      const threads = opts.threads || 3;
+
+      // Build requests
+      const results = [];
+      const running = [];
+      for (let i = 0; i < payloads.length; i++) {
+        if (!scriptRunning) break;
+        const pl = payloads[i];
+        const testUrl = opts.injectIn === "url" ? url.replace(opts.marker || "FUZZ", pl) : url;
+        const testBody = opts.injectIn === "body" ? (body || "").replace(opts.marker || "FUZZ", pl) : body;
+        const testHdrs = opts.injectIn === "header" ? rawHeaders.replace(opts.marker || "FUZZ", pl) : rawHeaders;
+
+        const p = (async () => {
+          const t0 = Date.now();
+          const res = await bg({ type: "SEND_REQUEST", url: testUrl, method, rawHeaders: testHdrs, body: testBody || undefined });
+          return { payload: pl, status: res?.status || 0, length: (res?.body || "").length, elapsed: Date.now() - t0, body: res?.body || "", headers: res?.headers || {} };
+        })();
+        running.push(p);
+        if (running.length >= threads) { results.push(await Promise.race(running.map((pr, idx) => pr.then(r => { running.splice(idx, 1); return r; })))); }
+      }
+      results.push(...await Promise.all(running));
+      scriptLog(`[Attack complete: ${results.length} results]`);
+      return results;
+    },
+
+    // ── Encoding / Decoding ──
+    encode: (value, ...ops) => {
+      let result = String(value);
+      for (const op of ops) {
+        const mapped = { base64: "b64-enc", url: "url-enc", html: "html-enc", hex: "hex-enc", unicode: "unicode-enc", js: "js-enc", "ascii-hex": "ascii-hex", "url-double": "url-enc2" }[op] || op;
+        const r = decOp(mapped, result);
+        if (r instanceof Promise) { scriptLog(`[Warning: ${op} is async, use await]`); } else { result = r; }
+      }
+      return result;
+    },
+    decode: (value, ...ops) => {
+      let result = String(value);
+      for (const op of ops) {
+        const mapped = { base64: "b64-dec", url: "url-dec", html: "html-dec", hex: "hex-dec", unicode: "unicode-dec", js: "js-dec", jwt: "jwt-dec" }[op] || op;
+        const r = decOp(mapped, result);
+        if (r instanceof Promise) { scriptLog(`[Warning: ${op} is async, use await]`); } else { result = r; }
+      }
+      return result;
+    },
+    hash: async (value, algo) => {
+      const a = { md5: "md5", sha1: "SHA-1", sha256: "SHA-256" }[algo || "md5"];
+      if (a === "md5") return md5(value);
+      return cryptoHash(a || "SHA-256", value);
+    },
+
+    // ── Scanner ──
+    scan: async (opts) => {
+      if (!scriptRunning) throw new Error("Script stopped");
+      const url = opts.url || "";
+      const method = opts.method || "GET";
+      const rawHeaders = _fmtHdrs(opts.headers);
+      const body = opts.body || "";
+      const modules = opts.modules || ["sqli", "xss"];
+      // Reuse scanStart logic inline
+      const urlObj = new URL(url);
+      const injectionPoints = [];
+      for (const [k] of urlObj.searchParams) injectionPoints.push({ location: "url-param", name: k });
+      if (body) { for (const p of body.split("&")) { const eq = p.indexOf("="); if (eq > 0) injectionPoints.push({ location: "body-param", name: p.slice(0, eq) }); } }
+      if (!injectionPoints.length) injectionPoints.push({ location: "body-append", name: "(body)" });
+
+      const findings = [];
+      for (const mod of modules) {
+        const payloads = SCAN_PAYLOADS[mod] || [];
+        for (const pl of payloads) {
+          if (!scriptRunning) break;
+          for (const ip of injectionPoints) {
+            let testUrl = url, testBody = body;
+            const plText = pl.payload;
+            if (ip.location === "url-param") { const u = new URL(url); u.searchParams.set(ip.name, plText); testUrl = u.toString(); }
+            else if (ip.location === "body-param") { testBody = body.split("&").map(p => { const eq = p.indexOf("="); return eq > 0 && decodeURIComponent(p.slice(0, eq)) === ip.name ? `${p.slice(0, eq + 1)}${encodeURIComponent(plText)}` : p; }).join("&"); }
+            else { testBody = (body ? body + "&" : "") + encodeURIComponent(plText); }
+            const t0 = Date.now();
+            const res = await bg({ type: "SEND_REQUEST", url: testUrl, method, rawHeaders, body: testBody || undefined });
+            const elapsed = Date.now() - t0;
+            if (!res) continue;
+            const respText = (res.body || "") + "\n" + Object.entries(res.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+            let found = false;
+            if (pl.detect && pl.detect.test(respText)) found = true;
+            if (pl.timing && elapsed >= pl.timing) found = true;
+            if (found) findings.push({ module: mod, type: pl.label, param: ip.name, payload: plText.slice(0, 60), evidence: (respText.match(pl.detect) || [""])[0].slice(0, 80) });
+          }
+        }
+      }
+      scriptLog(`[Scan complete: ${findings.length} findings]`);
+      return findings;
+    },
+
+    // ── Scope ──
+    isInScope: (url) => tgtIsInScope(url),
+
+    // ── Storage ──
+    storage: async (type) => storFetch(type || "local"),
+
+    // ── Notes / Findings ──
     log: (msg) => scriptLog(msg),
     addFinding: (f) => {
-      const entry = {
-        id: notesNextId++,
-        title: f.title || "Script finding",
-        severity: f.severity || "info",
-        detail: f.detail || "",
-        host: "",
-        created: Date.now(),
-      };
+      const entry = { id: notesNextId++, title: f.title || "Script finding", severity: f.severity || "info", detail: f.detail || "", host: f.host || "", created: Date.now() };
       notes.push(entry);
       scriptLog(`[Finding added: ${entry.severity.toUpperCase()} \u2014 ${entry.title}]`);
     },
+
+    // ── Utility ──
     sleep: (ms) => new Promise(r => setTimeout(r, Math.min(ms, 30000))),
-    storage: async (type) => storFetch(type || "local"),
     setVar: (name, value) => { scriptVars[name] = value; },
     getVar: (name) => scriptVars[name],
+    esc: (s) => esc(s),
+    parseUrl: (url) => { try { const u = new URL(url); return { host: u.host, path: u.pathname, params: Object.fromEntries(u.searchParams) }; } catch { return null; } },
   };
 
   try {

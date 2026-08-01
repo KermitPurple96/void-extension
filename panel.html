@@ -2236,19 +2236,25 @@
     <div class="script-split">
       <div class="script-editor-wrap">
         <div class="pane-label">EDITOR — use <code>void.*</code> API (see docs below)</div>
-        <textarea id="script-editor" class="raw-ta script-ta" spellcheck="false" placeholder="// Example: replay all history entries with a modified header
-for (const entry of await void.history()) {
-  const res = await void.request({
-    url: entry.url,
-    method: entry.method,
-    headers: { ...entry.headers, 'X-Custom': 'test' },
-    body: entry.body
-  });
-  void.log(`${res.status} ${entry.url}`);
-  if (res.body.includes('admin')) {
-    void.addFinding({ title: 'Admin access', severity: 'high', detail: entry.url });
-  }
-}"></textarea>
+        <textarea id="script-editor" class="raw-ta script-ta" spellcheck="false" placeholder="// Example: fuzz a parameter, encode payloads, report findings
+const payloads = [&quot;&lt;script&gt;alert(1)&lt;/script&gt;&quot;, &quot;' OR 1=1--&quot;, &quot;{{7*7}}&quot;];
+const results = await void.attack({
+  url: 'https://target.com/search?q=FUZZ',
+  payloads, marker: 'FUZZ', injectIn: 'url', threads: 3
+});
+for (const r of results) {
+  void.log(`${r.status} [${r.length}B] ${r.payload}`);
+  if (r.body.includes(r.payload))
+    void.addFinding({ title: 'Reflected: ' + r.payload, severity: 'high' });
+}
+
+// Encode a value through multiple steps
+const encoded = void.encode('test payload', 'url', 'base64');
+void.log('Encoded: ' + encoded);
+void.log('Decoded: ' + void.decode(encoded, 'base64', 'url'));
+
+// Send interesting request to Repeater for manual testing
+void.sendToRepeater({ url: 'https://target.com/admin', method: 'GET' });"></textarea>
       </div>
       <div class="script-console-wrap">
         <div class="pane-label">CONSOLE</div>
@@ -2259,13 +2265,24 @@ for (const entry of await void.history()) {
       <details>
         <summary class="pane-label" style="cursor:pointer">API REFERENCE</summary>
         <div class="script-api-body">
-          <code>await void.request({url, method, headers, body})</code> — send HTTP request, returns <code>{status, headers, body, elapsed}</code><br>
-          <code>await void.history()</code> — get all captured HTTP history entries<br>
-          <code>void.log(msg)</code> — print to console below<br>
-          <code>void.addFinding({title, severity, detail})</code> — add to Notes tab (severity: info/low/medium/high/critical)<br>
-          <code>await void.sleep(ms)</code> — wait N milliseconds<br>
-          <code>await void.storage(type)</code> — read storage (type: "local", "session", "cookies")<br>
-          <code>void.setVar(name, value)</code> / <code>void.getVar(name)</code> — persist variables across runs
+          <b>HTTP</b><br>
+          <code>await void.request({url, method, headers, body})</code> — send request → <code>{status, headers, body, elapsed}</code><br>
+          <code>await void.history()</code> — all captured HTTP history entries<br>
+          <code>await void.cookies(url)</code> — browser cookies as Map<br>
+          <br><b>Tabs</b><br>
+          <code>void.sendToRepeater({url, method, headers, body})</code> — open in Repeater<br>
+          <code>void.sendToIntruder({url, method, headers, body})</code> — load into Intruder<br>
+          <code>await void.attack({url, method, headers, body, payloads, marker, injectIn, threads})</code> — run fuzzing attack. <code>injectIn</code>: "url"/"body"/"header". <code>marker</code>: string to replace (default "FUZZ"). Returns <code>[{payload, status, length, elapsed, body, headers}]</code><br>
+          <code>await void.scan({url, method, headers, body, modules})</code> — run scanner. <code>modules</code>: ["sqli","xss","pathtraversal","ssrf","ssti","cmdi","openredirect","headerinject"]<br>
+          <br><b>Encoding</b><br>
+          <code>void.encode(value, ...ops)</code> — chain encode: "base64", "url", "html", "hex", "unicode", "js", "url-double"<br>
+          <code>void.decode(value, ...ops)</code> — chain decode: "base64", "url", "html", "hex", "unicode", "js", "jwt"<br>
+          <code>await void.hash(value, algo)</code> — "md5", "sha1", "sha256"<br>
+          <br><b>Utility</b><br>
+          <code>void.log(msg)</code> — print to console &nbsp; <code>void.addFinding({title, severity, detail})</code> — add to Notes<br>
+          <code>await void.sleep(ms)</code> — wait &nbsp; <code>await void.storage(type)</code> — read storage<br>
+          <code>void.setVar(name, val)</code> / <code>void.getVar(name)</code> — persist variables &nbsp; <code>void.isInScope(url)</code> — scope check<br>
+          <code>void.esc(str)</code> — HTML-escape &nbsp; <code>void.parseUrl(url)</code> — parse to <code>{host, path, params}</code>
         </div>
       </details>
     </div>
