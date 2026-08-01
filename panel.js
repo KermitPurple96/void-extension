@@ -3996,6 +3996,48 @@ function saveSettings() {
   settings.httpKeepalive  = document.getElementById("cfg-http-keepalive").checked;
   settings.http2          = document.getElementById("cfg-http2").checked;
   settings.http100        = document.getElementById("cfg-http-100").checked;
+  // Tools: Proxy
+  settings.proxyPort      = document.getElementById("cfg-proxy-port").value;
+  settings.ctrlPort       = document.getElementById("cfg-ctrl-port").value;
+  settings.icScopeOnly    = document.getElementById("cfg-ic-scope-only").checked;
+  settings.icSkipStatic   = document.getElementById("cfg-ic-skip-static").checked;
+  settings.icSkipMedia    = document.getElementById("cfg-ic-skip-media").checked;
+  settings.icUpdateCl     = document.getElementById("cfg-ic-update-cl").checked;
+  settings.icFixNewlines  = document.getElementById("cfg-ic-fix-newlines").checked;
+  settings.icDropPattern  = document.getElementById("cfg-ic-drop-pattern").value;
+  settings.icRespScope    = document.getElementById("cfg-ic-resp-scope").checked;
+  settings.icRespText     = document.getElementById("cfg-ic-resp-text").checked;
+  settings.icRespUpdateCl = document.getElementById("cfg-ic-resp-update-cl").checked;
+  settings.icWsClient     = document.getElementById("cfg-ic-ws-client").checked;
+  settings.icWsServer     = document.getElementById("cfg-ic-ws-server").checked;
+  settings.icWsScope      = document.getElementById("cfg-ic-ws-scope").checked;
+  // Tools: Intruder
+  settings.intrPlacement  = document.getElementById("cfg-intr-placement").value;
+  settings.intrUrlEncode  = document.getElementById("cfg-intr-url-encode").checked;
+  settings.intrFollowRedir = document.getElementById("cfg-intr-follow-redir").checked;
+  settings.intrStoreResp  = document.getElementById("cfg-intr-store-resp").checked;
+  settings.intrMaxThreads = document.getElementById("cfg-intr-max-threads").value;
+  settings.intrRetry      = document.getElementById("cfg-intr-retry").value;
+  settings.intrGrepDefault = document.getElementById("cfg-intr-grep-default").value;
+  // Tools: Repeater
+  settings.repUpdateCl    = document.getElementById("cfg-rep-update-cl").checked;
+  settings.repUnpack      = document.getElementById("cfg-rep-unpack").checked;
+  settings.repNormalize   = document.getElementById("cfg-rep-normalize").checked;
+  settings.repStripConn   = document.getElementById("cfg-rep-strip-conn").checked;
+  settings.repRedir       = document.getElementById("cfg-rep-redir").value;
+  settings.repRedirCookies = document.getElementById("cfg-rep-redir-cookies").checked;
+  settings.repRedirProto  = document.getElementById("cfg-rep-redir-proto").checked;
+  settings.repStreamTimeout = document.getElementById("cfg-rep-stream-timeout").value;
+  settings.repDefaultGroup = document.getElementById("cfg-rep-default-group").value;
+  settings.repTabView     = document.getElementById("cfg-rep-tab-view").value;
+  // Tools: Sequencer
+  settings.seqThreads     = document.getElementById("cfg-seq-threads").value;
+  settings.seqThrottle    = document.getElementById("cfg-seq-throttle").value;
+  settings.seqIgnoreLen   = document.getElementById("cfg-seq-ignore-len").checked;
+  settings.seqLenDev      = document.getElementById("cfg-seq-len-dev").value;
+  settings.seqPadPos      = document.getElementById("cfg-seq-pad-pos").value;
+  settings.seqPadChar     = document.getElementById("cfg-seq-pad-char").value;
+  settings.seqB64Decode   = document.getElementById("cfg-seq-b64-decode").checked;
   // Session handling
   // Collaborator
   settings.collabUrl      = (document.getElementById("mr-collab-url") || document.getElementById("cfg-collab-url")).value;
@@ -4062,6 +4104,48 @@ function loadSettingsUI() {
   document.getElementById("cfg-http-keepalive").checked = !!settings.httpKeepalive;
   document.getElementById("cfg-http2").checked          = settings.http2 !== false;
   document.getElementById("cfg-http-100").checked       = settings.http100 !== false;
+  // Tools: Proxy
+  document.getElementById("cfg-proxy-port").value       = settings.proxyPort || "8081";
+  document.getElementById("cfg-ctrl-port").value        = settings.ctrlPort || "8082";
+  document.getElementById("cfg-ic-scope-only").checked  = !!settings.icScopeOnly;
+  document.getElementById("cfg-ic-skip-static").checked = settings.icSkipStatic !== false;
+  document.getElementById("cfg-ic-skip-media").checked  = settings.icSkipMedia !== false;
+  document.getElementById("cfg-ic-update-cl").checked   = settings.icUpdateCl !== false;
+  document.getElementById("cfg-ic-fix-newlines").checked = !!settings.icFixNewlines;
+  document.getElementById("cfg-ic-drop-pattern").value  = settings.icDropPattern || "";
+  document.getElementById("cfg-ic-resp-scope").checked  = !!settings.icRespScope;
+  document.getElementById("cfg-ic-resp-text").checked   = settings.icRespText !== false;
+  document.getElementById("cfg-ic-resp-update-cl").checked = settings.icRespUpdateCl !== false;
+  document.getElementById("cfg-ic-ws-client").checked   = settings.icWsClient !== false;
+  document.getElementById("cfg-ic-ws-server").checked   = settings.icWsServer !== false;
+  document.getElementById("cfg-ic-ws-scope").checked    = !!settings.icWsScope;
+  // Tools: Intruder
+  document.getElementById("cfg-intr-placement").value   = settings.intrPlacement || "replace";
+  document.getElementById("cfg-intr-url-encode").checked = settings.intrUrlEncode !== false;
+  document.getElementById("cfg-intr-follow-redir").checked = !!settings.intrFollowRedir;
+  document.getElementById("cfg-intr-store-resp").checked = settings.intrStoreResp !== false;
+  document.getElementById("cfg-intr-max-threads").value = settings.intrMaxThreads || "20";
+  document.getElementById("cfg-intr-retry").value       = settings.intrRetry || "0";
+  document.getElementById("cfg-intr-grep-default").value = settings.intrGrepDefault || "";
+  // Tools: Repeater
+  document.getElementById("cfg-rep-update-cl").checked  = settings.repUpdateCl !== false;
+  document.getElementById("cfg-rep-unpack").checked     = settings.repUnpack !== false;
+  document.getElementById("cfg-rep-normalize").checked  = settings.repNormalize !== false;
+  document.getElementById("cfg-rep-strip-conn").checked = settings.repStripConn !== false;
+  document.getElementById("cfg-rep-redir").value        = settings.repRedir || "never";
+  document.getElementById("cfg-rep-redir-cookies").checked = !!settings.repRedirCookies;
+  document.getElementById("cfg-rep-redir-proto").checked = !!settings.repRedirProto;
+  document.getElementById("cfg-rep-stream-timeout").value = settings.repStreamTimeout || "600";
+  document.getElementById("cfg-rep-default-group").value = settings.repDefaultGroup || "";
+  document.getElementById("cfg-rep-tab-view").value     = settings.repTabView || "scroll";
+  // Tools: Sequencer
+  document.getElementById("cfg-seq-threads").value      = settings.seqThreads || "5";
+  document.getElementById("cfg-seq-throttle").value     = settings.seqThrottle || "0";
+  document.getElementById("cfg-seq-ignore-len").checked = settings.seqIgnoreLen !== false;
+  document.getElementById("cfg-seq-len-dev").value      = settings.seqLenDev || "5";
+  document.getElementById("cfg-seq-pad-pos").value      = settings.seqPadPos || "start";
+  document.getElementById("cfg-seq-pad-char").value     = settings.seqPadChar || "0";
+  document.getElementById("cfg-seq-b64-decode").checked = !!settings.seqB64Decode;
   // Session handling
   // Collaborator
   (document.getElementById("mr-collab-url") || document.getElementById("cfg-collab-url")).value = settings.collabUrl || "";

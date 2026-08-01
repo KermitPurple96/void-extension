@@ -2187,6 +2187,184 @@
         </div>
       </div>
 
+      <!-- ═══ TOOLS: PROXY ═══════════════════════════════════ -->
+      <div class="settings-section">
+        <div class="settings-section-title">Proxy</div>
+
+        <div class="pane-label">PROXY LISTENER</div>
+        <div class="settings-section-desc">The intercepting proxy runs on <code>void-proxy-server.js</code>. Default: <code>127.0.0.1:8081</code> (proxy) + <code>:8082</code> (control).</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Proxy port</label>
+          <input id="cfg-proxy-port" type="number" class="settings-inp settings-inp-sm" value="8081" min="1" max="65535">
+          <label class="settings-label-sm">Control port</label>
+          <input id="cfg-ctrl-port" type="number" class="settings-inp settings-inp-sm" value="8082" min="1" max="65535">
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">REQUEST INTERCEPTION RULES</div>
+        <div class="settings-section-desc">Control which requests are paused for editing. Requests matching these rules are held in the Intercept tab.</div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-ic-scope-only"><span class="toggle-track"></span> Only intercept in-scope requests</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-ic-skip-static" checked><span class="toggle-track"></span> Skip static resources (img/css/js/font/ico)</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-ic-skip-media" checked><span class="toggle-track"></span> Skip media (png/jpg/gif/webp/svg/woff)</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-ic-update-cl" checked><span class="toggle-track"></span> Auto-update Content-Length when editing</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-ic-fix-newlines"><span class="toggle-track"></span> Fix missing trailing newlines</label>
+        </div>
+        <div class="settings-row" style="margin-top:6px">
+          <label class="settings-label-sm" for="cfg-ic-drop-pattern">Drop pattern</label>
+          <input id="cfg-ic-drop-pattern" type="text" class="settings-inp" placeholder="Regex — auto-drop requests matching this pattern" spellcheck="false" style="flex:1">
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">RESPONSE INTERCEPTION RULES</div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-ic-resp-scope"><span class="toggle-track"></span> Only intercept in-scope responses</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-ic-resp-text" checked><span class="toggle-track"></span> Only intercept responses with text content-type</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-ic-resp-update-cl" checked><span class="toggle-track"></span> Auto-update Content-Length on response edit</label>
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">WEBSOCKET INTERCEPTION</div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-ic-ws-client" checked><span class="toggle-track"></span> Intercept client-to-server messages</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-ic-ws-server" checked><span class="toggle-track"></span> Intercept server-to-client messages</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-ic-ws-scope"><span class="toggle-track"></span> Only intercept in-scope WebSocket messages</label>
+        </div>
+      </div>
+
+      <!-- ═══ TOOLS: INTRUDER ═════════════════════════════════ -->
+      <div class="settings-section">
+        <div class="settings-section-title">Intruder</div>
+
+        <div class="pane-label">PAYLOAD PLACEMENT</div>
+        <div class="settings-section-desc">Control how automatically-placed § payload positions interact with existing parameter values.</div>
+        <div class="settings-row">
+          <select id="cfg-intr-placement" class="filter-sel">
+            <option value="replace">Replace base parameter value</option>
+            <option value="append">Append to base parameter value</option>
+          </select>
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">PAYLOAD PROCESSING</div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-intr-url-encode" checked><span class="toggle-track"></span> URL-encode payloads</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-intr-follow-redir"><span class="toggle-track"></span> Follow redirects during attacks</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-intr-store-resp" checked><span class="toggle-track"></span> Store full responses in results</label>
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">RESOURCE POOL</div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-intr-max-threads">Max concurrent threads</label>
+          <input id="cfg-intr-max-threads" type="number" class="settings-inp settings-inp-sm" value="20" min="1" max="100">
+          <label class="settings-label-sm" for="cfg-intr-retry">Retry on failure</label>
+          <input id="cfg-intr-retry" type="number" class="settings-inp settings-inp-sm" value="0" min="0" max="5">
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">GREP — EXTRACT</div>
+        <div class="settings-section-desc">Default grep/extract patterns applied to all Intruder attacks.</div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-intr-grep-default">Default extract regex</label>
+          <input id="cfg-intr-grep-default" type="text" class="settings-inp" placeholder="Regex to extract from each response" spellcheck="false" style="flex:1">
+        </div>
+      </div>
+
+      <!-- ═══ TOOLS: REPEATER ════════════════════════════════ -->
+      <div class="settings-section">
+        <div class="settings-section-title">Repeater</div>
+
+        <div class="pane-label">MESSAGE MODIFICATION</div>
+        <div class="settings-section-desc">Tweaks to Repeater request/response handling.</div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-rep-update-cl" checked><span class="toggle-track"></span> Update Content-Length</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-rep-unpack" checked><span class="toggle-track"></span> Unpack compressed responses</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-rep-normalize" checked><span class="toggle-track"></span> Normalize HTTP/1 line endings</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-rep-strip-conn" checked><span class="toggle-track"></span> Strip Connection header over HTTP/2</label>
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">REDIRECTS</div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-rep-redir">Follow redirects</label>
+          <select id="cfg-rep-redir" class="filter-sel">
+            <option value="never">Never</option>
+            <option value="onsite">On-site only</option>
+            <option value="inscope">In-scope only</option>
+            <option value="always">Always</option>
+          </select>
+        </div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-rep-redir-cookies"><span class="toggle-track"></span> Process cookies in redirects</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-rep-redir-proto"><span class="toggle-track"></span> Use selected protocol for cross-domain redirects</label>
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">STREAMING</div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-rep-stream-timeout">Streaming timeout (seconds)</label>
+          <input id="cfg-rep-stream-timeout" type="number" class="settings-inp settings-inp-sm" value="600" min="0">
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">TAB DEFAULTS</div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-rep-default-group">Default tab group</label>
+          <select id="cfg-rep-default-group" class="filter-sel">
+            <option value="">Ungrouped</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-rep-tab-view">Tab view</label>
+          <select id="cfg-rep-tab-view" class="filter-sel">
+            <option value="scroll">Scrolling view</option>
+            <option value="wrap">Wrapped view</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- ═══ TOOLS: SEQUENCER ═══════════════════════════════ -->
+      <div class="settings-section">
+        <div class="settings-section-title">Sequencer</div>
+
+        <div class="pane-label">LIVE CAPTURE</div>
+        <div class="settings-section-desc">Engine settings for collecting tokens via the Sequencer (in Intruder).</div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-seq-threads">Threads</label>
+          <input id="cfg-seq-threads" type="number" class="settings-inp settings-inp-sm" value="5" min="1" max="20">
+          <label class="settings-label-sm" for="cfg-seq-throttle">Throttle (ms)</label>
+          <input id="cfg-seq-throttle" type="number" class="settings-inp settings-inp-sm" value="0" min="0">
+        </div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-seq-ignore-len" checked><span class="toggle-track"></span> Ignore tokens with abnormal length</label>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-seq-len-dev">Length deviation</label>
+          <input id="cfg-seq-len-dev" type="number" class="settings-inp settings-inp-sm" value="5" min="0">
+          <span class="settings-status">characters</span>
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">TOKEN HANDLING</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Pad short tokens at</label>
+          <select id="cfg-seq-pad-pos" class="filter-sel" style="width:80px">
+            <option value="start">Start</option>
+            <option value="end">End</option>
+          </select>
+          <label class="settings-label-sm" for="cfg-seq-pad-char">Pad with</label>
+          <input id="cfg-seq-pad-char" type="text" class="settings-inp settings-inp-sm" value="0" style="width:40px">
+        </div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-seq-b64-decode"><span class="toggle-track"></span> Base64-decode before analyzing</label>
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">TOKEN ANALYSIS</div>
+        <div class="settings-section-desc">Statistical tests to run during entropy analysis.</div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-seq-test-count" checked><span class="toggle-track"></span> Character count</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-seq-test-transitions" checked><span class="toggle-track"></span> Transitions</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-seq-test-monobit" checked><span class="toggle-track"></span> FIPS monobit</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-seq-test-poker" checked><span class="toggle-track"></span> FIPS poker</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-seq-test-runs" checked><span class="toggle-track"></span> FIPS runs</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-seq-test-longrun" checked><span class="toggle-track"></span> FIPS long run</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-seq-test-spectral" checked><span class="toggle-track"></span> Spectral</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-seq-test-correlation" checked><span class="toggle-track"></span> Correlation</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-seq-test-compression" checked><span class="toggle-track"></span> Compression</label>
+        </div>
+      </div>
+
       <!-- ── Appearance ──────────────────────────────────────── -->
       <div class="settings-section">
         <div class="settings-section-title">Appearance</div>
