@@ -711,8 +711,15 @@
           <div id="intr-payload-tabs" class="intr-payload-tabs">
             <button class="sub-tab active" data-plset="0">Set 1</button>
           </div>
+          <div class="intr-payload-bar">
+            <button id="intr-load-file" class="btn btn-xs btn-ghost" title="Load wordlist from file (.txt, one per line)">Load file</button>
+            <button id="intr-paste-clip" class="btn btn-xs btn-ghost" title="Paste from clipboard">Paste</button>
+            <button id="intr-clear-payloads" class="btn btn-xs btn-ghost" title="Clear payloads">Clear</button>
+            <span id="intr-payload-count" class="settings-status"></span>
+            <input type="file" id="intr-file-input" accept=".txt,.csv,.lst,.list,.dic" hidden>
+          </div>
           <textarea id="intr-payloads" class="raw-ta intr-payload-ta" spellcheck="false"
-                    placeholder="admin&#10;test&#10;guest&#10;{{0-100}}&#10;{{file:wordlist.txt}}"></textarea>
+                    placeholder="admin&#10;test&#10;guest&#10;{{0-100}}&#10;&#10;Or click Load file to import a wordlist (.txt)"></textarea>
 
           <div class="pane-label" style="margin-top:4px">PAYLOAD PROCESSING</div>
           <div class="intr-processing">

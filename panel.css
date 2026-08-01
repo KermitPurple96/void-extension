@@ -2472,6 +2472,7 @@ body {
 .rep-side-right { border-left: 2px solid var(--accent); }
 .rep-side-right.hidden { display: none; }
 
+.intr-payload-bar { display: flex; gap: 4px; align-items: center; padding: 2px 0; }
 .intr-processing { display: flex; gap: 6px; align-items: center; }
 .intr-spec-config { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 4px; }
 .intr-spec { padding: 4px 0; }

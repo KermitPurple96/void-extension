@@ -7124,6 +7124,43 @@ document.addEventListener("DOMContentLoaded", () => {
     intrCountPositions();
   });
 
+  // Payload file loader
+  document.getElementById("intr-load-file").addEventListener("click", () => {
+    document.getElementById("intr-file-input").click();
+  });
+  document.getElementById("intr-file-input").addEventListener("change", e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    file.text().then(text => {
+      const ta = document.getElementById("intr-payloads");
+      const existing = ta.value.trim();
+      ta.value = existing ? existing + "\n" + text : text;
+      const count = ta.value.split("\n").filter(l => l.trim()).length;
+      document.getElementById("intr-payload-count").textContent = `${count} payloads`;
+      showToast(`Loaded ${file.name} (${count} lines)`);
+    });
+    e.target.value = "";
+  });
+  document.getElementById("intr-paste-clip").addEventListener("click", async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const ta = document.getElementById("intr-payloads");
+      const existing = ta.value.trim();
+      ta.value = existing ? existing + "\n" + text : text;
+      const count = ta.value.split("\n").filter(l => l.trim()).length;
+      document.getElementById("intr-payload-count").textContent = `${count} payloads`;
+      showToast(`Pasted ${count} lines`);
+    } catch { showToast("Clipboard access denied"); }
+  });
+  document.getElementById("intr-clear-payloads").addEventListener("click", () => {
+    document.getElementById("intr-payloads").value = "";
+    document.getElementById("intr-payload-count").textContent = "";
+  });
+  document.getElementById("intr-payloads").addEventListener("input", () => {
+    const count = document.getElementById("intr-payloads").value.split("\n").filter(l => l.trim()).length;
+    document.getElementById("intr-payload-count").textContent = count ? `${count} payloads` : "";
+  });
+
   // Attack mode selector → show/hide specialized config panels
   document.getElementById("intr-attack").addEventListener("change", intrUpdateSpecConfig);
   intrUpdateSpecConfig();
