@@ -8147,6 +8147,16 @@ const AI_TOOLS = [
   { name: "get_notes", description: "Get all notes/findings.", parameters: { type: "object", properties: {} } },
   { name: "get_headers_analysis", description: "Get security header analysis results for captured hosts.", parameters: { type: "object", properties: {} } },
   { name: "get_sequencer_tokens", description: "Get collected sequencer tokens and entropy analysis.", parameters: { type: "object", properties: {} } },
+  { name: "eval_page", description: "Execute JavaScript in the inspected page's context via the debugger. Returns the result. Use for DOM inspection, reading page state, or interacting with the page.", parameters: { type: "object", properties: { expression: { type: "string", description: "JavaScript expression to evaluate in the page" } }, required: ["expression"] } },
+  { name: "get_page_info", description: "Get current page URL, title, cookies, and meta information.", parameters: { type: "object", properties: {} } },
+  { name: "get_response_headers", description: "Get response headers for a specific URL from history.", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] } },
+  { name: "search_responses", description: "Search all response bodies for a pattern (regex or string).", parameters: { type: "object", properties: { pattern: { type: "string", description: "Regex pattern to search for" }, limit: { type: "number" } }, required: ["pattern"] } },
+  { name: "get_forms", description: "Extract all forms from the page DOM (action, method, inputs).", parameters: { type: "object", properties: {} } },
+  { name: "get_links", description: "Extract all links from the page DOM.", parameters: { type: "object", properties: {} } },
+  { name: "get_scripts", description: "List all script sources loaded by the page.", parameters: { type: "object", properties: {} } },
+  { name: "get_postmessages", description: "Get captured postMessage events from the Storage tab.", parameters: { type: "object", properties: {} } },
+  { name: "get_intruder_results", description: "Get the latest Intruder attack results.", parameters: { type: "object", properties: {} } },
+  { name: "get_scan_findings", description: "Get the latest Active Scanner findings.", parameters: { type: "object", properties: {} } },
 ];
 
 const AI_SYSTEM_PROMPT = `You are an expert security researcher and penetration tester embedded in the Void Extension — a Chrome DevTools security toolkit similar to Burp Suite. You have access to tools that let you read HTTP traffic, send requests, scan for vulnerabilities, encode/decode values, and manage findings.
@@ -8163,6 +8173,9 @@ let aiProxyWs = null;
 let aiSessions = []; // { id, name, messages, llmMessages }
 let aiActiveSessionId = null;
 let aiNextSessionId = 1;
+let aiInputHistory = [];
+let aiInputHistIdx = -1;
+let aiInputDraft = "";
 
 // Tool executor — runs tools locally in panel.js where all extension state lives
 async function aiExecTool(name, args) {
@@ -8302,6 +8315,69 @@ async function aiExecTool(name, args) {
     case "get_sequencer_tokens": {
       return { count: seqTokens.length, tokens: seqTokens.slice(0, 20) };
     }
+    // Debugger tools — intentional: AI security assistant needs page inspection
+    // chrome.devtools.inspectedWindow.eval is the official DevTools API for this
+    case "eval_page": {
+      return new Promise((resolve) => {
+        chrome.devtools.inspectedWindow.eval(args.expression, (result, err) => {
+          if (err) resolve({ error: err.description || err.value || String(err) });
+          else resolve(result);
+        });
+      });
+    }
+    case "get_page_info": {
+      return new Promise((resolve) => {
+        chrome.tabs.get(TAB_ID, tab => {
+          const info = { url: tab?.url || "", title: tab?.title || "" };
+          chrome.devtools.inspectedWindow.eval(
+            `({ cookies: document.cookie, referrer: document.referrer, charset: document.characterSet, doctype: document.doctype?.name || "", readyState: document.readyState })`,
+            (result) => { resolve({ ...info, ...result }); }
+          );
+        });
+      });
+    }
+    case "get_response_headers": {
+      const entry = historyData.find(e => e.url === args.url) || historyData.find(e => (e.url || "").includes(args.url));
+      if (!entry) return { error: "URL not found in history" };
+      return { url: entry.url, status: entry.status, headers: entry.respHeaders };
+    }
+    case "search_responses": {
+      const results = [];
+      const re = new RegExp(args.pattern, "i");
+      for (const e of historyData.slice(-(args.limit || 200))) {
+        const body = e.respBody || "";
+        const m = body.match(re);
+        if (m) results.push({ url: e.url, status: e.status, match: m[0].slice(0, 100), index: m.index });
+      }
+      return results;
+    }
+    case "get_forms": {
+      return new Promise((resolve) => {
+        chrome.devtools.inspectedWindow.eval(
+          `[...document.querySelectorAll("form")].map(f => ({ action: f.action, method: f.method, id: f.id, inputs: [...f.querySelectorAll("input,select,textarea")].map(i => ({ name: i.name, type: i.type, id: i.id, value: (i.value || "").slice(0, 50) })) }))`,
+          (result, err) => resolve(err ? [] : result)
+        );
+      });
+    }
+    case "get_links": {
+      return new Promise((resolve) => {
+        chrome.devtools.inspectedWindow.eval(
+          `[...document.querySelectorAll("a[href]")].map(a => ({ href: a.href, text: (a.textContent || "").trim().slice(0, 50) })).filter(a => a.href && !a.href.startsWith("javascript:"))`,
+          (result, err) => resolve(err ? [] : result)
+        );
+      });
+    }
+    case "get_scripts": {
+      return new Promise((resolve) => {
+        chrome.devtools.inspectedWindow.eval(
+          `[...document.querySelectorAll("script[src]")].map(s => s.src)`,
+          (result, err) => resolve(err ? [] : result)
+        );
+      });
+    }
+    case "get_postmessages": return storPostMessages.slice(-50);
+    case "get_intruder_results": return intrResults.slice(0, 50).map(r => ({ id: r.id, payload: r.payload, status: r.status, length: r.length, elapsed: r.elapsed, grepExtract: r.grepExtract }));
+    case "get_scan_findings": return scanFindings;
     default: return { error: `Unknown tool: ${name}` };
   }
 }
@@ -8403,7 +8479,7 @@ function aiRenderSessions() {
 
 function aiPersistSessions() {
   aiSaveCurrentSession();
-  chrome.storage.local.set({ voidAiSessions: { sessions: aiSessions, nextId: aiNextSessionId, activeId: aiActiveSessionId } });
+  chrome.storage.local.set({ voidAiSessions: { sessions: aiSessions, nextId: aiNextSessionId, activeId: aiActiveSessionId, inputHistory: aiInputHistory.slice(-100) } });
 }
 
 function aiLoadSessions() {
@@ -8413,6 +8489,7 @@ function aiLoadSessions() {
       aiSessions = data.sessions;
       aiNextSessionId = data.nextId || aiSessions.length + 1;
       aiActiveSessionId = data.activeId || aiSessions[0].id;
+      aiInputHistory = data.inputHistory || [];
       const session = aiSessions.find(s => s.id === aiActiveSessionId);
       if (session) { aiMessages = session.messages || []; aiLlmMessages = session.llmMessages || []; }
       aiRenderSessions();
@@ -8442,6 +8519,13 @@ function aiConnectProxy() {
       aiProxyWs.onmessage = async (ev) => {
         let msg;
         try { msg = JSON.parse(ev.data); } catch { return; }
+
+        // Status updates from proxy
+        if (msg.type === "ai_status") {
+          aiRemoveThinking();
+          aiSetStatus(msg.text);
+          return;
+        }
 
         // Tool execution request from proxy
         if (msg.type === "tool_exec") {
@@ -8541,9 +8625,13 @@ async function aiSendMessage() {
   document.getElementById("ai-send").disabled = true;
   input.value = "";
 
+  aiInputHistory.push(text);
+  aiInputHistIdx = -1;
+  aiInputDraft = "";
+
   aiAddMessage("user", text);
   aiLlmMessages.push({ role: "user", content: text });
-  aiAddMessage("thinking", "Thinking\u2026");
+  aiAddMessage("thinking", "Connecting\u2026");
 
   // Read config from Settings tab
   const provider = document.getElementById("ai-provider").value;
@@ -10246,6 +10334,25 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("ai-send").addEventListener("click", aiSendMessage);
     document.getElementById("ai-input").addEventListener("keydown", e => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); aiSendMessage(); }
+      // Arrow key history
+      if (e.key === "ArrowUp" && e.target.selectionStart === 0) {
+        e.preventDefault();
+        if (aiInputHistIdx === -1) aiInputDraft = e.target.value;
+        if (aiInputHistIdx < aiInputHistory.length - 1) {
+          aiInputHistIdx++;
+          e.target.value = aiInputHistory[aiInputHistory.length - 1 - aiInputHistIdx];
+        }
+      }
+      if (e.key === "ArrowDown" && e.target.selectionEnd === e.target.value.length) {
+        e.preventDefault();
+        if (aiInputHistIdx > 0) {
+          aiInputHistIdx--;
+          e.target.value = aiInputHistory[aiInputHistory.length - 1 - aiInputHistIdx];
+        } else if (aiInputHistIdx === 0) {
+          aiInputHistIdx = -1;
+          e.target.value = aiInputDraft;
+        }
+      }
     });
     document.getElementById("ai-new-chat").addEventListener("click", () => aiNewSession());
 

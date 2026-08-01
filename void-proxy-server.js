@@ -454,8 +454,22 @@ async function handleAiChat(req, res) {
   // Claude CLI mode — spawn the CLI process
   if (provider === "claude-cli") {
     // Build conversation into a single prompt
-    const toolList = (tools || []).map(t => `- ${t.name}: ${t.description}`).join("\n");
-    const toolInstr = tools?.length ? `\n\nYou have access to these tools. To call a tool, respond with a JSON block:\n<tool_call>{"name": "tool_name", "args": {...}}</tool_call>\n\nAvailable tools:\n${toolList}\n\nAfter I provide tool results, continue your analysis.` : "";
+    const toolList = (tools || []).map(t => `- ${t.name}(${Object.keys(t.parameters?.properties || {}).join(", ")}): ${t.description}`).join("\n");
+    const toolInstr = tools?.length ? `
+
+IMPORTANT: You have access to security testing tools. When you need data or want to perform an action, you MUST respond with EXACTLY this format (no markdown, no code blocks around it):
+
+<tool_call>{"name": "tool_name", "args": {"param": "value"}}</tool_call>
+
+You may include text before the tool call to explain what you're doing. Only ONE tool call per response. After receiving the tool result, you can make another tool call or provide your final analysis.
+
+Available tools:
+${toolList}
+
+Example:
+Let me check the HTTP history for interesting requests.
+<tool_call>{"name": "get_history", "args": {"filter": "POST", "limit": 20}}</tool_call>` : "";
+
     const sysBlock = (systemPrompt || "") + toolInstr;
 
     let conversationText = sysBlock ? `System: ${sysBlock}\n\n` : "";
@@ -465,6 +479,8 @@ async function handleAiChat(req, res) {
 
     const MAX_CLI_TURNS = 30;
     for (let turn = 0; turn < MAX_CLI_TURNS; turn++) {
+      broadcast({ type: "ai_status", text: turn === 0 ? "Sending to Claude CLI\u2026" : `Claude is thinking (turn ${turn + 1})\u2026` });
+
       let response;
       try {
         response = await claudeCliExec(cliPath, conversationText.trim(), model);
@@ -547,6 +563,7 @@ async function handleAiChat(req, res) {
   const MAX_TURNS = 30;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    broadcast({ type: "ai_status", text: turn === 0 ? `Sending to ${provider}\u2026` : `AI is thinking (turn ${turn + 1})\u2026` });
     let llmRes;
     try {
       if (isAnthropic) apiBody.messages = conversationMessages;
