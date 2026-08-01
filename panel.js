@@ -7362,6 +7362,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Settings profiles
+  initBlock("settings-profiles", () => {
   async function cfgRefreshProfiles() {
     const stored = await new Promise(r => chrome.storage.local.get("voidSettingsProfiles", r));
     const profiles = stored.voidSettingsProfiles || {};
@@ -7431,46 +7432,53 @@ document.addEventListener("DOMContentLoaded", () => {
     e.target.value = "";
   });
   cfgRefreshProfiles();
+  }); // end initBlock("settings-profiles")
 
   // JA3 Fingerprint
-  document.getElementById("cfg-ja3-fetch").addEventListener("click", async () => {
-    document.getElementById("cfg-ja3-status").textContent = "Fetching…";
-    let tls = {};
-    try {
-      // Try direct fetch first (CSP allows https:)
-      const resp = await fetch("https://tls.peet.ws/api/all");
-      const d = await resp.json();
-      tls = d.tls || {};
-    } catch {
-      // Fallback: fetch via background service worker
+  initBlock("ja3", () => {
+    const ja3Btn = document.getElementById("cfg-ja3-fetch");
+    if (!ja3Btn) { console.error("[Void] cfg-ja3-fetch not found"); return; }
+    ja3Btn.addEventListener("click", async () => {
+      const statusEl = document.getElementById("cfg-ja3-status");
+      statusEl.textContent = "Fetching fingerprint…";
+      let tls = {};
       try {
-        await wakeSW();
-        const res = await bg({ type: "FETCH_JA3" }, 5);
-        if (res?.ok) tls = res.data?.tls || {};
-        else throw new Error(res?.error || "SW fetch failed");
-      } catch (e2) {
-        document.getElementById("cfg-ja3-status").textContent = "Error: " + e2.message;
-        return;
+        // Direct fetch from panel (CSP allows https:)
+        const resp = await fetch("https://tls.peet.ws/api/all", { signal: AbortSignal.timeout(10000) });
+        const d = await resp.json();
+        tls = d.tls || {};
+      } catch (e1) {
+        statusEl.textContent = "Direct fetch failed, trying SW…";
+        // Fallback: via background service worker
+        try {
+          await wakeSW();
+          const res = await bg({ type: "FETCH_JA3" }, 6);
+          if (res?.ok) tls = res.data?.tls || {};
+          else { statusEl.textContent = "Error: " + (res?.error || "no response from SW"); return; }
+        } catch (e2) {
+          statusEl.textContent = "Error: " + (e2.message || "unknown");
+          return;
+        }
       }
-    }
-    document.getElementById("cfg-ja3-hash").value = tls.ja3_hash || "—";
-    document.getElementById("cfg-ja4").value = tls.ja4 || "—";
-    document.getElementById("cfg-tls-ver").value = tls.tls_version_negotiated || "—";
-    document.getElementById("cfg-ja3-full").value = tls.ja3 || "—";
-    document.getElementById("cfg-ja3-ciphers").value = (tls.ciphers || []).map(c => c.name || c).join("\n");
-    document.getElementById("cfg-ja3-exts").value = (tls.extensions || []).map(e => `${e.name || e} (${e.id || ""})`).join("\n");
-    document.getElementById("cfg-ja3-results").classList.remove("hidden");
-    document.getElementById("cfg-ja3-status").textContent = "";
-    showToast("TLS fingerprint loaded");
-  });
-  document.getElementById("cfg-ja3-hash-copy").addEventListener("click", () => {
-    navigator.clipboard.writeText(document.getElementById("cfg-ja3-hash").value);
-    showToast("JA3 hash copied");
-  });
-  document.getElementById("cfg-ja4-copy").addEventListener("click", () => {
-    navigator.clipboard.writeText(document.getElementById("cfg-ja4").value);
-    showToast("JA4 copied");
-  });
+      document.getElementById("cfg-ja3-hash").value = tls.ja3_hash || "—";
+      document.getElementById("cfg-ja4").value = tls.ja4 || "—";
+      document.getElementById("cfg-tls-ver").value = tls.tls_version_negotiated || "—";
+      document.getElementById("cfg-ja3-full").value = tls.ja3 || "—";
+      document.getElementById("cfg-ja3-ciphers").value = (tls.ciphers || []).map(c => c.name || c).join("\n");
+      document.getElementById("cfg-ja3-exts").value = (tls.extensions || []).map(e => `${e.name || e} (${e.id || ""})`).join("\n");
+      document.getElementById("cfg-ja3-results").classList.remove("hidden");
+      statusEl.textContent = "";
+      showToast("TLS fingerprint loaded");
+    });
+    document.getElementById("cfg-ja3-hash-copy").addEventListener("click", () => {
+      navigator.clipboard.writeText(document.getElementById("cfg-ja3-hash").value);
+      showToast("JA3 hash copied");
+    });
+    document.getElementById("cfg-ja4-copy").addEventListener("click", () => {
+      navigator.clipboard.writeText(document.getElementById("cfg-ja4").value);
+      showToast("JA4 copied");
+    });
+  }); // end initBlock("ja3")
 
   // Session management (Project → Session tab)
   initBlock("session", () => {
