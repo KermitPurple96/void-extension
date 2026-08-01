@@ -2408,8 +2408,8 @@ function renderHeaders() {
     const tile = el("div", `hdr-sec-tile hdr-sec-${r.st}`);
     tile.innerHTML = `
       <div class="hdr-sec-top"><span class="hdr-sec-badge hdr-sec-badge-${r.st}">${r.st.toUpperCase()}</span><span class="hdr-sec-note">${esc(r.note)}</span></div>
-      <div class="hdr-sec-name">${r.label}</div>
-      <div class="hdr-sec-desc">${r.desc}</div>
+      <div class="hdr-sec-name">${esc(r.label)}</div>
+      <div class="hdr-sec-desc">${esc(r.desc)}</div>
       ${r.value ? `<div class="hdr-sec-val">${esc(r.value.length > 120 ? r.value.slice(0,117)+"…" : r.value)}</div>` : ""}
     `;
     tilesWrap.appendChild(tile);
@@ -8043,7 +8043,7 @@ document.addEventListener("DOMContentLoaded", () => {
       logRender();
     });
     document.getElementById("log-export").addEventListener("click", logExport);
-    document.getElementById("log-clear").addEventListener("click", () => { logEntries = []; logNextId = 1; logRender(); logCloseDetail(); });
+    document.getElementById("log-clear").addEventListener("click", () => { logEntries = []; logNextId = 1; _logKnownKeys.clear(); logRender(); logCloseDetail(); });
     document.getElementById("log-detail-close").addEventListener("click", logCloseDetail);
     document.getElementById("log-detail-to-rep").addEventListener("click", () => {
       if (!logDetailEntry) return;
