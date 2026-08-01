@@ -385,6 +385,7 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
       t.history[idx].mimeType    = resp.mimeType || "";
       t.history[idx].length      = resp.encodedDataLength || 0;
       t.history[idx].elapsed     = Date.now() - t.history[idx].time;
+      t.history[idx].remoteIP    = resp.remoteIPAddress ? `${resp.remoteIPAddress}:${resp.remotePort || ""}` : "";
 
       t.history[idx].respHeaders = resp.headers || {};
     }

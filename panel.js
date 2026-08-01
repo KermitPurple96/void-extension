@@ -1046,6 +1046,7 @@ function renderHistory() {
       case "mimeType": va = a.mimeType || ""; vb = b.mimeType || ""; break;
       case "length":   va = a.length || 0; vb = b.length || 0; break;
       case "elapsed":  va = a.elapsed || 0; vb = b.elapsed || 0; break;
+      case "remoteIP": va = a.remoteIP || ""; vb = b.remoteIP || ""; break;
       case "time":     va = a.time || 0; vb = b.time || 0; break;
       default:         va = a._idx; vb = b._idx;
     }
@@ -1084,6 +1085,7 @@ function renderHistory() {
       <td class="hist-td-mime">${esc(shortMime(entry.mimeType))}</td>
       <td class="hist-td-len">${esc(String(len))}</td>
       <td class="hist-td-elapsed">${entry.elapsed ? Number(entry.elapsed) || "" : ""}</td>
+      <td class="hist-td-ip" title="${esc(entry.remoteIP || "")}">${esc(entry.remoteIP || "")}</td>
       <td class="hist-td-timestamp">${esc(ts)}</td>
     `;
     if (entry.respBody && hasReflections(entry)) {
@@ -1160,7 +1162,7 @@ function openHistDetail(entry) {
   const detail = document.getElementById("hist-detail");
   const title  = document.getElementById("hist-detail-title");
 
-  title.textContent = `${entry.status || "…"} ${entry.method} ${entry.url}`;
+  title.textContent = `${entry.status || "…"} ${entry.method} ${entry.url}${entry.remoteIP ? " → " + entry.remoteIP : ""}`;
 
   document.getElementById("hist-req-pre").textContent  = rawRequestText(entry);
   document.getElementById("hist-resp-pre").textContent = rawResponseText(entry);
