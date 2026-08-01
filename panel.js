@@ -1570,12 +1570,6 @@ function repMakeTabBtn(tab) {
     });
   });
 
-  // Right-click context menu for grouping
-  btn.addEventListener("contextmenu", e => {
-    e.preventDefault();
-    repShowGroupMenu(tab, e.clientX, e.clientY);
-  });
-
   return btn;
 }
 
@@ -1597,14 +1591,44 @@ function renderRepTabs() {
     if (!groupTabs.length) continue;
     usedGroups.add(grp.name);
 
+    const grpColor = REP_GROUP_COLORS.find(c => c.name === grp.color)?.color || "var(--accent)";
     const hdr = document.createElement("div");
     hdr.className = "rep-group-hdr" + (grp.collapsed ? " collapsed" : "");
-    hdr.innerHTML = `<span class="rep-group-arrow">${grp.collapsed ? "\u25B6" : "\u25BC"}</span><span class="rep-group-name">${esc(grp.name)}</span><span class="rep-group-count">${groupTabs.length}</span>`;
+    hdr.style.borderBottomColor = grp.collapsed ? "" : grpColor;
+
+    const arrow = document.createElement("span");
+    arrow.className = "rep-group-arrow";
+    arrow.textContent = grp.collapsed ? "\u25B6" : "\u25BC";
+    hdr.appendChild(arrow);
+
+    const colorDot = document.createElement("span");
+    colorDot.className = "rep-group-dot";
+    colorDot.style.background = grpColor;
+    hdr.appendChild(colorDot);
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "rep-group-name";
+    nameSpan.textContent = grp.name;
+    hdr.appendChild(nameSpan);
+
+    const countSpan = document.createElement("span");
+    countSpan.className = "rep-group-count";
+    countSpan.textContent = groupTabs.length;
+    hdr.appendChild(countSpan);
+
+    // Gear icon — opens group actions menu (add tabs, color, delete)
+    const gear = document.createElement("span");
+    gear.className = "rep-group-gear";
+    gear.textContent = "\u2699";
+    gear.title = "Group settings";
+    gear.addEventListener("click", e => { e.stopPropagation(); repShowGroupActions(grp, hdr); });
+    hdr.appendChild(gear);
+
+    // Click header to collapse/expand
     hdr.addEventListener("click", () => { grp.collapsed = !grp.collapsed; renderRepTabs(); });
-    // Double-click to rename group
+    // Double-click to rename
     hdr.addEventListener("dblclick", e => {
       e.stopPropagation();
-      const nameSpan = hdr.querySelector(".rep-group-name");
       const input = document.createElement("input");
       input.type = "text"; input.className = "rep-tab-rename"; input.value = grp.name;
       input.size = Math.max(4, input.value.length + 1);
@@ -1628,7 +1652,11 @@ function renderRepTabs() {
     bar.insertBefore(hdr, addBtn);
 
     if (!grp.collapsed) {
-      for (const tab of groupTabs) bar.insertBefore(repMakeTabBtn(tab), addBtn);
+      for (const tab of groupTabs) {
+        const btn = repMakeTabBtn(tab);
+        btn.style.borderBottomColor = tab.id === repActiveTab ? grpColor : "";
+        bar.insertBefore(btn, addBtn);
+      }
     }
   }
 
@@ -1638,50 +1666,109 @@ function renderRepTabs() {
   renderRep2Tabs();
 }
 
-function repShowGroupMenu(tab, x, y) {
-  // Remove existing menu
-  document.getElementById("rep-group-menu")?.remove();
+const REP_GROUP_COLORS = [
+  { name: "blue", color: "var(--accent)" },
+  { name: "green", color: "var(--green)" },
+  { name: "yellow", color: "var(--yellow)" },
+  { name: "red", color: "var(--red)" },
+  { name: "purple", color: "var(--purple)" },
+  { name: "orange", color: "var(--orange)" },
+];
 
+function repShowAddMenu(anchor) {
+  document.getElementById("rep-group-menu")?.remove();
+  const rect = anchor.getBoundingClientRect();
   const menu = document.createElement("div");
   menu.id = "rep-group-menu";
   menu.className = "rep-group-menu";
-  menu.style.left = x + "px";
-  menu.style.top = y + "px";
+  menu.style.left = rect.left + "px";
+  menu.style.top = rect.bottom + 2 + "px";
 
-  // "New Group" option
+  const newTab = document.createElement("div");
+  newTab.className = "rep-group-menu-item";
+  newTab.textContent = "+ New Tab";
+  newTab.addEventListener("click", () => { menu.remove(); addRepTab(); });
+  menu.appendChild(newTab);
+
   const newGrp = document.createElement("div");
   newGrp.className = "rep-group-menu-item";
-  newGrp.textContent = "+ New Group";
+  newGrp.textContent = "\u25A0 New Group";
   newGrp.addEventListener("click", () => {
-    const name = "Group " + repNextGroupId++;
-    repGroups.push({ name, collapsed: false });
-    tab.group = name;
     menu.remove();
+    const name = "Group " + repNextGroupId++;
+    repGroups.push({ name, collapsed: false, color: "blue" });
     renderRepTabs();
   });
   menu.appendChild(newGrp);
 
-  // "Remove from group" if in a group
-  if (tab.group) {
-    const ungroup = document.createElement("div");
-    ungroup.className = "rep-group-menu-item";
-    ungroup.textContent = "\u2715 Remove from group";
-    ungroup.addEventListener("click", () => { tab.group = null; menu.remove(); renderRepTabs(); });
-    menu.appendChild(ungroup);
+  document.body.appendChild(menu);
+  const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener("click", close); } };
+  setTimeout(() => document.addEventListener("click", close), 0);
+}
+
+function repShowGroupActions(grp, anchor) {
+  document.getElementById("rep-group-menu")?.remove();
+  const rect = anchor.getBoundingClientRect();
+  const menu = document.createElement("div");
+  menu.id = "rep-group-menu";
+  menu.className = "rep-group-menu";
+  menu.style.left = rect.left + "px";
+  menu.style.top = rect.bottom + 2 + "px";
+
+  // Add ungrouped tabs to this group
+  const ungrouped = repTabs.filter(t => !t.group);
+  if (ungrouped.length) {
+    const hdr = document.createElement("div");
+    hdr.className = "rep-group-menu-hdr";
+    hdr.textContent = "Add tabs to group";
+    menu.appendChild(hdr);
+    for (const tab of ungrouped) {
+      const item = document.createElement("div");
+      item.className = "rep-group-menu-item";
+      item.textContent = repTabLabel(tab);
+      item.addEventListener("click", () => { tab.group = grp.name; renderRepTabs(); menu.remove(); });
+      menu.appendChild(item);
+    }
+    // "Add all" option
+    if (ungrouped.length > 1) {
+      const addAll = document.createElement("div");
+      addAll.className = "rep-group-menu-item rep-group-menu-accent";
+      addAll.textContent = "\u2192 Add all ungrouped";
+      addAll.addEventListener("click", () => { ungrouped.forEach(t => { t.group = grp.name; }); renderRepTabs(); menu.remove(); });
+      menu.appendChild(addAll);
+    }
   }
 
-  // Existing groups
-  for (const grp of repGroups) {
-    if (grp.name === tab.group) continue;
-    const item = document.createElement("div");
-    item.className = "rep-group-menu-item";
-    item.textContent = "\u2192 " + grp.name;
-    item.addEventListener("click", () => { tab.group = grp.name; menu.remove(); renderRepTabs(); });
-    menu.appendChild(item);
+  // Color picker
+  const colorHdr = document.createElement("div");
+  colorHdr.className = "rep-group-menu-hdr";
+  colorHdr.textContent = "Color";
+  menu.appendChild(colorHdr);
+  const colorRow = document.createElement("div");
+  colorRow.className = "rep-group-color-row";
+  for (const c of REP_GROUP_COLORS) {
+    const dot = document.createElement("span");
+    dot.className = "rep-group-color-dot" + (grp.color === c.name ? " active" : "");
+    dot.style.background = c.color;
+    dot.title = c.name;
+    dot.addEventListener("click", () => { grp.color = c.name; renderRepTabs(); menu.remove(); });
+    colorRow.appendChild(dot);
   }
+  menu.appendChild(colorRow);
+
+  // Delete group (ungroups all tabs)
+  const del = document.createElement("div");
+  del.className = "rep-group-menu-item rep-group-menu-danger";
+  del.textContent = "\u2715 Delete group";
+  del.addEventListener("click", () => {
+    repTabs.filter(t => t.group === grp.name).forEach(t => { t.group = null; });
+    repGroups = repGroups.filter(g => g !== grp);
+    renderRepTabs();
+    menu.remove();
+  });
+  menu.appendChild(del);
 
   document.body.appendChild(menu);
-  // Close on click outside
   const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener("click", close); } };
   setTimeout(() => document.addEventListener("click", close), 0);
 }
@@ -8119,7 +8206,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Repeater tabs
-  document.getElementById("rep-tab-add").addEventListener("click", addRepTab);
+  // + button shows menu: New Tab / New Group
+  document.getElementById("rep-tab-add").addEventListener("click", e => {
+    e.stopPropagation();
+    repShowAddMenu(e.currentTarget);
+  });
   renderRepTabs();
 
   // Response sub-tabs
