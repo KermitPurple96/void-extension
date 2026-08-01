@@ -453,65 +453,84 @@ async function handleAiChat(req, res) {
 
   // Claude CLI mode — spawn the CLI process
   if (provider === "claude-cli") {
-    // Build conversation into a single prompt
+    const TOOL_DELIM = "%%VOID_TOOL%%";
     const toolList = (tools || []).map(t => `- ${t.name}(${Object.keys(t.parameters?.properties || {}).join(", ")}): ${t.description}`).join("\n");
     const toolInstr = tools?.length ? `
 
-IMPORTANT: You have access to security testing tools. When you need data or want to perform an action, you MUST respond with EXACTLY this format (no markdown, no code blocks around it):
+You have access to security testing tools. To call a tool, you MUST end your response with this EXACT line (nothing after it):
 
-<tool_call>{"name": "tool_name", "args": {"param": "value"}}</tool_call>
+${TOOL_DELIM}{"name": "tool_name", "args": {"key": "value"}}
 
-You may include text before the tool call to explain what you're doing. Only ONE tool call per response. After receiving the tool result, you can make another tool call or provide your final analysis.
+Rules:
+- Only ONE tool call per response, always on the LAST line
+- Write your reasoning/explanation BEFORE the tool line
+- If you do NOT need a tool, just respond normally with NO ${TOOL_DELIM} line
+- Do NOT mention ${TOOL_DELIM} in explanatory text — only use it to actually invoke a tool
+- For simple questions about capabilities, just answer — don't call tools
 
 Available tools:
-${toolList}
-
-Example:
-Let me check the HTTP history for interesting requests.
-<tool_call>{"name": "get_history", "args": {"filter": "POST", "limit": 20}}</tool_call>` : "";
+${toolList}` : "";
 
     const sysBlock = (systemPrompt || "") + toolInstr;
 
-    let conversationText = sysBlock ? `System: ${sysBlock}\n\n` : "";
+    let conversationText = sysBlock ? `${sysBlock}\n\n` : "";
     for (const m of (messages || [])) {
-      if (typeof m.content === "string") conversationText += `${m.role === "user" ? "User" : "Assistant"}: ${m.content}\n\n`;
+      if (typeof m.content === "string") conversationText += `${m.role === "user" ? "Human" : "Assistant"}: ${m.content}\n\n`;
     }
+    conversationText += "Assistant:";
 
     const MAX_CLI_TURNS = 30;
     for (let turn = 0; turn < MAX_CLI_TURNS; turn++) {
-      broadcast({ type: "ai_status", text: turn === 0 ? "Sending to Claude CLI\u2026" : `Claude is thinking (turn ${turn + 1})\u2026` });
+      broadcast({ type: "ai_status", text: turn === 0 ? "Sending to Claude CLI\u2026" : `Claude is analyzing (turn ${turn + 1})\u2026` });
+      console.log(`[AI] CLI turn ${turn + 1}, prompt length: ${conversationText.length}`);
 
       let response;
       try {
         response = await claudeCliExec(cliPath, conversationText.trim(), model);
       } catch (e) {
+        console.error("[AI] CLI error:", e.message);
         res.writeHead(502).end(JSON.stringify({ error: `Claude CLI error: ${e.message}` }));
         return;
       }
 
-      // Check for tool calls in the response
-      const toolCallMatch = response.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/);
-      if (toolCallMatch) {
-        let parsed;
-        try { parsed = JSON.parse(toolCallMatch[1]); } catch { break; }
-        const textBefore = response.slice(0, response.indexOf("<tool_call>")).trim();
+      console.log(`[AI] CLI response (${response.length} chars): ${response.slice(0, 150).replace(/\n/g, "\\n")}...`);
+
+      // Check for tool call — must be the LAST line with our unique delimiter
+      const lines = response.trimEnd().split("\n");
+      const lastLine = lines[lines.length - 1].trim();
+      let toolParsed = null;
+
+      if (lastLine.startsWith(TOOL_DELIM)) {
+        const jsonStr = lastLine.slice(TOOL_DELIM.length).trim();
+        try { toolParsed = JSON.parse(jsonStr); } catch (e) {
+          console.error("[AI] Failed to parse tool call JSON:", jsonStr.slice(0, 100));
+        }
+      }
+
+      if (toolParsed && toolParsed.name) {
+        // Show text before the tool call
+        const textBefore = lines.slice(0, -1).join("\n").trim();
         if (textBefore) broadcast({ type: "ai_chunk", role: "assistant", text: textBefore, toolCalls: [] });
 
-        broadcast({ type: "ai_tool_start", name: parsed.name, args: parsed.args || {} });
-        const result = await requestToolExec(parsed.name, parsed.args || {});
-        broadcast({ type: "ai_tool_done", name: parsed.name, result });
+        console.log(`[AI] Tool call: ${toolParsed.name}(${JSON.stringify(toolParsed.args || {}).slice(0, 100)})`);
+        broadcast({ type: "ai_tool_start", name: toolParsed.name, args: toolParsed.args || {} });
+        const result = await requestToolExec(toolParsed.name, toolParsed.args || {});
+        broadcast({ type: "ai_tool_done", name: toolParsed.name, result });
 
         const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-        conversationText += `Assistant: ${response}\n\nUser: Tool result for ${parsed.name}:\n${resultStr.slice(0, 5000)}\n\nPlease continue your analysis based on this result.\n\n`;
+        console.log(`[AI] Tool result (${resultStr.length} chars): ${resultStr.slice(0, 100)}...`);
+        conversationText += ` ${response}\n\nHuman: Tool result for ${toolParsed.name}:\n${resultStr.slice(0, 5000)}\n\nContinue your analysis. If you need another tool, end with ${TOOL_DELIM}. If you're done, just respond normally.\n\nAssistant:`;
         continue;
       }
 
       // No tool call — final response
+      console.log("[AI] Final response (no tool call)");
       broadcast({ type: "ai_chunk", role: "assistant", text: response, toolCalls: [] });
       res.writeHead(200).end(JSON.stringify({ role: "assistant", content: response, done: true }));
       return;
     }
 
+    console.log("[AI] Max tool turns reached");
     res.writeHead(200).end(JSON.stringify({ role: "assistant", content: "Max tool turns reached.", done: true }));
     return;
   }
