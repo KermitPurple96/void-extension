@@ -226,6 +226,7 @@ function showTab(name) {
     p.classList.toggle("hidden",  p.id !== `tab-${name}`);
   });
   if (name === "intercept") startPoll(); else stopPoll();
+  if (name === "repeater") repCheckCookieDrift();
   if (name === "history") startHistPoll(); else stopHistPoll();
   if (name === "logger") { logSyncLocal(); logRender(); startLogSync(); logSyncConnect(); } else stopLogSync();
   if (name === "target") { pollHistory().then(() => renderSiteMap()); renderEndpoints(); }
@@ -513,6 +514,85 @@ function closeEditor() {
 
 function headersToRaw(headers) {
   return Object.entries(headers).map(([k,v]) => `${k}: ${v}`).join("\n");
+}
+
+// ── Smart Cookie Merge ─────────────────────────────────────────────────────
+// Parses "name=val; name2=val2" into a Map
+function parseCookieStr(str) {
+  const map = new Map();
+  if (!str) return map;
+  for (const pair of str.split(/;\s*/)) {
+    const eq = pair.indexOf("=");
+    if (eq > 0) map.set(pair.slice(0, eq).trim(), pair.slice(eq + 1));
+  }
+  return map;
+}
+
+// Smart merge: update cookies that exist in browser, preserve manually-added ones.
+// Returns { merged, changed } where changed lists cookie names that were updated.
+function smartCookieMerge(existingCookieHeader, browserCookieStr) {
+  const existing = parseCookieStr(existingCookieHeader);
+  const browser = parseCookieStr(browserCookieStr);
+  const changed = [];
+
+  if (existing.size === 0) {
+    // No existing cookies — use browser cookies directly
+    return { merged: browserCookieStr, changed: [...browser.keys()] };
+  }
+
+  // Update existing keys with browser values, add new browser keys
+  for (const [name, val] of browser) {
+    const oldVal = existing.get(name);
+    if (oldVal !== val) {
+      changed.push(name);
+    }
+    existing.set(name, val);
+  }
+  // Note: keys in existing that are NOT in browser are preserved (manually-added test cookies)
+
+  const merged = [...existing.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+  return { merged, changed };
+}
+
+// Check if browser cookies differ from what's in the Repeater request
+async function repCheckCookieDrift() {
+  const url = document.getElementById("rep-url")?.value?.trim();
+  if (!url) return;
+  const indicator = document.getElementById("rep-cookie-indicator");
+  if (!indicator) return;
+  try {
+    const ck = await bg({ type: "GET_COOKIES", url });
+    if (!ck?.cookies) { indicator.classList.add("hidden"); return; }
+    const rawHeaders = document.getElementById("rep-headers")?.value || "";
+    const existingVal = extractCookieHeader(rawHeaders);
+    if (!existingVal) { indicator.classList.add("hidden"); return; }
+    const { changed } = smartCookieMerge(existingVal, ck.cookies);
+    if (changed.length > 0) {
+      indicator.classList.remove("hidden");
+      indicator.title = `Browser cookies differ: ${changed.join(", ")}`;
+    } else {
+      indicator.classList.add("hidden");
+    }
+  } catch { indicator.classList.add("hidden"); }
+}
+
+// Extract the Cookie header value from raw headers string
+function extractCookieHeader(rawHeaders) {
+  const lines = rawHeaders.split("\n");
+  const idx = lines.findIndex(l => /^cookie\s*:/i.test(l));
+  if (idx < 0) return "";
+  return lines[idx].replace(/^cookie\s*:\s*/i, "");
+}
+
+// Inject/replace Cookie header in raw headers using smart merge
+function injectCookieSmart(rawHeaders, browserCookieStr) {
+  const existingVal = extractCookieHeader(rawHeaders);
+  const { merged, changed } = smartCookieMerge(existingVal, browserCookieStr);
+  const lines = rawHeaders.split("\n");
+  const idx = lines.findIndex(l => /^cookie\s*:/i.test(l));
+  if (idx >= 0) lines[idx] = `Cookie: ${merged}`;
+  else lines.push(`Cookie: ${merged}`);
+  return { headers: lines.join("\n"), changed };
 }
 function rawToHeaders(raw) {
   const h = {};
@@ -1653,16 +1733,16 @@ async function doSend() {
 
   if (!url) { document.getElementById("rep-url").focus(); return; }
 
-  // Auto-cookie: fetch cookies from browser and inject/replace Cookie header
+  // Auto-cookie: fetch browser cookies and smart-merge (preserves manually-added cookies)
   if (document.getElementById("rep-autocookie").checked) {
     const ck = await bg({ type: "GET_COOKIES", url });
     if (ck?.cookies) {
-      const lines = rawHeaders.split("\n");
-      const idx = lines.findIndex(l => /^cookie\s*:/i.test(l));
-      if (idx >= 0) { lines[idx] = `Cookie: ${ck.cookies}`; }
-      else { lines.push(`Cookie: ${ck.cookies}`); }
-      rawHeaders = lines.join("\n");
+      const { headers: merged, changed } = injectCookieSmart(rawHeaders, ck.cookies);
+      rawHeaders = merged;
       document.getElementById("rep-headers").value = rawHeaders;
+      if (changed.length) {
+        showToast(`Cookie sync: updated ${changed.join(", ")}`);
+      }
     }
   }
 
@@ -3083,11 +3163,11 @@ async function intrStart() {
   document.getElementById("intr-start").disabled = true;
   document.getElementById("intr-stop").disabled  = false;
 
-  // Get cookies once if auto-cookie enabled
-  let cookieStr = "";
+  // Get cookies once if auto-cookie enabled (for smart merge in each request)
+  let browserCookieStr = "";
   if (autoCookie) {
     const ck = await bg({ type: "GET_COOKIES", url });
-    if (ck?.cookies) cookieStr = ck.cookies;
+    if (ck?.cookies) browserCookieStr = ck.cookies;
   }
 
   let completed = 0;
@@ -3101,14 +3181,11 @@ async function intrStart() {
     const promises = batch.map(async (req, batchIdx) => {
       const parsed = intrParseRaw(req.raw, method, url);
 
-      // Inject cookies
+      // Smart cookie merge — update browser cookies, preserve manually-added ones
       let rawHdrs = parsed.headers;
-      if (cookieStr) {
-        const hdrLines = rawHdrs.split("\n");
-        const ci = hdrLines.findIndex(l => /^cookie\s*:/i.test(l));
-        if (ci >= 0) hdrLines[ci] = `Cookie: ${cookieStr}`;
-        else hdrLines.push(`Cookie: ${cookieStr}`);
-        rawHdrs = hdrLines.join("\n");
+      if (browserCookieStr) {
+        const { headers: mergedHdrs } = injectCookieSmart(rawHdrs, browserCookieStr);
+        rawHdrs = mergedHdrs;
       }
 
       const res = await bg({
@@ -7016,15 +7093,30 @@ async function sessionCheckAndRenew(res) {
   });
   if (!loginRes) return;
 
-  // Extract new token
+  // Extract new token and inject into active Repeater/Intruder
+  let newTokenCookie = "";
   if (settings.sessionExtract === "cookie") {
     const setCookie = Object.entries(loginRes.headers || {}).find(([k]) => k.toLowerCase() === "set-cookie")?.[1] || "";
     const m = setCookie.match(new RegExp(`${settings.sessionTokenName}=([^;]+)`));
-    if (m) {
-      // Update the repeater/intruder cookie
-      const cookieHdr = `${settings.sessionTokenName}=${m[1]}`;
-      // Store for reuse
-      settings._lastSessionCookie = cookieHdr;
+    if (m) newTokenCookie = `${settings.sessionTokenName}=${m[1]}`;
+  } else if (settings.sessionExtract === "header") {
+    const val = Object.entries(loginRes.headers || {}).find(([k]) => k.toLowerCase() === (settings.sessionTokenName || "").toLowerCase())?.[1] || "";
+    if (val) newTokenCookie = val; // Not a cookie, but store for reference
+  } else if (settings.sessionExtract === "body-regex") {
+    try {
+      const m = (loginRes.body || "").match(new RegExp(settings.sessionTokenName));
+      if (m) newTokenCookie = m[1] || m[0];
+    } catch {}
+  }
+
+  if (newTokenCookie) {
+    settings._lastSessionCookie = newTokenCookie;
+    // Auto-inject into active Repeater tab's headers
+    const repHdrs = document.getElementById("rep-headers");
+    if (repHdrs && settings.sessionExtract === "cookie") {
+      const { headers: merged } = injectCookieSmart(repHdrs.value, newTokenCookie);
+      repHdrs.value = merged;
+      showToast(`Session renewed: ${settings.sessionTokenName}`);
     }
   }
 }
