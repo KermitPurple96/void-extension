@@ -7118,6 +7118,28 @@ document.addEventListener("DOMContentLoaded", () => {
     ta.focus();
     intrCountPositions();
   });
+  document.getElementById("intr-auto-pos").addEventListener("click", () => {
+    const ta = document.getElementById("intr-request");
+    // Strip existing markers first
+    let text = ta.value.replace(/§/g, "");
+    // Mark values in: key=value pairs (URL query, body params, Cookie values, JSON values)
+    // URL query params: ?key=value&key2=value2
+    text = text.replace(/([?&])([^=&\s]+)=([^&\s\n]+)/g, (m, sep, key, val) => `${sep}${key}=§${val}§`);
+    // Body params: key=value&key2=value2 (lines that look like form data)
+    text = text.replace(/^([a-zA-Z0-9_\-\[\]]+)=([^&\n]+)/gm, (m, key, val) => {
+      if (val.includes("§")) return m; // already marked
+      return `${key}=§${val}§`;
+    });
+    // Cookie header values: Cookie: name=value; name2=value2
+    text = text.replace(/^(Cookie:\s*)(.+)$/gim, (m, prefix, cookies) => {
+      return prefix + cookies.replace(/([^=;\s]+)=([^;\s]+)/g, (cm, k, v) => v.includes("§") ? cm : `${k}=§${v}§`);
+    });
+    // JSON string values: "key": "value"
+    text = text.replace(/"([^"]+)":\s*"([^"]+)"/g, (m, key, val) => val.includes("§") ? m : `"${key}": "§${val}§"`);
+    setFieldValue(ta, text);
+    intrCountPositions();
+    showToast("Auto-marked parameter values");
+  });
   document.getElementById("intr-clear-pos").addEventListener("click", () => {
     const ta = document.getElementById("intr-request");
     setFieldValue(ta, intrStripPositions(ta.value)); // undoable
