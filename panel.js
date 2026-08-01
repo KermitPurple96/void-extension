@@ -80,6 +80,7 @@ let notesFilterText = "";
 let notesFilterSev = "";
 let notesFilterHost = "";
 let notesEditingId = null;
+let decSavedChains = {};
 
 // ── Messaging to background (with auto-retry on SW restart) ──────────────────
 let _contextDead = false;
@@ -3500,6 +3501,23 @@ function saveSettings() {
   settings.timeout        = document.getElementById("cfg-timeout").value;
   settings.reqView        = document.getElementById("cfg-req-view").value;
   settings.matchReplace   = readMRRules();
+  // Theme
+  settings.theme          = document.getElementById("cfg-theme").value;
+  // Upstream proxy
+  settings.upstreamProxy  = document.getElementById("cfg-upstream-proxy").value;
+  // Session handling
+  settings.sessionEnabled = document.getElementById("cfg-session-enabled").checked;
+  settings.sessionDetect  = document.getElementById("cfg-session-detect").value;
+  settings.sessionMatch   = document.getElementById("cfg-session-match").value;
+  settings.sessionUrl     = document.getElementById("cfg-session-url").value;
+  settings.sessionMethod  = document.getElementById("cfg-session-method").value;
+  settings.sessionBody    = document.getElementById("cfg-session-body").value;
+  settings.sessionExtract = document.getElementById("cfg-session-extract").value;
+  settings.sessionTokenName = document.getElementById("cfg-session-token-name").value;
+  // Collaborator
+  settings.collabUrl      = document.getElementById("cfg-collab-url").value;
+  // Dencoder saved chains
+  settings.decoderChains  = typeof decSavedChains !== "undefined" ? decSavedChains : {};
 
   chrome.storage.local.set({ voidSettings: settings });
 
@@ -3512,12 +3530,34 @@ function saveSettings() {
 }
 
 function loadSettingsUI() {
-  document.getElementById("cfg-auto-headers").value    = settings.autoHeaders;
-  document.getElementById("cfg-scope-include").value    = settings.scopeInclude;
-  document.getElementById("cfg-scope-exclude").value    = settings.scopeExclude;
-  document.getElementById("cfg-follow-redirects").checked = settings.followRedirects;
-  document.getElementById("cfg-timeout").value          = settings.timeout;
+  document.getElementById("cfg-auto-headers").value    = settings.autoHeaders || "";
+  document.getElementById("cfg-scope-include").value    = settings.scopeInclude || "";
+  document.getElementById("cfg-scope-exclude").value    = settings.scopeExclude || "";
+  document.getElementById("cfg-follow-redirects").checked = !!settings.followRedirects;
+  document.getElementById("cfg-timeout").value          = settings.timeout || "30000";
   document.getElementById("cfg-req-view").value         = settings.reqView || "split";
+  // Theme
+  if (settings.theme) {
+    document.getElementById("cfg-theme").value = settings.theme;
+    applyTheme(settings.theme);
+  }
+  // Upstream proxy
+  document.getElementById("cfg-upstream-proxy").value   = settings.upstreamProxy || "";
+  // Session handling
+  document.getElementById("cfg-session-enabled").checked = !!settings.sessionEnabled;
+  document.getElementById("cfg-session-detect").value   = settings.sessionDetect || "status";
+  document.getElementById("cfg-session-match").value    = settings.sessionMatch || "";
+  document.getElementById("cfg-session-url").value      = settings.sessionUrl || "";
+  document.getElementById("cfg-session-method").value   = settings.sessionMethod || "POST";
+  document.getElementById("cfg-session-body").value     = settings.sessionBody || "";
+  document.getElementById("cfg-session-extract").value  = settings.sessionExtract || "cookie";
+  document.getElementById("cfg-session-token-name").value = settings.sessionTokenName || "";
+  // Collaborator
+  document.getElementById("cfg-collab-url").value       = settings.collabUrl || "";
+  // Dencoder chains
+  if (settings.decoderChains && typeof decSavedChains !== "undefined") {
+    Object.assign(decSavedChains, settings.decoderChains);
+  }
   renderMRRules();
 }
 
@@ -7352,7 +7392,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Saved chains — persist to chrome.storage
-  let decSavedChains = {};
+  decSavedChains = decSavedChains || {};
   async function decLoadSaved() {
     const stored = await new Promise(r => chrome.storage.local.get("voidDecChains", r));
     decSavedChains = stored.voidDecChains || {};
