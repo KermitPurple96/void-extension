@@ -2654,6 +2654,51 @@ body {
 .script-api-body { padding: var(--sp-3); font-size: 11px; line-height: 1.6; }
 .script-api-body code { background: var(--bg3); padding: 1px var(--sp-2); border-radius: var(--r); font-size: 11px; }
 
+/* ── AI Chat ──────────────────────────────────────────────────────── */
+.ai-chat-layout { display: flex; flex: 1; overflow: hidden; }
+.ai-config-bar {
+  width: 220px; flex-shrink: 0; padding: var(--sp-4);
+  border-right: 1px solid var(--border); overflow-y: auto;
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+.ai-config-bar .pane-label { margin-top: var(--sp-2); }
+.ai-system-ta { resize: vertical; font: 11px var(--mono); min-height: 60px; }
+.ai-config-actions { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; margin-top: var(--sp-2); }
+.ai-tools-ref { margin-top: var(--sp-3); }
+
+.ai-chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.ai-messages {
+  flex: 1; overflow-y: auto; padding: var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-4);
+}
+.ai-msg {
+  max-width: 85%; padding: var(--sp-4); border-radius: var(--r);
+  font: 12px/1.5 var(--font); white-space: pre-wrap; word-break: break-word;
+}
+.ai-msg-user {
+  align-self: flex-end; background: var(--bg4); color: var(--text);
+  border-bottom-right-radius: 2px;
+}
+.ai-msg-assistant {
+  align-self: flex-start; background: var(--bg3); color: var(--text);
+  border-bottom-left-radius: 2px;
+}
+.ai-msg-tool {
+  align-self: flex-start; background: var(--bg2); color: var(--muted);
+  font: 11px var(--mono); border-left: 3px solid var(--accent);
+  padding: var(--sp-2) var(--sp-3); max-width: 95%;
+}
+.ai-msg-tool .ai-tool-name { color: var(--accent); font-weight: 600; }
+.ai-msg-tool .ai-tool-result { color: var(--green); margin-top: var(--sp-1); max-height: 120px; overflow-y: auto; }
+.ai-msg-error { align-self: center; color: var(--red); font-size: 11px; }
+.ai-msg-thinking { align-self: flex-start; color: var(--muted); font-style: italic; font-size: 11px; }
+
+.ai-input-bar {
+  display: flex; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border); align-items: flex-end;
+}
+.ai-input-ta { flex: 1; resize: none; font: 12px var(--mono); min-height: 36px; max-height: 120px; }
+
 /* ── Response Timeline ────────────────────────────────────────────── */
 .timeline-panel { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
 .timeline-list { flex: 1; overflow-y: auto; }

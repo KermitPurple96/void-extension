@@ -30,6 +30,7 @@
     <button class="tab"        data-tab="sensitive" role="tab" aria-selected="false">Sensitive <span class="bdg hidden" id="bdg-sensitive">0</span></button>
     <button class="tab"        data-tab="storage"   role="tab" aria-selected="false">Storage</button>
     <button class="tab"        data-tab="scripts"   role="tab" aria-selected="false">Scripts</button>
+    <button class="tab"        data-tab="aichat"    role="tab" aria-selected="false">AI Chat</button>
     <button class="tab"        data-tab="settings"  role="tab" aria-selected="false">Settings</button>
     <div class="tabbar-gap"></div>
     <span id="site-host" class="site-host">—</span>
@@ -1994,6 +1995,56 @@
   </div>
 
   <!-- ═══════════════════════════ SETTINGS ═════════════════════════════════ -->
+  <!-- ═══════════════════════════ AI CHAT ═══════════════════════════════════ -->
+  <div id="tab-aichat" class="tab-panel hidden" role="tabpanel">
+    <div class="ai-chat-layout">
+      <!-- Config sidebar -->
+      <div class="ai-config-bar">
+        <div class="pane-label">PROVIDER</div>
+        <select id="ai-provider" class="filter-sel" aria-label="AI provider">
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="ollama">Ollama (local)</option>
+          <option value="custom">Custom (OpenAI-compatible)</option>
+        </select>
+        <div class="pane-label">API KEY</div>
+        <input id="ai-apikey" type="password" class="settings-inp" placeholder="sk-… or leave blank for Ollama" spellcheck="false" aria-label="API key">
+        <div class="pane-label">MODEL</div>
+        <input id="ai-model" type="text" class="settings-inp" placeholder="claude-sonnet-4-20250514" spellcheck="false" aria-label="Model name">
+        <div id="ai-custom-url-wrap" class="hidden">
+          <div class="pane-label">ENDPOINT URL</div>
+          <input id="ai-custom-url" type="text" class="settings-inp" placeholder="http://localhost:11434/v1/chat/completions" spellcheck="false" aria-label="Custom endpoint">
+        </div>
+        <div class="pane-label">SYSTEM PROMPT</div>
+        <textarea id="ai-system" class="raw-ta ai-system-ta" rows="4" spellcheck="false" placeholder="You are a security researcher assistant..."></textarea>
+        <div class="ai-config-actions">
+          <button id="ai-save-config" class="btn btn-xs btn-ghost">Save Config</button>
+          <button id="ai-clear-chat" class="btn btn-xs btn-danger">Clear Chat</button>
+          <span id="ai-status" class="settings-status"></span>
+        </div>
+        <details class="ai-tools-ref">
+          <summary class="pane-label" style="cursor:pointer">AVAILABLE TOOLS</summary>
+          <div class="script-api-body" style="font-size:10px">
+            get_history, send_request, get_endpoints, get_technologies,
+            get_cookies, get_storage, send_to_repeater, send_to_intruder,
+            run_scan, run_passive_scan, encode, decode, hash,
+            add_finding, get_scope, check_reflections, get_site_map,
+            get_ws_frames, get_notes, get_sequencer_tokens
+          </div>
+        </details>
+      </div>
+      <!-- Chat area -->
+      <div class="ai-chat-area">
+        <div id="ai-messages" class="ai-messages"></div>
+        <div class="ai-input-bar">
+          <textarea id="ai-input" class="raw-ta ai-input-ta" rows="2" placeholder="Ask the AI to analyze traffic, test for vulns, encode payloads…" spellcheck="false" aria-label="Chat message"></textarea>
+          <button id="ai-send" class="btn btn-accent">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="tab-settings" class="tab-panel hidden" role="tabpanel">
     <div class="settings-scroll">
 

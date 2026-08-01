@@ -171,6 +171,13 @@ wss.on("connection", (ws) => {
     if (msg.type === "forwardAll") {
       for (const [id, p] of [...pending]) { pending.delete(id); p.resolve(null); }
       broadcast({ type: "state", intercepting });
+      return;
+    }
+
+    // Tool execution results from panel
+    if (msg.type === "tool_result") {
+      const p = pendingToolCalls.get(msg.callId);
+      if (p) { pendingToolCalls.delete(msg.callId); p.resolve(msg.result); }
     }
   });
 
@@ -353,7 +360,222 @@ mitm.on("clientError", (e, sock) => { try { sock.destroy(); } catch {} });
 mitm.on("error", onListenError("internal TLS", "(ephemeral)"));
 mitm.listen(0, "127.0.0.1");
 
-const proxy = http.createServer((req, res) => handle(req, res, false));
+// ── LLM Chat Proxy ──────────────────────────────────────────────────────────
+// POST /api/chat — proxies to whichever LLM API the user configured.
+// The panel sends tool results back over WebSocket; this endpoint handles
+// the agentic loop (LLM → tool_call → panel → result → LLM → repeat).
+
+const AI_ENDPOINTS = {
+  anthropic: "https://api.anthropic.com/v1/messages",
+  openai: "https://api.openai.com/v1/chat/completions",
+  openrouter: "https://openrouter.ai/api/v1/chat/completions",
+  ollama: "http://localhost:11434/v1/chat/completions",
+};
+
+// Active tool calls waiting for panel results
+const pendingToolCalls = new Map(); // callId → { resolve }
+let toolCallNextId = 1;
+
+// Request a tool execution from the panel, wait for result
+function requestToolExec(toolName, toolArgs) {
+  return new Promise((resolve) => {
+    const callId = "tc_" + (toolCallNextId++);
+    pendingToolCalls.set(callId, { resolve });
+    broadcast({ type: "tool_exec", callId, tool: toolName, args: toolArgs });
+    // Timeout after 30s
+    setTimeout(() => {
+      if (pendingToolCalls.has(callId)) {
+        pendingToolCalls.delete(callId);
+        resolve({ error: "Tool execution timed out" });
+      }
+    }, 30000);
+  });
+}
+
+async function llmFetch(url, headers, body) {
+  const mod = url.startsWith("https") ? https : http;
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const req = mod.request({
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      rejectUnauthorized: true,
+    }, (res) => {
+      const chunks = [];
+      res.on("data", c => chunks.push(c));
+      res.on("end", () => {
+        try { resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString()) }); }
+        catch { resolve({ status: res.statusCode, body: { error: Buffer.concat(chunks).toString().slice(0, 500) } }); }
+      });
+    });
+    req.on("error", e => reject(e));
+    req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
+async function handleAiChat(req, res) {
+  const { buf } = await readBody(req);
+  let msg;
+  try { msg = JSON.parse(buf.toString()); } catch { res.writeHead(400).end('{"error":"Invalid JSON"}'); return; }
+
+  const { provider, apiKey, model, endpoint, messages, tools, systemPrompt } = msg;
+  const isAnthropic = provider === "anthropic";
+  const baseUrl = endpoint || AI_ENDPOINTS[provider] || AI_ENDPOINTS.openai;
+
+  // Build API request
+  let apiHeaders, apiBody;
+
+  if (isAnthropic) {
+    apiHeaders = {
+      "x-api-key": apiKey || "",
+      "anthropic-version": "2023-06-01",
+    };
+    apiBody = {
+      model: model || "claude-sonnet-4-20250514",
+      max_tokens: 8192,
+      system: systemPrompt || "",
+      messages: messages || [],
+      tools: (tools || []).map(t => ({
+        name: t.name,
+        description: t.description,
+        input_schema: t.parameters,
+      })),
+    };
+  } else {
+    apiHeaders = {
+      "authorization": `Bearer ${apiKey || "void"}`,
+    };
+    if (provider === "openrouter") {
+      apiHeaders["http-referer"] = "https://void-extension.local";
+      apiHeaders["x-title"] = "Void Extension AI";
+    }
+    const sysMsg = systemPrompt ? [{ role: "system", content: systemPrompt }] : [];
+    apiBody = {
+      model: model || "gpt-4o",
+      messages: [...sysMsg, ...(messages || [])],
+      tools: (tools || []).map(t => ({
+        type: "function",
+        function: { name: t.name, description: t.description, parameters: t.parameters },
+      })),
+    };
+    if (!apiBody.tools.length) delete apiBody.tools;
+  }
+
+  // Agentic loop — keep calling LLM until it returns text (no more tool calls)
+  const conversationMessages = isAnthropic ? [...(messages || [])] : [...(messages || [])];
+  const MAX_TURNS = 15;
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    let llmRes;
+    try {
+      if (isAnthropic) apiBody.messages = conversationMessages;
+      else apiBody.messages = [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...conversationMessages];
+
+      llmRes = await llmFetch(baseUrl, apiHeaders, apiBody);
+    } catch (e) {
+      res.writeHead(502).end(JSON.stringify({ error: `LLM API error: ${e.message}` }));
+      return;
+    }
+
+    if (llmRes.status >= 400) {
+      res.writeHead(llmRes.status).end(JSON.stringify({ error: llmRes.body?.error?.message || JSON.stringify(llmRes.body).slice(0, 300) }));
+      return;
+    }
+
+    if (isAnthropic) {
+      const content = llmRes.body.content || [];
+      const toolUses = content.filter(c => c.type === "tool_use");
+
+      // Broadcast assistant message to panel for display
+      const textParts = content.filter(c => c.type === "text").map(c => c.text).join("\n");
+      broadcast({ type: "ai_chunk", role: "assistant", text: textParts, toolCalls: toolUses.map(t => ({ name: t.name, args: t.input })) });
+
+      if (llmRes.body.stop_reason !== "tool_use" || !toolUses.length) {
+        // Final response — no more tool calls
+        res.writeHead(200).end(JSON.stringify({
+          role: "assistant",
+          content: textParts,
+          done: true,
+        }));
+        return;
+      }
+
+      // Execute tools and feed results back
+      conversationMessages.push({ role: "assistant", content });
+      const toolResults = [];
+      for (const tu of toolUses) {
+        broadcast({ type: "ai_tool_start", name: tu.name, args: tu.input });
+        const result = await requestToolExec(tu.name, tu.input || {});
+        broadcast({ type: "ai_tool_done", name: tu.name, result });
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: typeof result === "string" ? result : JSON.stringify(result),
+        });
+      }
+      conversationMessages.push({ role: "user", content: toolResults });
+
+    } else {
+      // OpenAI-compatible
+      const choice = llmRes.body.choices?.[0];
+      if (!choice) {
+        res.writeHead(502).end(JSON.stringify({ error: "No choices in LLM response" }));
+        return;
+      }
+
+      const msg = choice.message;
+      const toolCalls = msg.tool_calls || [];
+
+      broadcast({ type: "ai_chunk", role: "assistant", text: msg.content || "", toolCalls: toolCalls.map(t => ({ name: t.function?.name, args: t.function?.arguments })) });
+
+      if (choice.finish_reason !== "tool_calls" || !toolCalls.length) {
+        res.writeHead(200).end(JSON.stringify({
+          role: "assistant",
+          content: msg.content || "",
+          done: true,
+        }));
+        return;
+      }
+
+      // Execute tools
+      conversationMessages.push({ role: "assistant", content: msg.content || null, tool_calls: toolCalls });
+      for (const tc of toolCalls) {
+        const fnName = tc.function?.name;
+        let fnArgs = {};
+        try { fnArgs = JSON.parse(tc.function?.arguments || "{}"); } catch {}
+        broadcast({ type: "ai_tool_start", name: fnName, args: fnArgs });
+        const result = await requestToolExec(fnName, fnArgs);
+        broadcast({ type: "ai_tool_done", name: fnName, result });
+        conversationMessages.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: typeof result === "string" ? result : JSON.stringify(result),
+        });
+      }
+    }
+  }
+
+  res.writeHead(200).end(JSON.stringify({ role: "assistant", content: "Max tool turns reached.", done: true }));
+}
+
+const proxy = http.createServer((req, res) => {
+  // CORS for panel requests
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type" });
+    res.end();
+    return;
+  }
+  if (req.url === "/api/chat" && req.method === "POST") {
+    res.setHeader("access-control-allow-origin", "*");
+    handleAiChat(req, res);
+    return;
+  }
+  handle(req, res, false);
+});
 
 proxy.on("connect", (req, clientSocket, head) => {
   const [host, port] = req.url.split(":");

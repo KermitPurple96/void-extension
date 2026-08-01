@@ -8123,6 +8123,317 @@ function scriptLoadLibrary() {
   }
 }
 
+// ═══════════════════════════ AI CHAT ═════════════════════════════════════════
+
+const AI_TOOLS = [
+  { name: "get_history", description: "Get captured HTTP request/response history. Returns array of entries with method, url, status, headers, body, respBody, elapsed.", parameters: { type: "object", properties: { filter: { type: "string", description: "URL substring or method to filter by" }, limit: { type: "number", description: "Max entries to return (default 50)" } } } },
+  { name: "send_request", description: "Send an HTTP request and get the response.", parameters: { type: "object", properties: { url: { type: "string" }, method: { type: "string" }, headers: { type: "string", description: "Raw headers, one per line" }, body: { type: "string" } }, required: ["url"] } },
+  { name: "get_endpoints", description: "Get discovered API endpoints from the target site.", parameters: { type: "object", properties: {} } },
+  { name: "get_technologies", description: "Get detected technologies/frameworks on the target.", parameters: { type: "object", properties: {} } },
+  { name: "get_cookies", description: "Get browser cookies for a URL.", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] } },
+  { name: "get_storage", description: "Read localStorage or sessionStorage from the target page.", parameters: { type: "object", properties: { type: { type: "string", enum: ["local", "session"], description: "Storage type" } } } },
+  { name: "send_to_repeater", description: "Open a request in the Repeater tab for manual testing.", parameters: { type: "object", properties: { url: { type: "string" }, method: { type: "string" }, headers: { type: "object" }, body: { type: "string" } }, required: ["url"] } },
+  { name: "send_to_intruder", description: "Load a request into the Intruder tab.", parameters: { type: "object", properties: { url: { type: "string" }, method: { type: "string" }, headers: { type: "object" }, body: { type: "string" } }, required: ["url"] } },
+  { name: "run_scan", description: "Run active scanner modules against a URL. Returns array of findings.", parameters: { type: "object", properties: { url: { type: "string" }, method: { type: "string" }, headers: { type: "string" }, body: { type: "string" }, modules: { type: "array", items: { type: "string" }, description: "Scanner modules: sqli, xss, pathtraversal, ssrf, ssti, cmdi, openredirect, headerinject" } }, required: ["url"] } },
+  { name: "run_passive_scan", description: "Search HTTP history for sensitive data patterns (passwords, tokens, PII, errors).", parameters: { type: "object", properties: { filter: { type: "string", description: "URL filter" } } } },
+  { name: "encode", description: "Encode a value. Operations: base64, url, html, hex, unicode, js, url-double", parameters: { type: "object", properties: { value: { type: "string" }, operations: { type: "array", items: { type: "string" } } }, required: ["value", "operations"] } },
+  { name: "decode", description: "Decode a value. Operations: base64, url, html, hex, unicode, js, jwt", parameters: { type: "object", properties: { value: { type: "string" }, operations: { type: "array", items: { type: "string" } } }, required: ["value", "operations"] } },
+  { name: "hash", description: "Hash a value with md5, sha1, or sha256.", parameters: { type: "object", properties: { value: { type: "string" }, algorithm: { type: "string", enum: ["md5", "sha1", "sha256"] } }, required: ["value"] } },
+  { name: "add_finding", description: "Create a finding/note in the Notes tab.", parameters: { type: "object", properties: { title: { type: "string" }, severity: { type: "string", enum: ["info", "low", "medium", "high", "critical"] }, detail: { type: "string" } }, required: ["title"] } },
+  { name: "get_scope", description: "Get the current scope include/exclude patterns.", parameters: { type: "object", properties: {} } },
+  { name: "check_reflections", description: "Check if request parameter values are reflected in the response (potential XSS).", parameters: { type: "object", properties: { url: { type: "string", description: "URL to check. Looks up in history." } }, required: ["url"] } },
+  { name: "get_site_map", description: "Get the site map tree structure from Target tab.", parameters: { type: "object", properties: {} } },
+  { name: "get_ws_frames", description: "Get captured WebSocket frames.", parameters: { type: "object", properties: { limit: { type: "number" } } } },
+  { name: "get_notes", description: "Get all notes/findings.", parameters: { type: "object", properties: {} } },
+  { name: "get_headers_analysis", description: "Get security header analysis results for captured hosts.", parameters: { type: "object", properties: {} } },
+  { name: "get_sequencer_tokens", description: "Get collected sequencer tokens and entropy analysis.", parameters: { type: "object", properties: {} } },
+];
+
+const AI_SYSTEM_PROMPT = `You are an expert security researcher and penetration tester embedded in the Void Extension — a Chrome DevTools security toolkit similar to Burp Suite. You have access to tools that let you read HTTP traffic, send requests, scan for vulnerabilities, encode/decode values, and manage findings.
+
+When the user asks you to analyze something, use the available tools proactively. Don't just describe what you would do — actually do it using the tools. Check the HTTP history, send test requests, look for reflections, run scans.
+
+Keep responses concise and technical. When you find something interesting, use add_finding to record it.`;
+
+let aiMessages = []; // conversation history for display
+let aiLlmMessages = []; // conversation history in LLM format
+let aiConfig = { provider: "anthropic", apiKey: "", model: "", endpoint: "", systemPrompt: AI_SYSTEM_PROMPT };
+let aiSending = false;
+let aiProxyWs = null;
+
+// Tool executor — runs tools locally in panel.js where all extension state lives
+async function aiExecTool(name, args) {
+  switch (name) {
+    case "get_history": {
+      let items = [...historyData];
+      if (args.filter) {
+        const f = args.filter.toLowerCase();
+        items = items.filter(e => (e.url || "").toLowerCase().includes(f) || (e.method || "").toLowerCase() === f);
+      }
+      const limit = args.limit || 50;
+      return items.slice(-limit).map(e => ({
+        method: e.method, url: e.url, status: e.status, host: e.host, path: e.path,
+        mimeType: e.mimeType, length: e.length, elapsed: e.elapsed,
+        headers: e.headers, body: (e.body || "").slice(0, 2000),
+        respHeaders: e.respHeaders, respBody: (e.respBody || "").slice(0, 3000),
+      }));
+    }
+    case "send_request": {
+      const res = await bg({ type: "SEND_REQUEST", url: args.url, method: args.method || "GET", rawHeaders: args.headers || "", body: args.body || undefined });
+      return { status: res?.status || 0, headers: res?.headers || {}, body: (res?.body || "").slice(0, 5000), elapsed: res?.elapsed || 0 };
+    }
+    case "get_endpoints": return state.endpoints.slice(0, 200);
+    case "get_technologies": return state.technologies || [];
+    case "get_cookies": {
+      const ck = await bg({ type: "GET_COOKIES", url: args.url || "" });
+      return ck?.cookies || "";
+    }
+    case "get_storage": return storFetch(args.type || "local");
+    case "send_to_repeater": {
+      sendToRepeater({ method: args.method || "GET", url: args.url, headers: args.headers || {}, body: args.body || "" });
+      return { ok: true, message: "Request sent to Repeater" };
+    }
+    case "send_to_intruder": {
+      intrSendToIntruder({ method: args.method || "GET", url: args.url, headers: args.headers || {}, body: args.body || "" });
+      return { ok: true, message: "Request sent to Intruder" };
+    }
+    case "run_scan": {
+      const url = args.url;
+      const method = args.method || "GET";
+      const rawHeaders = args.headers || "";
+      const body = args.body || "";
+      const modules = args.modules || ["sqli", "xss"];
+      const urlObj = new URL(url);
+      const injPts = [];
+      for (const [k] of urlObj.searchParams) injPts.push({ location: "url-param", name: k });
+      if (body) for (const p of body.split("&")) { const eq = p.indexOf("="); if (eq > 0) injPts.push({ location: "body-param", name: p.slice(0, eq) }); }
+      if (!injPts.length) injPts.push({ location: "body-append", name: "(body)" });
+      const findings = [];
+      for (const mod of modules) {
+        for (const pl of (SCAN_PAYLOADS[mod] || [])) {
+          for (const ip of injPts) {
+            let testUrl = url, testBody = body;
+            if (ip.location === "url-param") { const u = new URL(url); u.searchParams.set(ip.name, pl.payload); testUrl = u.toString(); }
+            else if (ip.location === "body-param") { testBody = body.split("&").map(p => { const eq = p.indexOf("="); return eq > 0 && decodeURIComponent(p.slice(0, eq)) === ip.name ? `${p.slice(0, eq + 1)}${encodeURIComponent(pl.payload)}` : p; }).join("&"); }
+            else testBody = (body ? body + "&" : "") + encodeURIComponent(pl.payload);
+            const t0 = Date.now();
+            const res = await bg({ type: "SEND_REQUEST", url: testUrl, method, rawHeaders, body: testBody || undefined });
+            if (!res) continue;
+            const respText = (res.body || "") + "\n" + Object.entries(res.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+            let found = false;
+            if (pl.detect && pl.detect.test(respText)) found = true;
+            if (pl.timing && (Date.now() - t0) >= pl.timing) found = true;
+            if (found) findings.push({ module: mod, type: pl.label, param: ip.name, payload: pl.payload.slice(0, 60), evidence: (respText.match(pl.detect) || [""])[0].slice(0, 80) });
+          }
+        }
+      }
+      return findings;
+    }
+    case "run_passive_scan": {
+      let items = [...historyData];
+      if (args.filter) items = items.filter(e => (e.url || "").toLowerCase().includes(args.filter.toLowerCase()));
+      const findings = [];
+      for (const e of items.slice(-100)) {
+        if (hasReflections(e)) findings.push({ type: "reflection", url: e.url, detail: "Request values reflected in response" });
+        const resp = e.respBody || "";
+        if (/password|passwd|pwd/i.test(resp)) findings.push({ type: "sensitive", url: e.url, detail: "Password-related content in response" });
+        if (/api[_-]?key|apikey|secret[_-]?key/i.test(resp)) findings.push({ type: "sensitive", url: e.url, detail: "API key in response" });
+        if (/stack.?trace|at\s+\w+\.\w+\(|Traceback/i.test(resp)) findings.push({ type: "error", url: e.url, detail: "Stack trace in response" });
+      }
+      return findings;
+    }
+    case "encode": {
+      let result = String(args.value);
+      for (const op of (args.operations || [])) {
+        const mapped = { base64: "b64-enc", url: "url-enc", html: "html-enc", hex: "hex-enc", unicode: "unicode-enc", js: "js-enc", "url-double": "url-enc2" }[op] || op;
+        result = decOp(mapped, result);
+        if (result instanceof Promise) result = await result;
+      }
+      return result;
+    }
+    case "decode": {
+      let result = String(args.value);
+      for (const op of (args.operations || [])) {
+        const mapped = { base64: "b64-dec", url: "url-dec", html: "html-dec", hex: "hex-dec", unicode: "unicode-dec", js: "js-dec", jwt: "jwt-dec" }[op] || op;
+        result = decOp(mapped, result);
+        if (result instanceof Promise) result = await result;
+      }
+      return result;
+    }
+    case "hash": {
+      const algo = { md5: "md5", sha1: "SHA-1", sha256: "SHA-256" }[args.algorithm || "md5"];
+      if (algo === "md5") return md5(args.value);
+      return cryptoHash(algo || "SHA-256", args.value);
+    }
+    case "add_finding": {
+      const entry = { id: notesNextId++, title: args.title || "AI Finding", severity: args.severity || "info", detail: args.detail || "", host: "", created: Date.now() };
+      notes.push(entry);
+      return { ok: true, id: entry.id };
+    }
+    case "get_scope": return { include: settings.scopeInclude || "", exclude: settings.scopeExclude || "" };
+    case "check_reflections": {
+      const entry = historyData.find(e => e.url === args.url) || historyData.find(e => (e.url || "").includes(args.url));
+      if (!entry) return { found: false, message: "URL not found in history" };
+      const reflections = detectReflections(entry);
+      return { found: reflections.length > 0, reflections, url: entry.url };
+    }
+    case "get_site_map": {
+      const hosts = new Set(historyData.map(e => e.host).filter(Boolean));
+      const map = {};
+      for (const host of hosts) {
+        map[host] = [...new Set(historyData.filter(e => e.host === host).map(e => e.path))].sort();
+      }
+      return map;
+    }
+    case "get_ws_frames": return wsFrames.slice(-(args.limit || 50));
+    case "get_notes": return notes;
+    case "get_headers_analysis": {
+      const hosts = new Set(historyData.map(e => e.host).filter(Boolean));
+      const results = {};
+      for (const host of [...hosts].slice(0, 10)) {
+        const entry = historyData.find(e => e.host === host && e.respHeaders);
+        if (entry) results[host] = entry.respHeaders;
+      }
+      return results;
+    }
+    case "get_sequencer_tokens": {
+      return { count: seqTokens.length, tokens: seqTokens.slice(0, 20) };
+    }
+    default: return { error: `Unknown tool: ${name}` };
+  }
+}
+
+// Connect to proxy WebSocket for AI messages
+function aiConnectProxy() {
+  if (aiProxyWs && aiProxyWs.readyState <= 1) return;
+  try {
+    aiProxyWs = new WebSocket("ws://localhost:8082");
+    aiProxyWs.onmessage = async (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+
+      // Tool execution request from proxy
+      if (msg.type === "tool_exec") {
+        const result = await aiExecTool(msg.tool, msg.args || {});
+        aiProxyWs.send(JSON.stringify({ type: "tool_result", callId: msg.callId, result }));
+        return;
+      }
+
+      // AI response chunks for display
+      if (msg.type === "ai_chunk") {
+        if (msg.text) aiAddMessage("assistant", msg.text);
+        return;
+      }
+      if (msg.type === "ai_tool_start") {
+        aiAddMessage("tool-start", `\u2699 Calling ${msg.name}(${JSON.stringify(msg.args).slice(0, 100)})`);
+        return;
+      }
+      if (msg.type === "ai_tool_done") {
+        const resultStr = typeof msg.result === "string" ? msg.result : JSON.stringify(msg.result);
+        aiAddMessage("tool-result", `\u2713 ${msg.name} \u2192 ${resultStr.slice(0, 300)}`);
+        return;
+      }
+    };
+  } catch {}
+}
+
+function aiAddMessage(type, text) {
+  const container = document.getElementById("ai-messages");
+  const div = document.createElement("div");
+  if (type === "user") {
+    div.className = "ai-msg ai-msg-user";
+    div.textContent = text;
+  } else if (type === "assistant") {
+    div.className = "ai-msg ai-msg-assistant";
+    div.textContent = text;
+  } else if (type === "tool-start") {
+    div.className = "ai-msg ai-msg-tool";
+    div.innerHTML = `<span class="ai-tool-name">${esc(text)}</span>`;
+  } else if (type === "tool-result") {
+    div.className = "ai-msg ai-msg-tool";
+    div.innerHTML = `<span class="ai-tool-result">${esc(text)}</span>`;
+  } else if (type === "error") {
+    div.className = "ai-msg ai-msg-error";
+    div.textContent = text;
+  } else if (type === "thinking") {
+    div.className = "ai-msg ai-msg-thinking";
+    div.textContent = text;
+  }
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  aiMessages.push({ type, text });
+}
+
+async function aiSendMessage() {
+  const input = document.getElementById("ai-input");
+  const text = input.value.trim();
+  if (!text || aiSending) return;
+
+  aiSending = true;
+  document.getElementById("ai-send").disabled = true;
+  input.value = "";
+
+  aiAddMessage("user", text);
+  aiLlmMessages.push({ role: "user", content: text });
+  aiAddMessage("thinking", "Thinking\u2026");
+
+  // Read current config
+  const provider = document.getElementById("ai-provider").value;
+  const apiKey = document.getElementById("ai-apikey").value;
+  const model = document.getElementById("ai-model").value;
+  const systemPrompt = document.getElementById("ai-system").value || AI_SYSTEM_PROMPT;
+  const customUrl = document.getElementById("ai-custom-url").value;
+
+  // Connect proxy WS for tool execution
+  aiConnectProxy();
+
+  try {
+    const res = await fetch("http://localhost:8081/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider,
+        apiKey,
+        model: model || undefined,
+        endpoint: (provider === "custom" || provider === "ollama") ? customUrl : undefined,
+        messages: aiLlmMessages,
+        tools: AI_TOOLS,
+        systemPrompt,
+      }),
+    });
+
+    // Remove "thinking" indicator
+    const msgs = document.getElementById("ai-messages");
+    const thinking = msgs.querySelector(".ai-msg-thinking:last-child");
+    if (thinking) thinking.remove();
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      aiAddMessage("error", `Error: ${err.error || res.statusText}`);
+    } else {
+      const data = await res.json();
+      if (data.content) {
+        // The proxy already broadcast chunks via WS; this is the final consolidated response
+        // Only add if not already shown via WS broadcast
+        const lastMsg = aiMessages[aiMessages.length - 1];
+        if (!lastMsg || lastMsg.type !== "assistant" || lastMsg.text !== data.content) {
+          aiAddMessage("assistant", data.content);
+        }
+        aiLlmMessages.push({ role: "assistant", content: data.content });
+      }
+    }
+  } catch (e) {
+    const msgs = document.getElementById("ai-messages");
+    const thinking = msgs.querySelector(".ai-msg-thinking:last-child");
+    if (thinking) thinking.remove();
+    aiAddMessage("error", `Connection error: ${e.message}. Is void-proxy-server.js running?`);
+  }
+
+  aiSending = false;
+  document.getElementById("ai-send").disabled = false;
+  input.focus();
+}
+
 // ═══════════════════════════ INIT ════════════════════════════════════════════
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -9758,6 +10069,55 @@ document.addEventListener("DOMContentLoaded", () => {
         const start = ta.selectionStart;
         ta.value = ta.value.substring(0, start) + "  " + ta.value.substring(ta.selectionEnd);
         ta.selectionStart = ta.selectionEnd = start + 2;
+      }
+    });
+  });
+
+  // ── AI Chat ─────────────────────────────────────────────────────────────────
+  initBlock("ai-chat", () => {
+    document.getElementById("ai-send").addEventListener("click", aiSendMessage);
+    document.getElementById("ai-input").addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); aiSendMessage(); }
+    });
+    document.getElementById("ai-clear-chat").addEventListener("click", () => {
+      aiMessages = [];
+      aiLlmMessages = [];
+      document.getElementById("ai-messages").replaceChildren();
+    });
+    document.getElementById("ai-provider").addEventListener("change", e => {
+      const prov = e.target.value;
+      // Show/hide custom URL field
+      document.getElementById("ai-custom-url-wrap").classList.toggle("hidden", prov !== "custom" && prov !== "ollama");
+      // Auto-fill model placeholder
+      const modelInp = document.getElementById("ai-model");
+      const defaults = { anthropic: "claude-sonnet-4-20250514", openai: "gpt-4o", openrouter: "anthropic/claude-sonnet-4-20250514", ollama: "llama3.1", custom: "" };
+      modelInp.placeholder = defaults[prov] || "";
+      // Auto-fill endpoint for ollama
+      if (prov === "ollama") document.getElementById("ai-custom-url").value = "http://localhost:11434/v1/chat/completions";
+    });
+    document.getElementById("ai-save-config").addEventListener("click", () => {
+      aiConfig = {
+        provider: document.getElementById("ai-provider").value,
+        apiKey: document.getElementById("ai-apikey").value,
+        model: document.getElementById("ai-model").value,
+        endpoint: document.getElementById("ai-custom-url").value,
+        systemPrompt: document.getElementById("ai-system").value,
+      };
+      chrome.storage.local.set({ voidAiConfig: aiConfig });
+      showToast("AI config saved");
+    });
+    // Load saved config
+    chrome.storage.local.get("voidAiConfig", r => {
+      if (r.voidAiConfig) {
+        aiConfig = r.voidAiConfig;
+        document.getElementById("ai-provider").value = aiConfig.provider || "anthropic";
+        document.getElementById("ai-apikey").value = aiConfig.apiKey || "";
+        document.getElementById("ai-model").value = aiConfig.model || "";
+        document.getElementById("ai-custom-url").value = aiConfig.endpoint || "";
+        document.getElementById("ai-system").value = aiConfig.systemPrompt || AI_SYSTEM_PROMPT;
+        document.getElementById("ai-custom-url-wrap").classList.toggle("hidden", aiConfig.provider !== "custom" && aiConfig.provider !== "ollama");
+      } else {
+        document.getElementById("ai-system").value = AI_SYSTEM_PROMPT;
       }
     });
   });
