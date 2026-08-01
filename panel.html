@@ -2181,71 +2181,6 @@
   <div id="tab-settings" class="tab-panel hidden">
     <div class="settings-scroll">
 
-      <!-- ── Match & Replace ────────────────────────────────────── -->
-      <div class="settings-section">
-        <div class="settings-section-title">Match &amp; Replace</div>
-        <div class="settings-section-desc">Automatically modify requests and responses. Rules apply to intercepted traffic (debugger) and Repeater.</div>
-        <div id="mr-rules" class="mr-rules"></div>
-        <button id="mr-add" class="btn btn-sm btn-accent">+ Add Rule</button>
-      </div>
-
-      <!-- ── Auto Headers ───────────────────────────────────────── -->
-      <div class="settings-section">
-        <div class="settings-section-title">Auto Headers</div>
-        <div class="settings-section-desc">Headers injected into every outgoing request (intercepted + Repeater). One per line: <code>Name: Value</code></div>
-        <div class="settings-row">
-          <select id="cfg-hdr-preset" class="filter-sel">
-            <option value="">+ Add preset header…</option>
-            <optgroup label="User-Agent">
-              <option value="User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36">Chrome 131 — Windows</option>
-              <option value="User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15">Safari 18 — macOS</option>
-              <option value="User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0">Firefox 133 — Windows</option>
-              <option value="User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36">Chrome 131 — Linux</option>
-              <option value="User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1">Safari — iPhone</option>
-              <option value="User-Agent: Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36">Chrome — Android</option>
-              <option value="User-Agent: curl/8.9.0">curl</option>
-              <option value="User-Agent: Googlebot/2.1 (+http://www.google.com/bot.html)">Googlebot</option>
-            </optgroup>
-            <optgroup label="Content-Type">
-              <option value="Content-Type: application/json">application/json</option>
-              <option value="Content-Type: application/x-www-form-urlencoded">x-www-form-urlencoded</option>
-              <option value="Content-Type: multipart/form-data">multipart/form-data</option>
-              <option value="Content-Type: text/xml">text/xml</option>
-              <option value="Content-Type: application/xml">application/xml</option>
-            </optgroup>
-            <optgroup label="Authorization">
-              <option value="Authorization: Bearer TOKEN_HERE">Bearer token</option>
-              <option value="Authorization: Basic BASE64_HERE">Basic auth</option>
-              <option value="X-API-Key: KEY_HERE">X-API-Key</option>
-            </optgroup>
-            <optgroup label="Accept">
-              <option value="Accept: application/json">application/json</option>
-              <option value="Accept: text/html,application/xhtml+xml,*/*;q=0.9">HTML (browser)</option>
-              <option value="Accept: */*">*/*</option>
-            </optgroup>
-            <optgroup label="CORS / Origin">
-              <option value="Origin: https://example.com">Origin</option>
-              <option value="Referer: https://example.com/">Referer</option>
-              <option value="X-Forwarded-For: 127.0.0.1">X-Forwarded-For</option>
-              <option value="X-Real-IP: 127.0.0.1">X-Real-IP</option>
-              <option value="X-Original-URL: /admin">X-Original-URL</option>
-              <option value="X-Rewrite-URL: /admin">X-Rewrite-URL</option>
-            </optgroup>
-            <optgroup label="Security Testing">
-              <option value="X-Forwarded-Host: evil.com">X-Forwarded-Host</option>
-              <option value="X-Forwarded-Proto: https">X-Forwarded-Proto</option>
-              <option value="X-Custom-IP-Authorization: 127.0.0.1">X-Custom-IP-Authorization</option>
-              <option value="X-CSRF-Token: TOKEN_HERE">X-CSRF-Token</option>
-              <option value="X-Requested-With: XMLHttpRequest">X-Requested-With (AJAX)</option>
-              <option value="If-None-Match: invalid">If-None-Match (cache bypass)</option>
-              <option value="Cache-Control: no-cache">Cache-Control: no-cache</option>
-            </optgroup>
-          </select>
-        </div>
-        <textarea id="cfg-auto-headers" class="raw-ta settings-ta" rows="4" spellcheck="false"
-                  placeholder="Cookie: session=abc123&#10;X-Custom: value"></textarea>
-      </div>
-
       <!-- ── Scope ──────────────────────────────────────────────── -->
       <div class="settings-section">
         <div class="settings-section-title">Scope</div>
@@ -2279,21 +2214,6 @@
             <option value="split">Split (Headers + Body)</option>
             <option value="raw">Raw (single editor)</option>
           </select>
-        </div>
-      </div>
-
-      <!-- ── Collaborator Everywhere ──────────────────────────────── -->
-      <div class="settings-section">
-        <div class="settings-section-title">Collaborator Everywhere</div>
-        <div class="settings-section-desc">Auto-inject your Interactsh OOB URL into common headers on every request. Creates Match &amp; Replace rules that inject the callback URL into Referer, X-Forwarded-For, Origin, and other headers.</div>
-        <div class="settings-row">
-          <label class="settings-label-sm">OOB URL</label>
-          <input id="cfg-collab-url" type="text" class="settings-inp" placeholder="your-id.oast.fun" spellcheck="false">
-        </div>
-        <div class="settings-actions">
-          <button id="cfg-collab-enable" class="btn btn-sm btn-accent">Enable (add M&amp;R rules)</button>
-          <button id="cfg-collab-disable" class="btn btn-sm btn-danger">Disable (remove rules)</button>
-          <span id="cfg-collab-status" class="settings-status"></span>
         </div>
       </div>
 

@@ -33,7 +33,7 @@ t("No dup IDs ("+ids.length+")",Object.values(ic).every(v=>v===1));
 S("3. JS-HTML Cross-Ref");
 const ji=[...new Set((js.match(/getElementById\("([^"]+)"\)/g)||[]).map(m=>m.match(/"([^"]+)"/)[1]))];
 const hs=new Set(ids);
-const cmpLegacy=new Set(["rep-compare-pane","cmp-status","cmp-ignore-headers","cmp-to-rep","cmp-to-intr","cmp-to-poc","cmp-to-notes","cmp-render","cmp-curl","cmp-fetch","cmp-python","cmp-diff","cmp-swap","cmp-clear","cmp-resizer","cmp-left","cmp-right","cmp-left-title","cmp-right-title","cmp-left-req-pre","cmp-left-resp-pre","cmp-right-req-pre","cmp-right-resp-pre","cmp-left-req-pane","cmp-left-resp-pane","cmp-right-req-pane","cmp-right-resp-pane"]);
+const cmpLegacy=new Set(["rep-compare-pane","cfg-auto-headers","cfg-collab-url","cfg-hdr-preset","mr-rules","mr-add","cmp-status","cmp-ignore-headers","cmp-to-rep","cmp-to-intr","cmp-to-poc","cmp-to-notes","cmp-render","cmp-curl","cmp-fetch","cmp-python","cmp-diff","cmp-swap","cmp-clear","cmp-resizer","cmp-left","cmp-right","cmp-left-title","cmp-right-title","cmp-left-req-pre","cmp-left-resp-pre","cmp-right-req-pre","cmp-right-resp-pre","cmp-left-req-pane","cmp-left-resp-pane","cmp-right-req-pane","cmp-right-resp-pane"]);
 const mi=ji.filter(id=>!hs.has(id)&&id!=="void-toast"&&!cmpLegacy.has(id));
 t("All "+ji.length+" refs",mi.length===0);
 if(mi.length)console.log("    "+mi.join(", "));

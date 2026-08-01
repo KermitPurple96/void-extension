@@ -3610,7 +3610,7 @@ function loadSettings() {
 
 function saveSettings() {
   // Read current UI state into settings
-  settings.autoHeaders    = document.getElementById("cfg-auto-headers").value;
+  settings.autoHeaders    = (document.getElementById("mr-auto-headers") || document.getElementById("cfg-auto-headers")).value;
   settings.scopeInclude   = document.getElementById("cfg-scope-include").value;
   settings.scopeExclude   = document.getElementById("cfg-scope-exclude").value;
   settings.followRedirects = document.getElementById("cfg-follow-redirects").checked;
@@ -3631,7 +3631,7 @@ function saveSettings() {
   settings.sessionExtract = document.getElementById("cfg-session-extract").value;
   settings.sessionTokenName = document.getElementById("cfg-session-token-name").value;
   // Collaborator
-  settings.collabUrl      = document.getElementById("cfg-collab-url").value;
+  settings.collabUrl      = (document.getElementById("mr-collab-url") || document.getElementById("cfg-collab-url")).value;
   // Dencoder saved chains
   settings.decoderChains  = typeof decSavedChains !== "undefined" ? decSavedChains : {};
 
@@ -3646,7 +3646,7 @@ function saveSettings() {
 }
 
 function loadSettingsUI() {
-  document.getElementById("cfg-auto-headers").value    = settings.autoHeaders || "";
+  (document.getElementById("mr-auto-headers") || document.getElementById("cfg-auto-headers")).value = settings.autoHeaders || "";
   document.getElementById("cfg-scope-include").value    = settings.scopeInclude || "";
   document.getElementById("cfg-scope-exclude").value    = settings.scopeExclude || "";
   document.getElementById("cfg-follow-redirects").checked = !!settings.followRedirects;
@@ -3669,7 +3669,7 @@ function loadSettingsUI() {
   document.getElementById("cfg-session-extract").value  = settings.sessionExtract || "cookie";
   document.getElementById("cfg-session-token-name").value = settings.sessionTokenName || "";
   // Collaborator
-  document.getElementById("cfg-collab-url").value       = settings.collabUrl || "";
+  (document.getElementById("mr-collab-url") || document.getElementById("cfg-collab-url")).value = settings.collabUrl || "";
   // Dencoder chains
   if (settings.decoderChains && typeof decSavedChains !== "undefined") {
     Object.assign(decSavedChains, settings.decoderChains);
@@ -3679,7 +3679,7 @@ function loadSettingsUI() {
 
 // ── Match & Replace UI ───────────────────────────────────────────────────────
 function renderMRRules() {
-  const container = document.getElementById("mr-rules");
+  const container = document.getElementById("mr-rules-mr") || document.getElementById("mr-rules");
   container.replaceChildren();
 
   (settings.matchReplace || []).forEach((rule, i) => {
@@ -5805,10 +5805,12 @@ function regexTest() {
   if (document.getElementById("regex-flag-m").checked) flags += "m";
   let re;
   try { re = new RegExp(pattern, flags); } catch (e) { countEl.textContent = "Invalid: " + e.message; return; }
+  const MAX_MATCHES = 5000;
   const matches = [];
   groupsEl.replaceChildren();
   if (flags.includes("g")) {
-    let m; while ((m = re.exec(input)) !== null) { matches.push({ index: m.index, length: m[0].length, groups: m.slice(1) }); if (!m[0].length) re.lastIndex++; }
+    const deadline = Date.now() + 2000; // 2s cap against ReDoS
+    let m; while ((m = re.exec(input)) !== null) { matches.push({ index: m.index, length: m[0].length, groups: m.slice(1) }); if (!m[0].length) re.lastIndex++; if (matches.length >= MAX_MATCHES || Date.now() > deadline) { countEl.textContent = matches.length + "+ matches (limit reached)"; break; } }
   } else {
     const m = input.match(re);
     if (m) matches.push({ index: m.index, length: m[0].length, groups: m.slice(1) });
@@ -7689,21 +7691,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   decLoadSaved();
 
-  // Settings
-  document.getElementById("mr-add").addEventListener("click", addMRRule);
-  // Auto Headers preset dropdown
-  document.getElementById("cfg-hdr-preset").addEventListener("change", e => {
-    const val = e.target.value;
-    if (!val) return;
-    const ta = document.getElementById("cfg-auto-headers");
-    const hdrName = val.split(":")[0].toLowerCase();
-    // Replace existing header with same name, or append
-    const lines = ta.value.split("\n").filter(l => l.trim());
-    const idx = lines.findIndex(l => l.toLowerCase().startsWith(hdrName + ":"));
-    if (idx >= 0) { lines[idx] = val; } else { lines.push(val); }
-    ta.value = lines.join("\n");
-    e.target.value = ""; // reset dropdown
-  });
+  // Settings — M&R rules add button (now in M&R tab)
+  document.getElementById("mr-add")?.addEventListener("click", addMRRule);
+  document.getElementById("mr-add-mr")?.addEventListener("click", addMRRule);
 
   document.getElementById("cfg-save").addEventListener("click", saveSettings);
   document.getElementById("cfg-reset").addEventListener("click", () => {
@@ -8218,37 +8208,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // ── HAR export + scope auto-detect ────────────────────────────────────
-  // ── Collaborator Everywhere ────────────────────────────────────────
-  initBlock("collab-everywhere", () => {
-    const COLLAB_HEADERS = ["Referer", "X-Forwarded-For", "X-Forwarded-Host", "Origin", "X-Real-IP", "X-Client-IP", "True-Client-IP", "X-Custom-IP-Authorization", "Contact", "From"];
-    const COLLAB_PREFIX = "[Collab]";
-
-    document.getElementById("cfg-collab-enable").addEventListener("click", () => {
-      const oobUrl = document.getElementById("cfg-collab-url").value.trim();
-      if (!oobUrl) { showToast("Enter your OOB URL first"); return; }
-      // Remove existing collab rules
-      settings.matchReplace = (settings.matchReplace || []).filter(r => !r._collab);
-      // Add new rules
-      for (const hdr of COLLAB_HEADERS) {
-        settings.matchReplace.push({
-          enabled: true, type: "req-header", match: "", replace: `${hdr}: https://${hdr.toLowerCase().replace(/[^a-z]/g, "")}.${oobUrl}`,
-          scope: "", _collab: true,
-        });
-      }
-      saveSettings();
-      renderMRRules();
-      document.getElementById("cfg-collab-status").textContent = `${COLLAB_HEADERS.length} rules added`;
-      showToast(`Collaborator Everywhere enabled — ${COLLAB_HEADERS.length} headers injected`);
-    });
-
-    document.getElementById("cfg-collab-disable").addEventListener("click", () => {
-      settings.matchReplace = (settings.matchReplace || []).filter(r => !r._collab);
-      saveSettings();
-      renderMRRules();
-      document.getElementById("cfg-collab-status").textContent = "Disabled";
-      showToast("Collaborator rules removed");
-    });
-  });
+  // Collaborator Everywhere: handled in M&R tab (mr-collab-enable/disable)
 
   // ── API Schema ─────────────────────────────────────────────────────
   initBlock("api-schema", () => {
