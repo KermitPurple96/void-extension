@@ -6405,18 +6405,6 @@ function baselineRecord(entry) {
   }
 }
 
-function baselineCheck(entry) {
-  if (!entry.url || !entry.status) return null;
-  let path = ""; try { path = new URL(entry.url).pathname; } catch { return null; }
-  const baseline = responseBaselines[path];
-  if (!baseline) return null;
-  const hash = simpleHash(entry.respBody || "");
-  if (hash !== baseline.hash || entry.status !== baseline.status) {
-    return { path, oldStatus: baseline.status, newStatus: entry.status, oldLen: baseline.length, newLen: (entry.respBody || "").length };
-  }
-  return null;
-}
-
 function simpleHash(str) { let h = 0; for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0; return h; }
 
 // ═══════════════════════════ RESPONSE INTERCEPTION ═══════════════════════════
@@ -8516,12 +8504,12 @@ async function aiExecTool(name, args) {
       return { url: entry.url, status: entry.status, headers: entry.respHeaders };
     }
     case "search_responses": {
+      let re;
+      try { re = new RegExp(args.pattern, "i"); } catch { return { error: "Invalid regex: " + args.pattern }; }
       const results = [];
-      const re = new RegExp(args.pattern, "i");
       for (const e of historyData.slice(-(args.limit || 200))) {
         const body = e.respBody || "";
-        const m = body.match(re);
-        if (m) results.push({ url: e.url, status: e.status, match: m[0].slice(0, 100), index: m.index });
+        try { const m = body.match(re); if (m) results.push({ url: e.url, status: e.status, match: m[0].slice(0, 100), index: m.index }); } catch { break; }
       }
       return results;
     }
@@ -8593,9 +8581,9 @@ async function aiExecTool(name, args) {
           const t0 = Date.now();
           const res = await bg({ type: "SEND_REQUEST", url: testUrl, method, rawHeaders: testHdrs, body: testBody || undefined });
           return { payload: pl, status: res?.status || 0, length: (res?.body || "").length, elapsed: Date.now() - t0, body: (res?.body || "").slice(0, 1000) };
-        })();
+        })().then(r => { running.splice(running.indexOf(p), 1); return r; });
         running.push(p);
-        if (running.length >= threads) { results.push(await Promise.race(running.map((pr, idx) => pr.then(r => { running.splice(idx, 1); return r; })))); }
+        if (running.length >= threads) { results.push(await Promise.race(running)); }
       }
       results.push(...await Promise.all(running));
       return results;
@@ -8666,11 +8654,14 @@ async function aiExecTool(name, args) {
     case "run_flow": {
       const steps = args.steps || [];
       if (!steps.length) return { error: "No steps provided" };
+      // Save and restore global flowSteps to avoid destroying user's Flow Builder state
+      const savedSteps = flowSteps;
       flowSteps = steps.map((s, i) => ({
         id: i + 1, method: s.method || "GET", url: s.url || "", headers: s.headers || "", body: s.body || "",
         extractors: (s.extractors || []).map(ex => ({ type: ex.type || "regex", expr: ex.expr || "", varName: ex.varName || "" })),
       }));
       const results = await intrRunFlow(steps[0].url, steps[0].method || "GET", steps[0].headers || "", steps[0].body || "");
+      flowSteps = savedSteps;
       return results;
     }
     default: return { error: `Unknown tool: ${name}` };
@@ -8832,8 +8823,17 @@ function aiConnectProxy() {
         if (msg.type === "tool_exec") {
           aiRemoveThinking();
           aiSetStatus(`\u2699 Running tool: ${msg.tool}`);
-          const result = await aiExecTool(msg.tool, msg.args || {});
-          aiProxyWs.send(JSON.stringify({ type: "tool_result", callId: msg.callId, result }));
+          let result;
+          try {
+            result = await aiExecTool(msg.tool, msg.args || {});
+          } catch (e) {
+            result = { error: `Tool ${msg.tool} failed: ${e.message}` };
+          }
+          try {
+            if (aiProxyWs && aiProxyWs.readyState === 1) {
+              aiProxyWs.send(JSON.stringify({ type: "tool_result", callId: msg.callId, result }));
+            }
+          } catch {}
           return;
         }
 
