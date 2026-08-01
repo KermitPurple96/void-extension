@@ -1588,7 +1588,6 @@ function renderRepTabs() {
   // Group headers + their tabs
   for (const grp of repGroups) {
     const groupTabs = repTabs.filter(t => t.group === grp.name);
-    if (!groupTabs.length) continue;
     usedGroups.add(grp.name);
 
     const grpColor = REP_GROUP_COLORS.find(c => c.name === grp.color)?.color || "var(--accent)";
@@ -1613,7 +1612,7 @@ function renderRepTabs() {
 
     const countSpan = document.createElement("span");
     countSpan.className = "rep-group-count";
-    countSpan.textContent = groupTabs.length;
+    countSpan.textContent = groupTabs.length || "empty";
     hdr.appendChild(countSpan);
 
     // Gear icon — opens group actions menu (add tabs, color, delete)
@@ -1660,8 +1659,7 @@ function renderRepTabs() {
     }
   }
 
-  // Clean up empty groups
-  repGroups = repGroups.filter(g => usedGroups.has(g.name) || repTabs.some(t => t.group === g.name));
+  // Groups persist even when empty — only removed via explicit delete
 
   renderRep2Tabs();
 }
