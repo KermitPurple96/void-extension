@@ -1,6 +1,6 @@
 # Void Extension
 
-A Chrome DevTools extension for bug bounty hunters and security researchers — an in-browser testing toolkit in the shape of a DevTools panel. Works standalone; two optional Node helpers add an intercepting proxy and cross-container sync.
+A Chrome DevTools extension for bug bounty hunters and security researchers — an in-browser testing toolkit in the shape of a DevTools panel. Works standalone; two optional Node helpers add an intercepting proxy, AI chat integration, and cross-container sync.
 
 ![Chrome MV3](https://img.shields.io/badge/Chrome-MV3-4285F4?logo=googlechrome&logoColor=white)
 ![Version](https://img.shields.io/badge/version-1.0.0-green)
@@ -14,6 +14,7 @@ A Chrome DevTools extension for bug bounty hunters and security researchers — 
 - [Traffic capture](#traffic-capture)
 - [Installation](#installation)
 - [The intercepting proxy](#the-intercepting-proxy)
+- [AI Chat](#ai-chat)
 - [Cross-container sync](#cross-container-sync)
 - [Usage guide](#usage-guide)
 - [Permissions](#permissions)
@@ -28,21 +29,25 @@ A Chrome DevTools extension for bug bounty hunters and security researchers — 
 |-----|-------------|
 | **Project** | Session save/restore, site map tree, endpoint list, scope rules, WHOIS/DNS recon |
 | **Intercept** | Pause requests **and responses**, edit headers/body/status, forward or drop — from Chrome *and* external proxy |
-| **History** | Every request with field search, column filters, reflection detection, **remote IP column** |
+| **History** | Every request with field search, column filters, reflection detection, canary tracking, **remote IP column**, **response timeline** |
 | **WebSocket** | Live WebSocket frame capture — direction, type, length, connection status pills, JSON detail |
-| **Repeater** | Dual side-by-side Repeaters with independent tabs, **Diff** to compare responses, Burp-style path + HTTP version bar, split/raw mode |
-| **Intruder** | 4 fuzzing modes + **8 specialized attacks**: Auth/IDOR, Race Condition, Param Miner, JWT Attacker, CORS Scanner, Request Smuggling, GraphQL Explorer, Upload Scanner |
-| **Scan** | DOM XSS hunter (Probe) + **Active Scanner** (8 modules: SQLi, XSS, SSRF, path traversal, SSTI, CMDi, open redirect, CRLF) + **Content Discovery** (100+ paths) + **Interactsh OOB** |
+| **Repeater** | Dual side-by-side with independent tabs, **tab groups** (collapsible, color-coded), **Diff**, split/raw mode, **cookie sync** (smart merge), **response timeline** |
+| **Intruder** | 4 fuzzing modes + **10 specialized attacks**: Auth/IDOR, Race Condition, Param Miner, JWT Attacker, CORS Scanner, Request Smuggling, GraphQL Explorer, Upload Scanner, **Flow Builder**, **Sequencer** |
+| **Scan** | DOM XSS hunter (Probe) + **Active Scanner** (8 modules) + **Content Discovery** + **Interactsh OOB** |
 | **Logger** | Cross-container traffic aggregator |
 | **Containers** | Launch isolated Chrome profiles with their own cookie jars |
-| **Headers** | Security-header analysis of the main document, beside every captured header |
+| **Headers** | Security-header analysis with rescan, custom URL scan, per-domain auto-scan |
 | **Dencoder** | Chain-based encoding/decoding with **saved presets** — 20 operations in any order |
-| **PoC** | CSRF PoC (6 techniques + 4 evasions) + Clickjacking PoC (4 techniques), based on PortSwigger labs |
+| **API Schema** | Auto-generate **OpenAPI 3.0 YAML** from captured traffic |
+| **PoC** | CSRF PoC (6 techniques + 4 evasions) + Clickjacking PoC (4 techniques) |
 | **Sequencer** | Token entropy analysis — Shannon entropy, 5 statistical tests, character frequency histogram |
 | **Notes** | Severity-tagged findings, CRUD, markdown export by host |
-| **API Schema** | Auto-generate **OpenAPI 3.0 YAML** from captured traffic |
-| **Sensitive** | 180+ passive rules — secrets, PII, tech disclosure, **cookie flags, CSP absence, SRI, CRLF** |
-| **Settings** | Match & replace, auto headers, scope, **4 themes**, **TLS fingerprint (JA3/JA4)**, session handling, **Collaborator Everywhere**, settings profiles, upstream proxy, HAR export |
+| **M&R** | Match & Replace rules, **canary tokens**, **regex tester**, **payload generator**, **response baseline** |
+| **Sensitive** | 180+ passive rules — secrets, PII, tech disclosure, cookie flags, CSP, SRI, CRLF |
+| **Storage** | **localStorage/sessionStorage/cookies** inspector + **postMessage monitor** — read, delete, export, live capture |
+| **Scripts** | **User automation engine** — JavaScript editor with 20-function `void.*` API, save/load library, console output |
+| **AI Chat** | **LLM integration** with **48 tools** — multi-session, Claude CLI / Anthropic / OpenAI / OpenRouter / Ollama, full extension control |
+| **Settings** | Network (Connections, DNS, TLS, HTTP), Tool configs (Proxy, Intruder, Repeater, Sequencer), **4 themes**, TLS fingerprint, settings profiles, AI config |
 
 ### Recon engine
 
@@ -63,7 +68,7 @@ Void records from three independent sources, merged into one History:
 | **Debugger** (CDP) | the tab you attached to | yes | yes | click **Attach** |
 | **Proxy** (Node helper) | anything outside Chrome — curl, Postman, a phone | yes | yes | run the proxy server |
 
-Passive capture is always on, which is why History fills up without attaching anything. Response bodies only exist on debugger- and proxy-captured rows; passive rows say so plainly instead of implying one is on the way.
+Passive capture is always on, which is why History fills up without attaching anything. Response bodies only exist on debugger- and proxy-captured rows.
 
 ---
 
@@ -77,7 +82,7 @@ Passive capture is always on, which is why History fills up without attaching an
 git clone https://github.com/KermitPurple96/void-extension.git
 ```
 
-Or use **Code → Download ZIP** and extract it anywhere.
+Or use **Code > Download ZIP** and extract it anywhere.
 
 ### 2. Load it into Chrome
 
@@ -90,7 +95,7 @@ Or use **Code → Download ZIP** and extract it anywhere.
 
 1. Open any site you are authorised to test
 2. Press `F12` (or `Ctrl+Shift+I` / `Cmd+Option+I`)
-3. Click the **»** arrow in the DevTools tab bar
+3. Click the **>>** arrow in the DevTools tab bar
 4. Choose **Void**
 
 ### 4. Optional — the Node helpers
@@ -117,16 +122,12 @@ node void-proxy-server.js
 ```
 
 ```
-proxy    http://127.0.0.1:8081     ← point curl / Postman / your phone here
-control  ws://127.0.0.1:8082       ← the Void panel connects here
-CA       ~/.void/void-ca.pem       ← generated on first run
+proxy    http://127.0.0.1:8081     <- point curl / Postman / your phone here
+control  ws://127.0.0.1:8082       <- the Void panel connects here
+CA       ~/.void/void-ca.pem       <- generated on first run (requires openssl)
 ```
 
-HTTPS is MITM'd with a CA generated by `openssl` on first run; per-host leaf certificates are signed on demand and cached. Clients must trust it:
-
-```bash
-curl -x http://127.0.0.1:8081 --cacert ~/.void/void-ca.pem https://target/
-```
+HTTPS is MITM'd with a CA generated by `openssl` on first run. If `openssl` is not in PATH, HTTPS interception is disabled but HTTP proxy and AI chat still work.
 
 ### The three states
 
@@ -138,15 +139,42 @@ In the **Intercept** tab, the `Proxy` button cycles:
 | `Proxy: logging` | connected | passes | **yes** | no |
 | `Proxy: intercepting` | connected | passes | yes | **yes** |
 
-`logging` is the everyday mode — the equivalent of Burp with *Intercept is off*. Requests held by the proxy land in the same queue as debugger-held ones, tagged `PROXY`, and reuse the same editor, Forward / Drop and → Repeater / → Intruder buttons.
+---
 
-> **Disconnecting Void does not stop the proxy.** If the Node process is running it keeps passing traffic — it just stops being recorded. Kill the process to actually stop it.
+## AI Chat
 
-### Limitations
+The **AI Chat** tab connects to any LLM (local or cloud) and gives it **48 tools** with full read/write access to every tab in the extension.
 
-- **No streaming.** Bodies are buffered (5 MB cap) so they can be edited, and `Accept-Encoding: identity` is forced. SSE and large downloads will not work through the proxy.
-- **Chrome is not routed through it.** The browser keeps using the debugger path; the proxy is for external clients.
-- **Upstream certificates are not verified** (`rejectUnauthorized: false`) — you are the interception point, so validating upstream is your call, not the tool's.
+### Supported providers
+
+| Provider | Auth | How it works |
+|----------|------|-------------|
+| **Claude CLI** (default) | None — uses your Claude Code login | Spawns `claude --print` subprocess via the proxy |
+| **Anthropic API** | API key | Direct API with native tool_use |
+| **OpenAI API** | API key | Direct API with function calling |
+| **OpenRouter** | API key | Unified API (OpenAI-compatible) |
+| **Ollama** | None | Local models at `localhost:11434` |
+| **Custom** | Optional | Any OpenAI-compatible endpoint |
+
+### Setup
+
+1. Start the proxy: `node void-proxy-server.js`
+2. Open **Settings** > **AI Chat** section > choose provider + enter credentials
+3. Open the **AI Chat** tab and start chatting
+
+### What the AI can do (48 tools)
+
+**Read everything:** HTTP history, endpoints, technologies, cookies, storage, WebSocket frames, scan findings, Intruder results, Repeater tabs, site map, security headers, sequencer tokens, Notes, scope, M&R rules, postMessage events
+
+**Execute actions:** send requests, run active scanner, run sensitive scan, run Intruder attacks, run Flow Builder chains, send to Repeater/Intruder, toggle interception, forward/drop requests, add M&R rules, set scope, set canary tokens, set DNS overrides, generate CSRF PoCs
+
+**Browser access:** evaluate JavaScript in the inspected page, extract forms/links/scripts from DOM, read page info (URL, title, cookies, referrer)
+
+**Encoding:** encode/decode (base64, URL, HTML, hex, unicode, JS), hash (MD5, SHA-1, SHA-256), compare/diff responses
+
+### Multi-session
+
+The left sidebar maintains multiple chat sessions. Sessions auto-name from the first message, persist to `chrome.storage`, and survive browser restarts. Arrow Up/Down scrolls through input history.
 
 ---
 
@@ -156,9 +184,7 @@ In the **Intercept** tab, the `Proxy` button cycles:
 node void-sync-server.js     # ws://localhost:17580
 ```
 
-Containers launch separate Chrome profiles with their own `--user-data-dir`, so cookies are genuinely isolated. Each instance pushes its history to the sync server and the **Logger** tab shows the merged view across all of them.
-
-History is local to its window; Logger is the aggregator.
+Containers launch separate Chrome profiles with their own `--user-data-dir`, so cookies are genuinely isolated. Each instance pushes its history to the sync server and the **Logger** tab shows the merged view.
 
 ---
 
@@ -166,113 +192,72 @@ History is local to its window; Logger is the aggregator.
 
 ### Intercept
 
-1. **Chrome traffic** — click **Attach Debugger**, toggle **Intercept: OFF** → ON
-2. **Response interception** — click **Responses: OFF** → ON to also pause responses for editing (status, headers, body)
-3. **External traffic** — start the proxy, click **Proxy: connect** → **logging** → **intercepting**
+1. **Chrome traffic** — click **Attach Debugger**, toggle **Intercept: OFF** > ON
+2. **Response interception** — click **Responses: OFF** > ON to also pause responses
+3. **External traffic** — start the proxy, click **Proxy: connect** > **logging** > **intercepting**
 4. Click a paused request/response to open the editor
-5. **Forward →** sends, **Drop ✕** kills
-6. Full toolbar: → Repeater, → Intruder, → PoC, → Notes, ↗ Open, Reflections, Render, curl/fetch/py
+5. **Forward** sends, **Drop** kills
 
 ### Repeater
 
-- **Dual side-by-side** — click **Compare** to open a second Repeater; each side has its own tab selection from the shared tab pool
-- **Diff** button highlights differences between left and right responses (LCS diff, case-insensitive option)
-- Burp-style request bar: `[Method ▼] [/path?query] [HTTP/1.1 ▼]` — Host in headers, not URL
-- **Split / Raw** mode toggle in Settings — separate Headers+Body or single raw editor
-- **✎ Target** overrides TCP destination (IP/domain to connect to, independent of Host header)
-- Full toolbar on both sides: → Intruder, → PoC, → Notes, ↗ Open, Reflections, Render, curl/fetch/py
+- **Dual side-by-side** — click **Compare** to open a second Repeater
+- **Tab groups** — click **+** > **New Group**, then use the gear icon to add tabs, pick a color, rename, or collapse
+- **Diff** button highlights differences between left and right responses
+- **Cookie sync** — smart merge that updates browser cookies while preserving manually-added test cookies; yellow indicator when cookies drift
+- **Response Timeline** — click the clock icon in detail view to see how an endpoint's response changed over time
 
 ### Intruder
 
-**Fuzzing modes:** Sniper, Battering Ram, Pitchfork, Cluster Bomb — with `§position§` markers, payload processing (12 transforms), grep match/extract columns
+**Fuzzing modes:** Sniper, Battering Ram, Pitchfork, Cluster Bomb — with `payload` markers
 
-**Specialized attacks:**
+**10 specialized attacks:**
 
 | Mode | What it does |
 |------|-------------|
-| **Auth / IDOR** | Replays request with User A, User B, and unauthenticated cookies; flags same-status responses |
-| **Race Condition** | Fires 20+ parallel requests simultaneously; flags status/length anomalies |
-| **Param Miner** | Bruteforces hidden params (200 built-in) in query/body/headers/cookies |
-| **JWT Attacker** | `alg:none` bypass, HS256 weak secret brute-force (30 secrets), claim tampering |
-| **CORS Scanner** | Tests 7 Origin header variations; reports ACAO reflection + credentials |
-| **Request Smuggling** | CL.TE, TE.CL, TE.TE detection with timing analysis |
-| **GraphQL Explorer** | Introspection query, schema discovery, type/field listing |
-| **Upload Scanner** | 7 polyglot payloads (SVG XSS, PHP shell, path traversal, XXE) |
+| **Auth / IDOR** | Replays with User A, User B, and unauthenticated cookies |
+| **Race Condition** | 20+ parallel requests; flags anomalies |
+| **Param Miner** | Bruteforces hidden params (200 built-in) |
+| **JWT Attacker** | `alg:none`, HS256 brute-force, claim tampering |
+| **CORS Scanner** | 7 Origin variations; reports reflection + credentials |
+| **Request Smuggling** | CL.TE, TE.CL, TE.TE detection |
+| **GraphQL Explorer** | Introspection + schema discovery |
+| **Upload Scanner** | 7 polyglot payloads (SVG XSS, PHP shell, XXE) |
+| **Flow Builder** | Chained requests with variable extraction between steps |
+| **Sequencer** | Token entropy analysis with 5+ statistical tests |
 
-### History
+**Payload validation:** Warnings appear when markers don't match the attack mode (e.g., JWT attack without a JWT in the request).
 
-- Fills automatically from passive capture — no attach needed
-- `field:value` search (`host:`, `path:`, `status:`, `body:`, `header:`) alongside per-column filters
-- **Remote IP column** — shows the server IP:port from CDP (like Burp)
-- Reflection dot marks rows where request values appear in the response
+### Scripts
 
-### Active Scanner (Scan tab)
+Write JavaScript automation with the `void.*` API:
 
-- **8 scan modules**: SQL injection (error + time-based), reflected XSS, path traversal, SSRF (with Interactsh OOB), SSTI, command injection, open redirect, CRLF/header injection
-- **Content Discovery**: 100+ common paths bruteforced (SecLists-based)
-- **Interactsh OOB**: generate callback URLs, poll for DNS/HTTP/SMTP interactions
-- Auto-identifies injection points from URL params and body params
+```javascript
+// Fuzz a parameter and report findings
+const results = await void.attack({
+  url: 'https://target.com/search?q=FUZZ',
+  payloads: ["<script>alert(1)</script>", "' OR 1=1--"],
+  marker: 'FUZZ', injectIn: 'url', threads: 3
+});
+for (const r of results) {
+  if (r.body.includes(r.payload))
+    void.addFinding({ title: 'Reflected: ' + r.payload, severity: 'high' });
+}
+```
 
-### Dencoder
+**API:** `request`, `history`, `cookies`, `sendToRepeater`, `sendToIntruder`, `attack`, `scan`, `encode`, `decode`, `hash`, `log`, `addFinding`, `sleep`, `storage`, `setVar`, `getVar`, `isInScope`, `esc`, `parseUrl`
 
-- **Chain-only**: add steps from dropdown (20 operations: base64, URL, hex, HTML, unicode, JS, ASCII hex, JWT decode, MD5, SHA-1, SHA-256, lowercase, uppercase)
-- Steps run in order — output of each feeds into the next
-- **Save/load named chains** to chrome.storage
-- Swap input/output, clear all
+### Storage
 
-### PoC Generator
-
-- **CSRF**: 6 techniques (auto-form, GET img/iframe, XHR text/plain, fetch no-cors, method override, multipart) + 4 evasion toggles (auto-submit, suppress referer, strip tokens, sandbox)
-- **Clickjacking**: 4 techniques (basic overlay, prefilled form, frame buster bypass, multistep) with configurable positioning
-
-### API Schema
-
-- **Generate from History** builds OpenAPI 3.0 YAML from captured traffic
-- Groups endpoints by path + method, extracts query params, content types, observed status codes
-- Copy + download .yaml
-
-### Headers
-
-- **Security Analysis** (left) runs against the **main document response only** — CSP, HSTS and X-Frame-Options are meaningless for sub-resources, and a third-party iframe must not be allowed to overwrite them
-- The bar at the top names the exact URL being analysed
-- **All Headers** (right) defaults to that same response; tick *include sub-resources* to fold in every other response, each labelled with its origin and flagged when it came from another host
-
-### Sensitive
-
-180+ passive rules across everything in History:
-
-| Category | Examples |
-|---|---|
-| Tokens & keys | AWS, Google, Stripe, GitHub, Slack, OpenAI |
-| General secrets | PEM blocks, generic API keys, private IPv4 |
-| Cloud & webhooks | S3, Azure Blob, GCS, Slack/Teams webhooks |
-| Sensitive files | `.bak`, `.keychain`, `.cscfg`, `.env` |
-| Information disclosure | stack traces, `phpinfo()`, exposed `.git/config` |
-| PII | SSN, card numbers, JWTs, bcrypt hashes |
-| Security misconfig | **Cookie missing Secure/HttpOnly/SameSite**, missing CSP, mixed content, missing SRI |
-| Tech & version disclosure | `Server`, `X-Powered-By`, ASP.NET/PHP versions, internal hostnames |
-| Source maps | `.js.map` requests, `sourceMappingURL`, inline maps |
-
-Custom rules can be added from the tab.
+- **localStorage / sessionStorage / Cookies** — read, delete, export as JSON
+- **postMessage monitor** — captures cross-origin messages with origin, data, timestamp
 
 ### Settings
 
-- **Match & Replace** — auto-modify requests and responses (regex, header add/remove, body)
-- **Auto Headers** — injected into every outgoing request
-- **Request view** — Split (Headers + Body) or Raw (single editor like Burp)
-- **4 Themes** — Dark (GitHub), Light (GitHub), Dracula, Hacker
-- **TLS Fingerprint** — fetch your JA3/JA4 hash, TLS version, cipher suites, extensions
-- **Collaborator Everywhere** — auto-inject Interactsh OOB URLs into 10 request headers
-- **Session handling** — login macro with auto-renewal on session expiry
-- **Settings profiles** — save/load/export/import named settings configurations
-- **HAR 1.2 export**, scope auto-detect, upstream proxy config
-- **Keyboard shortcuts** — Ctrl+Enter (send), Ctrl+I (intercept), Ctrl+1-9 (switch tabs)
+**Network:** Connections (timeouts, upstream proxy, platform auth), DNS (resolution mode, hostname overrides), TLS (verify, min/max version, client certs, CA path), HTTP (redirect types, streaming, keep-alive, HTTP/2)
 
-### Project
+**Tools:** Proxy (interception rules, WebSocket interception), Intruder (payload placement, processing, threading), Repeater (message modification, redirects, streaming, tab defaults), Sequencer (capture settings, token handling, 9 statistical tests)
 
-- **Session** — full workspace save/restore (history, repeater tabs, scope, notes, WS frames, sequencer, scan findings, decoder chain)
-- **Site Map** — hierarchical tree of everything seen
-- **Scope** — include/exclude patterns other tabs can filter by
+**General:** Match & Replace, 4 themes, TLS fingerprint (JA3/JA4), settings profiles, HAR export, AI provider config
 
 ---
 
@@ -280,19 +265,17 @@ Custom rules can be added from the tab.
 
 | Permission | Why it's needed |
 |-----------|----------------|
-| `debugger` | Attach to tabs to intercept and modify requests, and read response bodies |
-| `webRequest` | Passive traffic capture across all tabs without attaching the debugger |
+| `debugger` | Attach to tabs to intercept/modify requests, read response bodies |
+| `webRequest` | Passive traffic capture across all tabs |
 | `tabs` | Open links and read the active tab's URL |
 | `activeTab` | Access the currently inspected page |
-| `storage` | Persist settings, sessions and intercept state |
+| `storage` | Persist settings, sessions, AI chat history |
 | `unlimitedStorage` | Saved sessions can hold large histories |
-| `scripting` | Inject the content script and the Probe scanner |
+| `scripting` | Inject content script and Probe scanner |
 | `cookies` | Cookie sync for Repeater and Intruder |
-| `downloads` | Export findings, sessions and container sync files |
+| `downloads` | Export findings, sessions and container sync |
 | `alarms` | Keep the service worker alive |
-| `host_permissions: <all_urls>` | Required to attach the debugger and capture traffic on any domain |
-
-The `extension_pages` CSP uses `connect-src *` because the Repeater, the crawler and the DNS/WHOIS lookups issue `fetch()` from the service worker to arbitrary hosts. `default-src 'none'` and `script-src 'self'` — the directives that actually stop injection — stay in place.
+| `host_permissions: <all_urls>` | Required to attach debugger and capture traffic on any domain |
 
 ---
 
@@ -300,29 +283,26 @@ The `extension_pages` CSP uses `connect-src *` because the Repeater, the crawler
 
 ```
 void-extension/
-├── manifest.json          # Extension manifest (MV3)
-├── package.json           # Pins `ws` for the two Node helpers — not needed by the extension
-├── devtools.html/.js      # DevTools page entry point
-├── panel.html             # Panel UI markup
-├── panel.js               # Panel logic — all tabs, rendering, proxy control channel
-├── panel.css              # All styles
-├── background.js          # Service worker — debugger bridge, passive capture,
-│                          #   DNS/WHOIS/IP APIs, crawler, proxy history
-├── content.js             # Content script — endpoint & tech fingerprinting
-├── early.js               # document_start content script
-├── sensitive-rules.js     # 180+ passive scanner rules
-├── void-proxy-server.js   # Node helper — intercepting MITM proxy (:8081 / ws :8082)
-├── void-sync-server.js    # Node helper — cross-container sync (ws :17580)
-├── probe/                 # DOM XSS hunter, injected into the page
-│   ├── scanner.js  flows.js  hooks.js  frameworks.js
-│   ├── fuzzer-*.js        # payload generation and autofill
-│   └── highlighter.js  reporter.js  main.js
-├── tests/
-│   └── e2e-audit.js       # 180 automated integrity tests
-└── icons/
+|-- manifest.json          # Extension manifest (MV3)
+|-- package.json           # Pins ws for the Node helpers
+|-- devtools.html/.js      # DevTools page entry point
+|-- panel.html             # Panel UI markup (21 tabs)
+|-- panel.js               # Panel logic — all tabs, AI chat, tool executors
+|-- panel.css              # All styles
+|-- background.js          # Service worker — debugger bridge, passive capture,
+|                          #   DNS/WHOIS/IP APIs, crawler, proxy history
+|-- content.js             # Content script — endpoint & tech fingerprinting
+|-- early.js               # document_start content script
+|-- sensitive-rules.js     # 180+ passive scanner rules
+|-- void-proxy-server.js   # Node helper — MITM proxy + LLM chat proxy + DNS overrides
+|-- void-sync-server.js    # Node helper — cross-container sync
+|-- probe/                 # DOM XSS hunter, injected into the page
+|-- tests/
+|   +-- e2e-audit.js       # 187 automated integrity tests
++-- icons/
 ```
 
-Neither Node helper is required to use the extension.
+Neither Node helper is required to use the extension. The proxy is needed for external client interception and AI chat.
 
 ---
 
