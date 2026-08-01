@@ -153,6 +153,66 @@ function el(tag, cls) { const e = document.createElement(tag); if (cls) e.classN
 function txt(tag, cls, t) { const e = el(tag, cls); e.textContent = t; return e; }
 function ap(p, ...kids) { kids.forEach(k => p.appendChild(k)); return p; }
 
+// ── Detail pane template ─────────────────────────────────────────────────────
+// Generates the standard req/resp detail pane HTML used by 6 tabs (tgt, ep,
+// hist, log, intr, sens). Each tab only differs in topbar buttons and minor
+// extras (render iframe, reflect badge). Call once per pane during init.
+function buildDetailPane(prefix, opts = {}) {
+  const p = prefix;
+  const subPaneCls = opts.subPaneClass || "hist-sub-pane";
+
+  // Topbar buttons — configurable per pane
+  const topBtns = [];
+  topBtns.push(`<button id="${p}-detail-close" class="btn btn-sm btn-ghost" aria-label="Close">\u2715</button>`);
+  topBtns.push(`<span id="${p}-detail-title" class="hist-detail-title"></span>`);
+  topBtns.push(`<button id="${p}-detail-to-rep" class="btn btn-sm btn-ghost">\u2192 Repeater</button>`);
+  if (opts.intruderBtn !== false) topBtns.push(`<button id="${p}-detail-to-intr" class="btn btn-sm btn-ghost">\u2192 Intruder</button>`);
+  if (opts.openBtn) topBtns.push(`<button id="${p}-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">\u2197${opts.openLabel || ""}</button>`);
+  topBtns.push(`<button id="${p}-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">\u2192 PoC</button>`);
+  topBtns.push(`<button id="${p}-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">\u2192 Notes</button>`);
+
+  // Reflect badge (only History has it)
+  const reflectBadge = opts.reflectBadge
+    ? `<span id="${p}-reflect-badge" class="reflect-badge hidden">Reflections</span>` : "";
+
+  // Render iframe (only History has it)
+  const renderPane = opts.renderPane
+    ? `<div id="${p}-render-pane" class="${subPaneCls} hidden"><iframe id="${p}-render-frame" class="render-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer"></iframe></div>` : "";
+
+  return `
+    <div class="hist-detail-topbar">${topBtns.join("\n      ")}</div>
+    <div class="detail-action-bar" id="${p}-reflect-bar">
+      <label class="reflect-bar-toggle"><input type="checkbox" id="${p}-reflect-hl"><span class="toggle-track"></span> Reflections</label>
+      <span class="reflect-chips hidden" id="${p}-reflect-chips"></span>
+      <button id="${p}-detail-render" class="btn btn-xs btn-ghost">Render</button>
+      <button id="${p}-detail-curl" class="btn btn-xs btn-ghost">curl</button>
+      <button id="${p}-detail-fetch" class="btn btn-xs btn-ghost">fetch</button>
+      <button id="${p}-detail-python" class="btn btn-xs btn-ghost">py</button>
+    </div>
+    <div class="hist-detail-body">
+      <div class="hist-detail-pane" id="${p}-req-side">
+        <div class="hist-detail-sub-tabs"><span class="pane-heading">REQUEST</span></div>
+        <div id="${p}-req-pane" class="${subPaneCls}"><pre id="${p}-req-pre" class="raw-pre"></pre></div>
+        <div class="detail-search-bar">
+          <input id="${p}-req-search" type="text" class="detail-search-inp" placeholder="Search request\u2026" spellcheck="false">
+          <span id="${p}-req-search-count" class="detail-search-count"></span>
+        </div>
+      </div>
+      <div class="hist-detail-pane" id="${p}-resp-side">
+        <div class="hist-detail-sub-tabs">
+          <span class="pane-heading">RESPONSE</span>
+          ${reflectBadge}
+        </div>
+        <div id="${p}-resp-pane" class="${subPaneCls}"><pre id="${p}-resp-pre" class="raw-pre"></pre></div>
+        ${renderPane}
+        <div class="detail-search-bar">
+          <input id="${p}-resp-search" type="text" class="detail-search-inp" placeholder="Search response\u2026" spellcheck="false">
+          <span id="${p}-resp-search-count" class="detail-search-count"></span>
+        </div>
+      </div>
+    </div>`;
+}
+
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function showTab(name) {
   document.querySelectorAll(".tab").forEach(t => {
@@ -1044,24 +1104,25 @@ function renderHistory() {
       <td><span class="method-pill m-${safeMethodCls}">${safeMethod}</span></td>
       <td title="${esc(entry.host)}">${esc(entry.host)}</td>
       <td title="${esc(entry.path)}">${esc(entry.path)}</td>
-      <td class="${statusCls}">${esc(String(entry.status ?? "…"))}</td>
+      <td class="hist-td-status ${statusCls}">${esc(String(entry.status ?? "\u2026"))}</td>
       <td class="hist-td-mime">${esc(shortMime(entry.mimeType))}</td>
       <td class="hist-td-len">${esc(String(len))}</td>
       <td class="hist-td-elapsed">${entry.elapsed ? Number(entry.elapsed) || "" : ""}</td>
       <td class="hist-td-ip" title="${esc(entry.remoteIP || "")}">${esc(entry.remoteIP || "")}</td>
       <td class="hist-td-timestamp">${esc(ts)}</td>
     `;
+    const statusTd = tr.querySelector(".hist-td-status");
     if (entry.respBody && hasReflections(entry)) {
       const dot = document.createElement("span");
       dot.className = "hist-reflect-dot";
       dot.title = "Reflections detected";
-      tr.querySelector("td:nth-child(5)").appendChild(dot);
+      statusTd.appendChild(dot);
     }
     if (canaryCheckResponse(entry)) {
       const cdot = document.createElement("span");
       cdot.className = "hist-canary-dot";
       cdot.title = "Canary reflected: " + canaryValue;
-      tr.querySelector("td:nth-child(5)").appendChild(cdot);
+      statusTd.appendChild(cdot);
     }
     // Record baseline for response diffing
     baselineRecord(entry);
@@ -6974,6 +7035,24 @@ document.addEventListener("DOMContentLoaded", () => {
   function initBlock(name, fn) {
     try { fn(); } catch (e) { console.error(`[Void] init "${name}" failed:`, e); }
   }
+
+  // ── Build detail panes from template ─────────────────────────────────────────
+  // All content is static trusted markup (no user input), generated by buildDetailPane().
+  initBlock("detail-panes", () => {
+    const paneConfigs = {
+      tgt:  {},
+      ep:   {},
+      hist: { openBtn: true, openLabel: " Open", reflectBadge: true, renderPane: true },
+      log:  { openBtn: true },
+      intr: { intruderBtn: false, openBtn: true, openLabel: " Open", subPaneClass: "intr-sub-pane" },
+      sens: { openBtn: true },
+    };
+    document.querySelectorAll("[data-detail-pane]").forEach(container => {
+      const prefix = container.dataset.detailPane;
+      const opts = paneConfigs[prefix] || {};
+      container.innerHTML = buildDetailPane(prefix, opts); // safe: static trusted markup, no user input
+    });
+  });
 
   // ── Scoped Ctrl+A: select only the pane under the mouse ────────────────────
   let _hoveredPane = null;
