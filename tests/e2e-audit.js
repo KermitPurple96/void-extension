@@ -54,7 +54,7 @@ S("6. Themes");
 ["--tint-green","--tint-yellow","--tint-blue","--tint-red"].forEach(v=>t(v,css.includes("var("+v+")")));
 
 S("7. Features");
-const ft={"WS":["ws-filter","ws-tbody"],"Seq":["seq-url","seq-start"],"Notes":["notes-add","notes-form-save"],"PoC":["poc-csrf-technique","poc-cj-technique"],"Scan":["scan-url","scan-start","scan-dirbrute"],"OOB":["oob-server","oob-register"],"Denc":["dec-chain-add","dec-saved-sel"],"RespInt":["resp-ed-status","btn-intercept-resp"],"Profiles":["cfg-profiles","cfg-profile-save"],"ReqView":["ed-path","rep-path"],"DualRepeater":["rep-compare-toggle","rep2-method","rep2-send","rep-diff","rep2-tabs-bar","rep-side-right"],"APISchema":["schema-generate","schema-spec","schema-tree"],"CollabEverywhere":["cfg-collab-url","cfg-collab-enable"],"IntrAttacks":["intr-cfg-auth","intr-cfg-race","intr-cfg-param","intr-cfg-jwt","intr-cfg-cors","intr-cfg-smuggling","intr-cfg-graphql","intr-cfg-upload"],"JA3":["cfg-ja3-fetch","cfg-ja3-hash"]};
+const ft={"WS":["ws-filter","ws-tbody"],"Seq":["seq-url","seq-start"],"Notes":["notes-add","notes-form-save"],"PoC":["poc-csrf-technique","poc-cj-technique"],"Scan":["scan-url","scan-start","scan-dirbrute"],"OOB":["oob-server","oob-register"],"Denc":["dec-chain-add","dec-saved-sel"],"RespInt":["resp-ed-status","btn-intercept-resp"],"Profiles":["cfg-profiles","cfg-profile-save"],"ReqView":["ed-path","rep-path"],"DualRepeater":["rep-compare-toggle","rep2-method","rep2-send","rep-diff","rep2-tabs-bar","rep-side-right"],"APISchema":["schema-generate","schema-spec","schema-tree"],"MRTab":["mr-rules-mr","mr-add-mr","mr-auto-headers","mr-collab-url","mr-collab-enable"],"Canary":["canary-value","canary-randomize","canary-copy","canary-enabled","canary-auto-inject","hist-canary-only","bdg-canary"],"PayloadGen":["payload-category","payload-list","payload-to-intruder"],"RegexTester":["regex-input","regex-pattern","regex-output","regex-match-count"],"IntrAttacks":["intr-cfg-auth","intr-cfg-race","intr-cfg-param","intr-cfg-jwt","intr-cfg-cors","intr-cfg-smuggling","intr-cfg-graphql","intr-cfg-upload"],"JA3":["cfg-ja3-fetch","cfg-ja3-hash"]};
 Object.entries(ft).forEach(([n,e])=>{t(n,e.every(id=>html.includes('id="'+id+'"')));});
 
 S("8. Background.js");
@@ -148,7 +148,7 @@ t("COLLAB_HEADERS",js.includes("COLLAB_HEADERS"));
 t("_collab flag",js.includes("_collab"));
 
 S("16. Misc");
-["initKeyboardShortcuts","exportHar","autoDetectScope","showToast","voidSettingsProfiles","voidDecChains"].forEach(f=>t(f,js.includes(f)));
+["initKeyboardShortcuts","exportHar","autoDetectScope","showToast","voidSettingsProfiles","voidDecChains","canaryCheckResponse","PAYLOAD_DB","regexTest","baselineRecord"].forEach(f=>t(f,js.includes(f)));
 
 S("17. CSS");
 ["detail-action-bar","rep-view-pane","path-inp","httpver-sel","void-toast","dec-chain-step","dec-saved-bar","poc-layout","seq-layout","note-card","scan-config","oob-interactions","ws-conn-bar","render-frame","toggle-track"].forEach(c=>t("."+c,css.includes(c)));
