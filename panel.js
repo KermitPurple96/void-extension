@@ -3962,6 +3962,8 @@ function saveSettings() {
   settings.theme          = document.getElementById("cfg-theme").value;
   // Upstream proxy
   settings.upstreamProxy  = document.getElementById("cfg-upstream-proxy").value;
+  settings.dnsOverrides   = document.getElementById("cfg-dns-overrides").value;
+  settings.dnsEnabled     = document.getElementById("cfg-dns-enabled").checked;
   // Session handling
   // Collaborator
   settings.collabUrl      = (document.getElementById("mr-collab-url") || document.getElementById("cfg-collab-url")).value;
@@ -3972,6 +3974,11 @@ function saveSettings() {
 
   // Push to background
   bg({ type: "UPDATE_SETTINGS", settings });
+
+  // Push DNS overrides to proxy server
+  if (aiProxyWs && aiProxyWs.readyState === 1) {
+    aiProxyWs.send(JSON.stringify({ type: "dns_overrides", enabled: settings.dnsEnabled !== false, mappings: settings.dnsOverrides || "" }));
+  }
 
   const st = document.getElementById("cfg-status");
   st.textContent = "Saved";
@@ -3990,6 +3997,8 @@ function loadSettingsUI() {
   }
   // Upstream proxy
   document.getElementById("cfg-upstream-proxy").value   = settings.upstreamProxy || "";
+  document.getElementById("cfg-dns-overrides").value    = settings.dnsOverrides || "";
+  document.getElementById("cfg-dns-enabled").checked    = settings.dnsEnabled !== false;
   // Session handling
   // Collaborator
   (document.getElementById("mr-collab-url") || document.getElementById("cfg-collab-url")).value = settings.collabUrl || "";
@@ -8172,6 +8181,7 @@ const AI_TOOLS = [
   { name: "get_logger_entries", description: "Get Logger tab entries (aggregated from all sources: proxy, repeater, containers).", parameters: { type: "object", properties: { limit: { type: "number" }, filter: { type: "string" } } } },
   { name: "set_canary", description: "Set a canary token value for tracking reflections across requests.", parameters: { type: "object", properties: { value: { type: "string" } }, required: ["value"] } },
   { name: "get_repeater_tabs", description: "Get all Repeater tabs with their request/response data.", parameters: { type: "object", properties: {} } },
+  { name: "set_dns_override", description: "Override DNS resolution for a hostname. Like /etc/hosts but only for proxy requests.", parameters: { type: "object", properties: { hostname: { type: "string" }, ip: { type: "string" } }, required: ["hostname", "ip"] } },
   { name: "compare_responses", description: "Diff two response bodies line by line. Useful for spotting differences between requests.", parameters: { type: "object", properties: { body1: { type: "string" }, body2: { type: "string" } }, required: ["body1", "body2"] } },
   { name: "run_flow", description: "Run a Flow Builder chain — sequential requests with variable extraction between steps.", parameters: { type: "object", properties: { steps: { type: "array", items: { type: "object", properties: { method: { type: "string" }, url: { type: "string" }, headers: { type: "string" }, body: { type: "string" }, extractors: { type: "array", items: { type: "object", properties: { type: { type: "string" }, expr: { type: "string" }, varName: { type: "string" } } } } } }, description: "Ordered request steps with extractors" } }, required: ["steps"] } },
 ];
@@ -8484,6 +8494,17 @@ async function aiExecTool(name, args) {
         status: t.response?.status, elapsed: t.response?.elapsed,
       }));
     }
+    case "set_dns_override": {
+      const current = settings.dnsOverrides || "";
+      const lines = current.split("\n").filter(l => !l.trim().startsWith(args.hostname));
+      lines.push(`${args.hostname} ${args.ip}`);
+      settings.dnsOverrides = lines.filter(Boolean).join("\n");
+      settings.dnsEnabled = true;
+      document.getElementById("cfg-dns-overrides").value = settings.dnsOverrides;
+      document.getElementById("cfg-dns-enabled").checked = true;
+      saveSettings();
+      return { ok: true, mapping: `${args.hostname} → ${args.ip}` };
+    }
     case "compare_responses": {
       const left = (args.body1 || "").split("\n");
       const right = (args.body2 || "").split("\n");
@@ -8641,7 +8662,13 @@ function aiConnectProxy() {
   return new Promise((resolve) => {
     try {
       aiProxyWs = new WebSocket("ws://localhost:8082");
-      aiProxyWs.onopen = () => resolve();
+      aiProxyWs.onopen = () => {
+        // Sync DNS overrides on connect
+        if (settings.dnsOverrides) {
+          aiProxyWs.send(JSON.stringify({ type: "dns_overrides", enabled: settings.dnsEnabled !== false, mappings: settings.dnsOverrides || "" }));
+        }
+        resolve();
+      };
       aiProxyWs.onerror = () => resolve(); // don't block forever
       aiProxyWs.onmessage = async (ev) => {
         let msg;

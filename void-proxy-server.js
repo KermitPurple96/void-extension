@@ -117,6 +117,7 @@ let intercepting = false;
 const pending = new Map();  // id → { txn, resolve }
 const history = [];
 let nextId = 1;
+let dnsOverrides = new Map(); // hostname → IP
 
 const wss = new WebSocketServer({ port: CTRL_PORT });
 wss.on("error", onListenError("control", CTRL_PORT));
@@ -171,6 +172,19 @@ wss.on("connection", (ws) => {
     if (msg.type === "forwardAll") {
       for (const [id, p] of [...pending]) { pending.delete(id); p.resolve(null); }
       broadcast({ type: "state", intercepting });
+      return;
+    }
+
+    // DNS override settings from panel
+    if (msg.type === "dns_overrides") {
+      dnsOverrides = new Map();
+      if (msg.enabled && msg.mappings) {
+        for (const line of msg.mappings.split("\n")) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length >= 2) dnsOverrides.set(parts[0].toLowerCase(), parts[1]);
+        }
+      }
+      console.log(`[Void Proxy] DNS overrides: ${dnsOverrides.size} mapping(s)`);
       return;
     }
 
@@ -280,10 +294,16 @@ async function handle(clientReq, clientRes, isTls) {
   // We buffer and re-emit the body, so ask for something we can hand back as-is
   headers["accept-encoding"] = "identity";
 
+  // DNS override — resolve hostname to a different IP
+  const resolvedHost = dnsOverrides.get(target.hostname.toLowerCase()) || target.hostname;
+  if (resolvedHost !== target.hostname) {
+    console.log(`[Void Proxy] DNS override: ${target.hostname} → ${resolvedHost}`);
+  }
+
   const mod = target.protocol === "https:" ? https : http;
   const upstream = mod.request({
     protocol: target.protocol,
-    hostname: target.hostname,
+    hostname: resolvedHost,
     port: target.port || (target.protocol === "https:" ? 443 : 80),
     method,
     path: target.pathname + target.search,

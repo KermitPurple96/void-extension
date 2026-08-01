@@ -2047,6 +2047,17 @@
         </div>
       </div>
 
+      <!-- ── Hostname Resolution ──────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Hostname Resolution</div>
+        <div class="settings-section-desc">Override DNS resolution for specific hostnames. Like editing <code>/etc/hosts</code> but only for requests through Void. One mapping per line: <code>hostname IP</code></div>
+        <textarea id="cfg-dns-overrides" class="raw-ta settings-ta" rows="4" spellcheck="false"
+                  placeholder="example.com 127.0.0.1&#10;api.target.com 10.0.0.5&#10;staging.app.io 192.168.1.100"></textarea>
+        <div class="settings-section-desc" style="margin-top:4px">
+          <label class="rep-autocookie"><input type="checkbox" id="cfg-dns-enabled" checked><span class="toggle-track"></span> Enable hostname overrides</label>
+        </div>
+      </div>
+
       <!-- ── Appearance ──────────────────────────────────────── -->
       <div class="settings-section">
         <div class="settings-section-title">Appearance</div>
