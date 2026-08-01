@@ -1576,14 +1576,20 @@ function repMakeTabBtn(tab) {
 function renderRepTabs() {
   const bar = document.getElementById("rep-tabs-bar");
   const addBtn = document.getElementById("rep-tab-add");
-  bar.querySelectorAll(".rep-tab-btn, .rep-group-hdr").forEach(b => b.remove());
+  bar.querySelectorAll(".rep-tab-btn, .rep-group-hdr, .rep-group-sep").forEach(b => b.remove());
 
-  // Render grouped tabs first, then ungrouped
   const usedGroups = new Set();
 
-  // Ungrouped tabs
+  // Ungrouped tabs first
   const ungrouped = repTabs.filter(t => !t.group);
   for (const tab of ungrouped) bar.insertBefore(repMakeTabBtn(tab), addBtn);
+
+  // Separator between ungrouped and groups (if both exist)
+  if (ungrouped.length && repGroups.length) {
+    const sep = document.createElement("div");
+    sep.className = "rep-group-sep";
+    bar.insertBefore(sep, addBtn);
+  }
 
   // Group headers + their tabs
   for (const grp of repGroups) {
@@ -1653,7 +1659,9 @@ function renderRepTabs() {
     if (!grp.collapsed) {
       for (const tab of groupTabs) {
         const btn = repMakeTabBtn(tab);
-        btn.style.borderBottomColor = tab.id === repActiveTab ? grpColor : "";
+        btn.classList.add("grouped");
+        btn.style.borderLeftColor = grpColor;
+        if (tab.id === repActiveTab) btn.style.borderBottomColor = grpColor;
         bar.insertBefore(btn, addBtn);
       }
     }
