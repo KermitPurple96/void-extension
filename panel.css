@@ -1469,13 +1469,20 @@ body {
   cursor: pointer;
   color: var(--text);
   font: 11px/1.3 var(--font);
-  border-bottom: 3px solid var(--accent);
+  border-bottom: none;
   user-select: none;
   background: rgba(88,166,255,.06);
   transition: background .12s;
 }
 .rep-group-hdr:hover { background: rgba(88,166,255,.14); }
 .rep-group-hdr.collapsed { border-bottom: 3px solid var(--border); color: var(--muted); background: none; }
+.rep-group-hdr.collapsed:hover { background: rgba(88,166,255,.06); }
+.rep-group-hdr.empty { border-bottom: 3px solid var(--accent); }
+.rep-group-hdr.grp-green  { background: rgba(63,185,80,.06); }
+.rep-group-hdr.grp-yellow { background: rgba(227,179,65,.06); }
+.rep-group-hdr.grp-red    { background: rgba(248,81,73,.06); }
+.rep-group-hdr.grp-purple { background: rgba(188,140,255,.06); }
+.rep-group-hdr.grp-orange { background: rgba(255,166,87,.06); }
 .rep-group-arrow { font-size: 10px; transition: transform .15s; }
 .rep-group-hdr.collapsed .rep-group-arrow { transform: rotate(0deg); }
 .rep-group-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 4px rgba(255,255,255,.15); }
@@ -1490,14 +1497,22 @@ body {
 }
 .rep-group-gear:hover { color: var(--text); }
 
-/* Grouped tabs — visual containment via left color stripe */
-.rep-tab-btn.grouped {
-  border-left: 3px solid var(--accent);
-  margin-left: 0;
-  padding-left: 9px;
-  background: rgba(88,166,255,.03);
-}
-.rep-tab-btn.grouped:hover { background: rgba(88,166,255,.08); }
+/* Grouped tabs — subtle bg tint on active, bottom border on last */
+.rep-tab-btn.grouped { border-bottom: 2px solid transparent; }
+.rep-tab-btn.grouped.active { color: var(--text); }
+.rep-tab-btn.grouped.group-last { border-bottom: 3px solid var(--accent); }
+.rep-tab-btn.grouped.grp-green.group-last  { border-bottom-color: var(--green); }
+.rep-tab-btn.grouped.grp-yellow.group-last { border-bottom-color: var(--yellow); }
+.rep-tab-btn.grouped.grp-red.group-last    { border-bottom-color: var(--red); }
+.rep-tab-btn.grouped.grp-purple.group-last { border-bottom-color: var(--purple); }
+.rep-tab-btn.grouped.grp-orange.group-last { border-bottom-color: var(--orange); }
+/* Per-color active tints */
+.rep-tab-btn.grouped.grp-blue.active    { background: rgba(88,166,255,.12); border-bottom-color: var(--accent); }
+.rep-tab-btn.grouped.grp-green.active   { background: rgba(63,185,80,.12);  border-bottom-color: var(--green); }
+.rep-tab-btn.grouped.grp-yellow.active  { background: rgba(227,179,65,.12); border-bottom-color: var(--yellow); }
+.rep-tab-btn.grouped.grp-red.active     { background: rgba(248,81,73,.12);  border-bottom-color: var(--red); }
+.rep-tab-btn.grouped.grp-purple.active  { background: rgba(188,140,255,.12); border-bottom-color: var(--purple); }
+.rep-tab-btn.grouped.grp-orange.active  { background: rgba(255,166,87,.12); border-bottom-color: var(--orange); }
 
 /* ── Group dropdown menu ─────────────────────────────────────── */
 .rep-group-menu {

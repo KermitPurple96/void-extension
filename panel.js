@@ -1598,8 +1598,7 @@ function renderRepTabs() {
 
     const grpColor = REP_GROUP_COLORS.find(c => c.name === grp.color)?.color || "var(--accent)";
     const hdr = document.createElement("div");
-    hdr.className = "rep-group-hdr" + (grp.collapsed ? " collapsed" : "");
-    hdr.style.borderBottomColor = grp.collapsed ? "" : grpColor;
+    hdr.className = `rep-group-hdr grp-${grp.color || "blue"}` + (grp.collapsed ? " collapsed" : "");
 
     const arrow = document.createElement("span");
     arrow.className = "rep-group-arrow";
@@ -1657,14 +1656,17 @@ function renderRepTabs() {
     bar.insertBefore(hdr, addBtn);
 
     if (!grp.collapsed) {
-      for (const tab of groupTabs) {
+      for (let i = 0; i < groupTabs.length; i++) {
+        const tab = groupTabs[i];
         const btn = repMakeTabBtn(tab);
-        btn.classList.add("grouped");
-        btn.style.borderLeftColor = grpColor;
-        if (tab.id === repActiveTab) btn.style.borderBottomColor = grpColor;
+        btn.classList.add("grouped", `grp-${grp.color || "blue"}`);
+        // Last tab gets the bottom border to close the group visually
+        if (i === groupTabs.length - 1) btn.classList.add("group-last");
         bar.insertBefore(btn, addBtn);
       }
     }
+    // Empty groups: show the color border on the header itself
+    if (!groupTabs.length) hdr.classList.add("empty");
   }
 
   // Groups persist even when empty — only removed via explicit delete
