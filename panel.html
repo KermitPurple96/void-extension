@@ -2025,10 +2025,6 @@
           <label class="settings-label"><input type="checkbox" id="cfg-follow-redirects" checked><span class="toggle-track"></span> Follow redirects</label>
         </div>
         <div class="settings-row">
-          <label class="settings-label-sm">Timeout (ms)</label>
-          <input id="cfg-timeout" type="text" class="settings-inp settings-inp-sm" value="30000" spellcheck="false">
-        </div>
-        <div class="settings-row">
           <label class="settings-label-sm">Request view</label>
           <select id="cfg-req-view" class="filter-sel">
             <option value="split">Split (Headers + Body)</option>
@@ -2037,24 +2033,157 @@
         </div>
       </div>
 
-      <!-- ── Upstream Proxy ──────────────────────────────────────── -->
+      <!-- ═══ NETWORK: CONNECTIONS ═══════════════════════════════ -->
       <div class="settings-section">
-        <div class="settings-section-title">Upstream Proxy</div>
-        <div class="settings-section-desc">Chain requests through a corporate or SOCKS proxy (applies to void-proxy-server.js).</div>
+        <div class="settings-section-title">Connections</div>
+
+        <div class="pane-label" style="margin-top:8px">TIMEOUTS</div>
+        <div class="settings-section-desc">Timeouts for proxy requests (in milliseconds). Zero = no timeout.</div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-timeout-connect">Connect</label>
+          <input id="cfg-timeout-connect" type="number" class="settings-inp settings-inp-sm" value="10000" min="0">
+          <label class="settings-label-sm" for="cfg-timeout-normal">Response</label>
+          <input id="cfg-timeout-normal" type="number" class="settings-inp settings-inp-sm" value="30000" min="0">
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">UPSTREAM PROXY</div>
+        <div class="settings-section-desc">Route outgoing requests through an upstream proxy. Supports HTTP and SOCKS5.</div>
         <div class="settings-row">
           <label class="settings-label-sm" for="cfg-upstream-proxy">Proxy URL</label>
-          <input id="cfg-upstream-proxy" type="text" class="settings-inp" placeholder="http://proxy.corp:8080 or socks5://127.0.0.1:1080" spellcheck="false">
+          <input id="cfg-upstream-proxy" type="text" class="settings-inp" placeholder="http://proxy.corp:8080 or socks5://127.0.0.1:1080" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-proxy-bypass">Bypass for hosts</label>
+          <input id="cfg-proxy-bypass" type="text" class="settings-inp" placeholder="localhost, 127.0.0.1, *.internal.corp" spellcheck="false" style="flex:1">
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">PLATFORM AUTHENTICATION</div>
+        <div class="settings-section-desc">Auto-authenticate to destination servers using Basic, Digest, or NTLM.</div>
+        <div class="settings-row">
+          <label class="rep-autocookie"><input type="checkbox" id="cfg-platform-auth"><span class="toggle-track"></span> Enable platform authentication</label>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-auth-host">Host pattern</label>
+          <input id="cfg-auth-host" type="text" class="settings-inp" placeholder="*.target.com" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-auth-type">Type</label>
+          <select id="cfg-auth-type" class="filter-sel" style="width:100px">
+            <option value="basic">Basic</option>
+            <option value="digest">Digest</option>
+            <option value="ntlm">NTLMv2</option>
+          </select>
+          <label class="settings-label-sm" for="cfg-auth-user">User</label>
+          <input id="cfg-auth-user" type="text" class="settings-inp" spellcheck="false" style="width:100px">
+          <label class="settings-label-sm" for="cfg-auth-pass">Pass</label>
+          <input id="cfg-auth-pass" type="password" class="settings-inp" style="width:100px">
         </div>
       </div>
 
-      <!-- ── Hostname Resolution ──────────────────────────────── -->
+      <!-- ═══ NETWORK: DNS ═════════════════════════════════════ -->
       <div class="settings-section">
-        <div class="settings-section-title">Hostname Resolution</div>
-        <div class="settings-section-desc">Override DNS resolution for specific hostnames. Like editing <code>/etc/hosts</code> but only for requests through Void. One mapping per line: <code>hostname IP</code></div>
+        <div class="settings-section-title">DNS</div>
+
+        <div class="pane-label">DNS RESOLUTION</div>
+        <div class="settings-section-desc">Control how Void prioritises IP addresses during DNS lookups.</div>
+        <div class="settings-row">
+          <select id="cfg-dns-mode" class="filter-sel">
+            <option value="default">Use system default behavior</option>
+            <option value="ipv4">Prefer IPv4</option>
+            <option value="ipv6">Prefer IPv6</option>
+          </select>
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">HOSTNAME RESOLUTION OVERRIDES</div>
+        <div class="settings-section-desc">Map hostnames to specific IP addresses. Like <code>/etc/hosts</code> but only for proxy requests. One per line: <code>hostname IP</code></div>
+        <div class="settings-row">
+          <label class="rep-autocookie"><input type="checkbox" id="cfg-dns-enabled" checked><span class="toggle-track"></span> Enable hostname overrides</label>
+        </div>
         <textarea id="cfg-dns-overrides" class="raw-ta settings-ta" rows="4" spellcheck="false"
                   placeholder="example.com 127.0.0.1&#10;api.target.com 10.0.0.5&#10;staging.app.io 192.168.1.100"></textarea>
-        <div class="settings-section-desc" style="margin-top:4px">
-          <label class="rep-autocookie"><input type="checkbox" id="cfg-dns-enabled" checked><span class="toggle-track"></span> Enable hostname overrides</label>
+      </div>
+
+      <!-- ═══ NETWORK: TLS ═════════════════════════════════════ -->
+      <div class="settings-section">
+        <div class="settings-section-title">TLS</div>
+
+        <div class="pane-label">TLS NEGOTIATION</div>
+        <div class="settings-section-desc">Control TLS behavior for outgoing proxy connections.</div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-tls-verify"><span class="toggle-track"></span> Verify upstream TLS certificates</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-tls-unsafe-reneg"><span class="toggle-track"></span> Allow unsafe renegotiation (some client certs)</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-tls-no-resume"><span class="toggle-track"></span> Disable TLS session resume</label>
+        </div>
+        <div class="settings-row" style="margin-top:8px">
+          <label class="settings-label-sm" for="cfg-tls-min">Min TLS version</label>
+          <select id="cfg-tls-min" class="filter-sel">
+            <option value="">Auto</option>
+            <option value="TLSv1">TLS 1.0</option>
+            <option value="TLSv1.1">TLS 1.1</option>
+            <option value="TLSv1.2">TLS 1.2</option>
+            <option value="TLSv1.3">TLS 1.3</option>
+          </select>
+          <label class="settings-label-sm" for="cfg-tls-max">Max</label>
+          <select id="cfg-tls-max" class="filter-sel">
+            <option value="">Auto</option>
+            <option value="TLSv1">TLS 1.0</option>
+            <option value="TLSv1.1">TLS 1.1</option>
+            <option value="TLSv1.2">TLS 1.2</option>
+            <option value="TLSv1.3">TLS 1.3</option>
+          </select>
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">CLIENT TLS CERTIFICATE</div>
+        <div class="settings-section-desc">PEM client certificate for mutual TLS. Used when servers require client authentication.</div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-tls-client-host">Host pattern</label>
+          <input id="cfg-tls-client-host" type="text" class="settings-inp" placeholder="*.corp.internal" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row"><label class="settings-label-sm" for="cfg-tls-client-cert">Cert path</label>
+          <input id="cfg-tls-client-cert" type="text" class="settings-inp" placeholder="/path/to/client.crt" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row"><label class="settings-label-sm" for="cfg-tls-client-key">Key path</label>
+          <input id="cfg-tls-client-key" type="text" class="settings-inp" placeholder="/path/to/client.key" spellcheck="false" style="flex:1">
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">PROXY CA CERTIFICATE</div>
+        <div class="settings-section-desc">Void auto-generates a CA in <code>~/.void/</code> for HTTPS interception. Trust this CA in your browser/client.</div>
+        <div class="settings-row">
+          <input id="cfg-ca-path" type="text" class="settings-inp" readonly style="flex:1">
+          <button id="cfg-ca-copy" class="btn btn-xs btn-ghost">Copy path</button>
+        </div>
+      </div>
+
+      <!-- ═══ NETWORK: HTTP ════════════════════════════════════ -->
+      <div class="settings-section">
+        <div class="settings-section-title">HTTP</div>
+
+        <div class="pane-label">REDIRECT HANDLING</div>
+        <div class="settings-section-desc">Control which redirect types Void follows when configured to follow redirects.</div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-redir-3xx" checked><span class="toggle-track"></span> 3xx status code with Location header</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-redir-refresh"><span class="toggle-track"></span> Refresh header</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-redir-meta" checked><span class="toggle-track"></span> Meta refresh tag</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-redir-js"><span class="toggle-track"></span> JavaScript-driven</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-redir-any"><span class="toggle-track"></span> Any status code with Location header</label>
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">STREAMING RESPONSES</div>
+        <div class="settings-section-desc">URLs returning streaming/SSE responses that do not terminate.</div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-stream-sse" checked><span class="toggle-track"></span> Treat text/event-stream as streaming</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-stream-strip" checked><span class="toggle-track"></span> Strip chunked encoding metadata</label>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm" for="cfg-stream-urls">Stream URL patterns</label>
+          <input id="cfg-stream-urls" type="text" class="settings-inp" placeholder="/events, /stream, /sse" spellcheck="false" style="flex:1">
+        </div>
+
+        <div class="pane-label" style="margin-top:12px">PROTOCOL</div>
+        <div class="poc-evasions">
+          <label class="probe-toggle"><input type="checkbox" id="cfg-http-keepalive"><span class="toggle-track"></span> Use HTTP/1.1 keep-alive</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-http2" checked><span class="toggle-track"></span> Default to HTTP/2 if server supports it</label>
+          <label class="probe-toggle"><input type="checkbox" id="cfg-http-100" checked><span class="toggle-track"></span> Understand 100 Continue responses</label>
         </div>
       </div>
 

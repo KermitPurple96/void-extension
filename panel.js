@@ -3955,15 +3955,47 @@ function saveSettings() {
   settings.scopeInclude   = document.getElementById("tgt-scope-include").value;
   settings.scopeExclude   = document.getElementById("tgt-scope-exclude").value;
   settings.followRedirects = document.getElementById("cfg-follow-redirects").checked;
-  settings.timeout        = document.getElementById("cfg-timeout").value;
+  settings.timeout        = settings.timeoutNormal || "30000";
   settings.reqView        = document.getElementById("cfg-req-view").value;
   settings.matchReplace   = readMRRules();
   // Theme
   settings.theme          = document.getElementById("cfg-theme").value;
   // Upstream proxy
+  // Network: Connections
+  settings.timeoutConnect = document.getElementById("cfg-timeout-connect").value;
+  settings.timeoutNormal  = document.getElementById("cfg-timeout-normal").value;
   settings.upstreamProxy  = document.getElementById("cfg-upstream-proxy").value;
-  settings.dnsOverrides   = document.getElementById("cfg-dns-overrides").value;
+  settings.proxyBypass    = document.getElementById("cfg-proxy-bypass").value;
+  settings.platformAuth   = document.getElementById("cfg-platform-auth").checked;
+  settings.authHost       = document.getElementById("cfg-auth-host").value;
+  settings.authType       = document.getElementById("cfg-auth-type").value;
+  settings.authUser       = document.getElementById("cfg-auth-user").value;
+  settings.authPass       = document.getElementById("cfg-auth-pass").value;
+  // Network: DNS
+  settings.dnsMode        = document.getElementById("cfg-dns-mode").value;
   settings.dnsEnabled     = document.getElementById("cfg-dns-enabled").checked;
+  settings.dnsOverrides   = document.getElementById("cfg-dns-overrides").value;
+  // Network: TLS
+  settings.tlsVerify      = document.getElementById("cfg-tls-verify").checked;
+  settings.tlsUnsafeReneg = document.getElementById("cfg-tls-unsafe-reneg").checked;
+  settings.tlsNoResume    = document.getElementById("cfg-tls-no-resume").checked;
+  settings.tlsMin         = document.getElementById("cfg-tls-min").value;
+  settings.tlsMax         = document.getElementById("cfg-tls-max").value;
+  settings.tlsClientHost  = document.getElementById("cfg-tls-client-host").value;
+  settings.tlsClientCert  = document.getElementById("cfg-tls-client-cert").value;
+  settings.tlsClientKey   = document.getElementById("cfg-tls-client-key").value;
+  // Network: HTTP
+  settings.redir3xx       = document.getElementById("cfg-redir-3xx").checked;
+  settings.redirRefresh   = document.getElementById("cfg-redir-refresh").checked;
+  settings.redirMeta      = document.getElementById("cfg-redir-meta").checked;
+  settings.redirJs        = document.getElementById("cfg-redir-js").checked;
+  settings.redirAny       = document.getElementById("cfg-redir-any").checked;
+  settings.streamSse      = document.getElementById("cfg-stream-sse").checked;
+  settings.streamStrip    = document.getElementById("cfg-stream-strip").checked;
+  settings.streamUrls     = document.getElementById("cfg-stream-urls").value;
+  settings.httpKeepalive  = document.getElementById("cfg-http-keepalive").checked;
+  settings.http2          = document.getElementById("cfg-http2").checked;
+  settings.http100        = document.getElementById("cfg-http-100").checked;
   // Session handling
   // Collaborator
   settings.collabUrl      = (document.getElementById("mr-collab-url") || document.getElementById("cfg-collab-url")).value;
@@ -3988,7 +4020,6 @@ function saveSettings() {
 function loadSettingsUI() {
   (document.getElementById("mr-auto-headers") || document.getElementById("cfg-auto-headers")).value = settings.autoHeaders || "";
   document.getElementById("cfg-follow-redirects").checked = !!settings.followRedirects;
-  document.getElementById("cfg-timeout").value          = settings.timeout || "30000";
   document.getElementById("cfg-req-view").value         = settings.reqView || "split";
   // Theme
   if (settings.theme) {
@@ -3996,9 +4027,41 @@ function loadSettingsUI() {
     applyTheme(settings.theme);
   }
   // Upstream proxy
+  // Network: Connections
+  document.getElementById("cfg-timeout-connect").value  = settings.timeoutConnect || "10000";
+  document.getElementById("cfg-timeout-normal").value   = settings.timeoutNormal || "30000";
   document.getElementById("cfg-upstream-proxy").value   = settings.upstreamProxy || "";
-  document.getElementById("cfg-dns-overrides").value    = settings.dnsOverrides || "";
+  document.getElementById("cfg-proxy-bypass").value     = settings.proxyBypass || "";
+  document.getElementById("cfg-platform-auth").checked  = !!settings.platformAuth;
+  document.getElementById("cfg-auth-host").value        = settings.authHost || "";
+  document.getElementById("cfg-auth-type").value        = settings.authType || "basic";
+  document.getElementById("cfg-auth-user").value        = settings.authUser || "";
+  document.getElementById("cfg-auth-pass").value        = settings.authPass || "";
+  // Network: DNS
+  document.getElementById("cfg-dns-mode").value         = settings.dnsMode || "default";
   document.getElementById("cfg-dns-enabled").checked    = settings.dnsEnabled !== false;
+  document.getElementById("cfg-dns-overrides").value    = settings.dnsOverrides || "";
+  // Network: TLS
+  document.getElementById("cfg-tls-verify").checked     = !!settings.tlsVerify;
+  document.getElementById("cfg-tls-unsafe-reneg").checked = !!settings.tlsUnsafeReneg;
+  document.getElementById("cfg-tls-no-resume").checked  = !!settings.tlsNoResume;
+  document.getElementById("cfg-tls-min").value          = settings.tlsMin || "";
+  document.getElementById("cfg-tls-max").value          = settings.tlsMax || "";
+  document.getElementById("cfg-tls-client-host").value  = settings.tlsClientHost || "";
+  document.getElementById("cfg-tls-client-cert").value  = settings.tlsClientCert || "";
+  document.getElementById("cfg-tls-client-key").value   = settings.tlsClientKey || "";
+  // Network: HTTP
+  document.getElementById("cfg-redir-3xx").checked      = settings.redir3xx !== false;
+  document.getElementById("cfg-redir-refresh").checked  = !!settings.redirRefresh;
+  document.getElementById("cfg-redir-meta").checked     = settings.redirMeta !== false;
+  document.getElementById("cfg-redir-js").checked       = !!settings.redirJs;
+  document.getElementById("cfg-redir-any").checked      = !!settings.redirAny;
+  document.getElementById("cfg-stream-sse").checked     = settings.streamSse !== false;
+  document.getElementById("cfg-stream-strip").checked   = settings.streamStrip !== false;
+  document.getElementById("cfg-stream-urls").value      = settings.streamUrls || "";
+  document.getElementById("cfg-http-keepalive").checked = !!settings.httpKeepalive;
+  document.getElementById("cfg-http2").checked          = settings.http2 !== false;
+  document.getElementById("cfg-http-100").checked       = settings.http100 !== false;
   // Session handling
   // Collaborator
   (document.getElementById("mr-collab-url") || document.getElementById("cfg-collab-url")).value = settings.collabUrl || "";
@@ -9695,6 +9758,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // Settings — M&R rules add button (now in M&R tab)
   document.getElementById("mr-add")?.addEventListener("click", addMRRule);
   document.getElementById("mr-add-mr")?.addEventListener("click", addMRRule);
+
+  // CA path display
+  const caPathEl = document.getElementById("cfg-ca-path");
+  if (caPathEl) {
+    const home = navigator.userAgent.includes("Win") ? "%USERPROFILE%" : "~";
+    caPathEl.value = `${home}/.void/void-ca.pem`;
+  }
+  document.getElementById("cfg-ca-copy")?.addEventListener("click", () => {
+    const p = document.getElementById("cfg-ca-path").value;
+    navigator.clipboard.writeText(p.replace("%USERPROFILE%", "").replace("~", ""));
+    showToast("CA path copied");
+  });
 
   document.getElementById("cfg-save").addEventListener("click", saveSettings);
   document.getElementById("cfg-reset").addEventListener("click", () => {
