@@ -28,6 +28,8 @@
     <button class="tab"        data-tab="notes"     role="tab" aria-selected="false">Notes <span class="bdg hidden" id="bdg-notes">0</span></button>
     <button class="tab"        data-tab="mr"        role="tab" aria-selected="false">M&amp;R</button>
     <button class="tab"        data-tab="sensitive" role="tab" aria-selected="false">Sensitive <span class="bdg hidden" id="bdg-sensitive">0</span></button>
+    <button class="tab"        data-tab="storage"   role="tab" aria-selected="false">Storage</button>
+    <button class="tab"        data-tab="scripts"   role="tab" aria-selected="false">Scripts</button>
     <button class="tab"        data-tab="settings"  role="tab" aria-selected="false">Settings</button>
     <div class="tabbar-gap"></div>
     <span id="site-host" class="site-host">—</span>
@@ -591,6 +593,7 @@
                 <option value="smuggling">Request Smuggling</option>
                 <option value="graphql">GraphQL Explorer</option>
                 <option value="upload-scan">Upload Scanner</option>
+                <option value="flow">Flow Builder (chained requests)</option>
               </optgroup>
             </select>
             <label class="settings-label-sm" for="intr-threads">Threads</label>
@@ -739,6 +742,13 @@
               </div>
               <div class="settings-row"><label class="settings-label-sm">Schema</label></div>
               <textarea id="intr-gql-schema" class="raw-ta settings-ta" rows="4" readonly spellcheck="false" placeholder="Run introspection to discover schema…"></textarea>
+            </div>
+            <!-- Flow Builder -->
+            <div id="intr-cfg-flow" class="intr-spec hidden">
+              <div class="pane-label">FLOW BUILDER — chained requests with variable extraction</div>
+              <div class="settings-section-desc">Define steps that run sequentially. Extract values from each response and inject into the next step via <code>{{varName}}</code> placeholders.</div>
+              <div id="flow-steps" class="flow-steps"></div>
+              <button id="flow-add-step" class="btn btn-xs btn-ghost">+ Add Step</button>
             </div>
             <!-- Upload Scanner -->
             <div id="intr-cfg-upload" class="intr-spec hidden">
@@ -2129,6 +2139,111 @@
   </div>
 
 
+
+  <!-- ═══════════════════════════ STORAGE ══════════════════════════════════ -->
+  <div id="tab-storage" class="tab-panel hidden" role="tabpanel">
+    <div class="filter-bar">
+      <div class="sub-tabs">
+        <button class="sub-tab active" data-storsub="local">localStorage</button>
+        <button class="sub-tab" data-storsub="session">sessionStorage</button>
+        <button class="sub-tab" data-storsub="cookies">Cookies</button>
+        <button class="sub-tab" data-storsub="postmsg">postMessage</button>
+      </div>
+      <input id="stor-filter" type="text" placeholder="Filter keys…" spellcheck="false" autocomplete="off" aria-label="Filter storage">
+      <button id="stor-refresh" class="btn btn-xs btn-ghost">Refresh</button>
+      <button id="stor-export" class="btn btn-xs btn-ghost">Export JSON</button>
+      <button id="stor-clear-all" class="btn btn-xs btn-danger">Clear All</button>
+    </div>
+
+    <!-- localStorage / sessionStorage / Cookies -->
+    <div id="stor-kv-panel" class="stor-panel">
+      <div class="hist-scroll-wrap">
+        <table class="hist-table" id="stor-table">
+          <thead><tr>
+            <th style="width:36px">#</th>
+            <th>Key</th>
+            <th>Value</th>
+            <th style="width:60px">Size</th>
+            <th style="width:60px">Actions</th>
+          </tr></thead>
+          <tbody id="stor-tbody"></tbody>
+        </table>
+      </div>
+      <div id="stor-empty" class="empty">Click <b>Refresh</b> to read storage from the inspected page.</div>
+    </div>
+
+    <!-- postMessage monitor -->
+    <div id="stor-postmsg-panel" class="stor-panel hidden">
+      <div class="hist-scroll-wrap">
+        <table class="hist-table" id="stor-pm-table">
+          <thead><tr>
+            <th style="width:36px">#</th>
+            <th style="width:120px">Time</th>
+            <th style="width:180px">Origin</th>
+            <th>Data</th>
+            <th style="width:60px">Type</th>
+          </tr></thead>
+          <tbody id="stor-pm-tbody"></tbody>
+        </table>
+      </div>
+      <div id="stor-pm-empty" class="empty">Listening for postMessage events… interact with the page to trigger them.</div>
+      <div class="stor-pm-bar">
+        <button id="stor-pm-clear" class="btn btn-xs btn-ghost">Clear</button>
+        <span id="stor-pm-count" class="settings-status"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ SCRIPTS ═════════════════════════════════ -->
+  <div id="tab-scripts" class="tab-panel hidden" role="tabpanel">
+    <div class="filter-bar">
+      <select id="script-lib" class="filter-sel" aria-label="Script library">
+        <option value="">New Script</option>
+      </select>
+      <input id="script-name" type="text" class="settings-inp" placeholder="Script name" spellcheck="false" style="max-width:200px" aria-label="Script name">
+      <button id="script-save" class="btn btn-xs btn-ghost">Save</button>
+      <button id="script-delete" class="btn btn-xs btn-danger">Delete</button>
+      <div class="tabbar-gap"></div>
+      <button id="script-run" class="btn btn-sm btn-accent">Run ▶</button>
+      <button id="script-stop" class="btn btn-sm btn-danger" disabled>Stop</button>
+    </div>
+    <div class="script-split">
+      <div class="script-editor-wrap">
+        <div class="pane-label">EDITOR — use <code>void.*</code> API (see docs below)</div>
+        <textarea id="script-editor" class="raw-ta script-ta" spellcheck="false" placeholder="// Example: replay all history entries with a modified header
+for (const entry of await void.history()) {
+  const res = await void.request({
+    url: entry.url,
+    method: entry.method,
+    headers: { ...entry.headers, 'X-Custom': 'test' },
+    body: entry.body
+  });
+  void.log(`${res.status} ${entry.url}`);
+  if (res.body.includes('admin')) {
+    void.addFinding({ title: 'Admin access', severity: 'high', detail: entry.url });
+  }
+}"></textarea>
+      </div>
+      <div class="script-console-wrap">
+        <div class="pane-label">CONSOLE</div>
+        <pre id="script-console" class="raw-pre script-console"></pre>
+      </div>
+    </div>
+    <div class="script-api-ref">
+      <details>
+        <summary class="pane-label" style="cursor:pointer">API REFERENCE</summary>
+        <div class="script-api-body">
+          <code>await void.request({url, method, headers, body})</code> — send HTTP request, returns <code>{status, headers, body, elapsed}</code><br>
+          <code>await void.history()</code> — get all captured HTTP history entries<br>
+          <code>void.log(msg)</code> — print to console below<br>
+          <code>void.addFinding({title, severity, detail})</code> — add to Notes tab (severity: info/low/medium/high/critical)<br>
+          <code>await void.sleep(ms)</code> — wait N milliseconds<br>
+          <code>await void.storage(type)</code> — read storage (type: "local", "session", "cookies")<br>
+          <code>void.setVar(name, value)</code> / <code>void.getVar(name)</code> — persist variables across runs
+        </div>
+      </details>
+    </div>
+  </div>
 
 </div>
 <script src="sensitive-rules.js"></script>

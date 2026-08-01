@@ -168,6 +168,7 @@ function buildDetailPane(prefix, opts = {}) {
   topBtns.push(`<button id="${p}-detail-to-rep" class="btn btn-sm btn-ghost">\u2192 Repeater</button>`);
   if (opts.intruderBtn !== false) topBtns.push(`<button id="${p}-detail-to-intr" class="btn btn-sm btn-ghost">\u2192 Intruder</button>`);
   if (opts.openBtn) topBtns.push(`<button id="${p}-detail-open" class="btn btn-sm btn-ghost" title="Open in new tab">\u2197${opts.openLabel || ""}</button>`);
+  if (opts.timelineBtn) topBtns.push(`<button id="${p}-detail-timeline" class="btn btn-sm btn-ghost" title="Show response changes over time">\u23F1 Timeline</button>`);
   topBtns.push(`<button id="${p}-detail-poc" class="btn btn-sm btn-ghost" title="Send to PoC Generator">\u2192 PoC</button>`);
   topBtns.push(`<button id="${p}-detail-notes" class="btn btn-sm btn-ghost" title="Add to Notes">\u2192 Notes</button>`);
 
@@ -3032,7 +3033,7 @@ async function intrStart() {
   if (!url) { document.getElementById("intr-url").focus(); return; }
 
   // Specialized attack modes — dispatch directly
-  const specialModes = ["auth-idor", "race", "param-miner", "jwt-attack", "cors-scan", "smuggling", "graphql", "upload-scan"];
+  const specialModes = ["auth-idor", "race", "param-miner", "jwt-attack", "cors-scan", "smuggling", "graphql", "upload-scan", "flow"];
   if (specialModes.includes(attackType)) {
     intrRunning = true;
     intrResults = [];
@@ -3053,6 +3054,7 @@ async function intrStart() {
         case "smuggling":    results = await intrRunSmuggling(url, method, rawHeaders); break;
         case "graphql":      results = await intrRunGraphQL(url, rawHeaders); break;
         case "upload-scan":  results = await intrRunUploadScan(url, method, rawHeaders); break;
+        case "flow":         results = await intrRunFlow(url, method, rawHeaders, body); break;
       }
     } catch (e) { document.getElementById("intr-status").textContent = "Error: " + e.message; }
 
@@ -6618,7 +6620,7 @@ function intrUpdateSpecConfig() {
   const cfgMap = {
     "auth-idor": "intr-cfg-auth", "race": "intr-cfg-race", "param-miner": "intr-cfg-param",
     "jwt-attack": "intr-cfg-jwt", "cors-scan": "intr-cfg-cors", "smuggling": "intr-cfg-smuggling",
-    "graphql": "intr-cfg-graphql", "upload-scan": "intr-cfg-upload",
+    "graphql": "intr-cfg-graphql", "upload-scan": "intr-cfg-upload", "flow": "intr-cfg-flow",
   };
   if (cfgMap[mode]) document.getElementById(cfgMap[mode]).classList.remove("hidden");
 }
@@ -7027,6 +7029,574 @@ async function sessionCheckAndRenew(res) {
   }
 }
 
+// ═══════════════════════════ STORAGE INSPECTOR ═══════════════════════════════
+
+let storSubTab = "local";
+let storData = [];
+let storFilter = "";
+let storPostMessages = [];
+let storPmNextId = 1;
+let storPmListening = false;
+
+async function storFetch(type) {
+  let script = "";
+  if (type === "local") {
+    script = `(() => { const r = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); r.push({ key: k, value: localStorage.getItem(k) }); } return r; })()`;
+  } else if (type === "session") {
+    script = `(() => { const r = []; for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); r.push({ key: k, value: sessionStorage.getItem(k) }); } return r; })()`;
+  } else if (type === "cookies") {
+    script = `document.cookie.split("; ").filter(Boolean).map(c => { const eq = c.indexOf("="); return { key: c.slice(0, eq), value: c.slice(eq + 1) }; })`;
+  }
+  try {
+    const result = await new Promise((resolve, reject) => {
+      chrome.devtools.inspectedWindow.eval(script, (res, err) => {
+        if (err) reject(err); else resolve(res || []);
+      });
+    });
+    return result;
+  } catch { return []; }
+}
+
+async function storRefresh() {
+  storData = await storFetch(storSubTab);
+  storRender();
+}
+
+function storRender() {
+  const tbody = document.getElementById("stor-tbody");
+  const empty = document.getElementById("stor-empty");
+  tbody.replaceChildren();
+  let items = storData;
+  if (storFilter) {
+    const q = storFilter.toLowerCase();
+    items = items.filter(e => e.key.toLowerCase().includes(q) || (e.value || "").toLowerCase().includes(q));
+  }
+  if (!items.length) { empty.classList.remove("hidden"); return; }
+  empty.classList.add("hidden");
+  for (let i = 0; i < items.length; i++) {
+    const e = items[i];
+    const tr = document.createElement("tr");
+    const valLen = (e.value || "").length;
+    const sizeStr = valLen > 1024 ? `${(valLen / 1024).toFixed(1)}k` : `${valLen}`;
+    tr.innerHTML = `
+      <td class="hist-td-num">${i + 1}</td>
+      <td title="${esc(e.key)}">${esc(e.key)}</td>
+      <td title="${esc((e.value || "").slice(0, 200))}">${esc((e.value || "").slice(0, 100))}</td>
+      <td class="hist-td-len">${esc(sizeStr)}</td>
+      <td><button class="btn btn-xs btn-ghost stor-copy-btn" data-idx="${i}">\u2398</button><button class="btn btn-xs btn-ghost stor-del-btn" data-idx="${i}">\u2715</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+async function storDeleteKey(idx) {
+  const e = storData[idx];
+  if (!e) return;
+  let script = "";
+  if (storSubTab === "local") script = `localStorage.removeItem(${JSON.stringify(e.key)})`;
+  else if (storSubTab === "session") script = `sessionStorage.removeItem(${JSON.stringify(e.key)})`;
+  else if (storSubTab === "cookies") script = `document.cookie = ${JSON.stringify(e.key + "=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/")}`;
+  try { await new Promise(r => chrome.devtools.inspectedWindow.eval(script, r)); } catch {}
+  await storRefresh();
+}
+
+async function storClearAll() {
+  let script = "";
+  if (storSubTab === "local") script = "localStorage.clear()";
+  else if (storSubTab === "session") script = "sessionStorage.clear()";
+  else if (storSubTab === "cookies") script = `document.cookie.split("; ").forEach(c => { document.cookie = c.split("=")[0] + "=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/"; })`;
+  try { await new Promise(r => chrome.devtools.inspectedWindow.eval(script, r)); } catch {}
+  await storRefresh();
+}
+
+function storStartPostMessageMonitor() {
+  if (storPmListening) return;
+  storPmListening = true;
+  const script = `
+    if (!window.__voidPmHook) {
+      window.__voidPmLog = [];
+      window.__voidPmHook = true;
+      window.addEventListener("message", function(e) {
+        window.__voidPmLog.push({ time: Date.now(), origin: e.origin || "", data: typeof e.data === "object" ? JSON.stringify(e.data) : String(e.data), type: typeof e.data });
+      });
+    }
+    true
+  `;
+  try { chrome.devtools.inspectedWindow.eval(script, () => {}); } catch {}
+}
+
+async function storPollPostMessages() {
+  const script = `(() => { const l = window.__voidPmLog || []; window.__voidPmLog = []; return l; })()`;
+  try {
+    const msgs = await new Promise((resolve, reject) => {
+      chrome.devtools.inspectedWindow.eval(script, (res, err) => {
+        if (err) reject(err); else resolve(res || []);
+      });
+    });
+    for (const m of msgs) {
+      storPostMessages.push({ ...m, id: storPmNextId++ });
+    }
+    storRenderPostMessages();
+  } catch {}
+}
+
+function storRenderPostMessages() {
+  const tbody = document.getElementById("stor-pm-tbody");
+  const empty = document.getElementById("stor-pm-empty");
+  const count = document.getElementById("stor-pm-count");
+  tbody.replaceChildren();
+  if (!storPostMessages.length) { empty.classList.remove("hidden"); count.textContent = ""; return; }
+  empty.classList.add("hidden");
+  count.textContent = `${storPostMessages.length} message(s)`;
+  for (const m of storPostMessages) {
+    const tr = document.createElement("tr");
+    const ts = m.time ? fmtTime(m.time) : "";
+    tr.innerHTML = `
+      <td class="hist-td-num">${m.id}</td>
+      <td class="hist-td-timestamp">${esc(ts)}</td>
+      <td title="${esc(m.origin)}">${esc(m.origin)}</td>
+      <td title="${esc(m.data)}">${esc((m.data || "").slice(0, 200))}</td>
+      <td>${esc(m.type)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+// ═══════════════════════════ RESPONSE TIMELINE ═══════════════════════════════
+
+function timelineGetEntries(entry) {
+  if (!entry) return [];
+  let path = "";
+  try { path = new URL(entry.url).pathname; } catch { return []; }
+  return historyData.filter(e => {
+    try { return new URL(e.url).pathname === path && e.method === entry.method; } catch { return false; }
+  }).sort((a, b) => (a.time || 0) - (b.time || 0));
+}
+
+function timelineShow(entry) {
+  const entries = timelineGetEntries(entry);
+  if (entries.length < 2) { showToast("Need 2+ captures of this endpoint for timeline"); return; }
+
+  // Build timeline panel — replaces the hist-detail-body content temporarily
+  const body = document.getElementById("hist-detail-body") || document.querySelector("#hist-detail .hist-detail-body");
+  if (!body) return;
+
+  // Store original content
+  if (!body._origHTML) body._origHTML = body.innerHTML;
+
+  const listItems = entries.map((e, i) => {
+    const prev = i > 0 ? entries[i - 1] : null;
+    const hash = simpleHash(e.respBody || "");
+    const prevHash = prev ? simpleHash(prev.respBody || "") : hash;
+    const statusChanged = prev && e.status !== prev.status;
+    const bodyChanged = prev && hash !== prevHash;
+    const dotCls = statusChanged ? "timeline-dot-status" : bodyChanged ? "timeline-dot-changed" : "timeline-dot-same";
+    const ts = e.time ? fmtTime(e.time) : "?";
+    const len = (e.respBody || "").length;
+    return `<div class="timeline-entry" data-tl-idx="${i}">
+      <span class="timeline-dot ${dotCls}"></span>
+      <span class="timeline-meta">${esc(ts)}</span>
+      <span class="hist-td-status-${e.status < 300 ? "ok" : e.status < 400 ? "rdir" : "err"}">${e.status || "\u2026"}</span>
+      <span class="hist-td-len">${len > 1024 ? (len / 1024).toFixed(1) + "k" : len}B</span>
+      <span class="timeline-meta">${esc(String(Object.keys(e.respHeaders || {}).length))} hdrs</span>
+      ${statusChanged ? '<span class="hist-td-status-err">STATUS \u0394</span>' : ""}
+      ${bodyChanged && !statusChanged ? '<span class="hist-td-status-rdir">BODY \u0394</span>' : ""}
+    </div>`;
+  }).join("");
+
+  // safe: all values escaped via esc(), static class names only
+  body.innerHTML = `
+    <div class="timeline-panel">
+      <div class="hist-detail-topbar" style="padding:4px 8px;gap:6px">
+        <button id="tl-back" class="btn btn-xs btn-ghost">\u2190 Back</button>
+        <span class="pane-heading">TIMELINE: ${esc(entry.method)} ${esc(entry.url.length > 60 ? entry.url.slice(0, 57) + "\u2026" : entry.url)}</span>
+        <span class="timeline-meta">${entries.length} captures</span>
+        <span class="timeline-meta">\u2022 Click two entries to diff</span>
+      </div>
+      <div class="timeline-list">${listItems}</div>
+      <div class="timeline-diff-panel"><pre id="tl-diff-pre" class="raw-pre" style="font-size:11px"></pre></div>
+    </div>
+  `;
+
+  // Wire events
+  let tlSelected = [];
+  document.getElementById("tl-back").addEventListener("click", () => {
+    body.innerHTML = body._origHTML; // safe: restoring own prior content
+    body._origHTML = null;
+  });
+
+  body.querySelectorAll(".timeline-entry").forEach(row => {
+    row.addEventListener("click", () => {
+      const idx = parseInt(row.dataset.tlIdx);
+      if (row.classList.contains("selected")) {
+        row.classList.remove("selected");
+        tlSelected = tlSelected.filter(i => i !== idx);
+      } else {
+        if (tlSelected.length >= 2) {
+          body.querySelectorAll(".timeline-entry").forEach(r => r.classList.remove("selected"));
+          tlSelected = [];
+        }
+        row.classList.add("selected");
+        tlSelected.push(idx);
+      }
+      if (tlSelected.length === 2) {
+        const a = entries[tlSelected[0]], b = entries[tlSelected[1]];
+        const leftLines = rawResponseText(a).split("\n");
+        const rightLines = rawResponseText(b).split("\n");
+        const diff = cmpLineDiff(leftLines, rightLines, false);
+        const pre = document.getElementById("tl-diff-pre");
+        pre.replaceChildren();
+        const maxLen = Math.max(diff.left.length, diff.right.length);
+        for (let i = 0; i < maxLen; i++) {
+          const l = diff.left[i], r = diff.right[i];
+          if (l && l.type === "del") {
+            const d = document.createElement("div");
+            d.className = "cmp-line-del"; d.textContent = "- " + l.text;
+            pre.appendChild(d);
+          }
+          if (r && r.type === "add") {
+            const d = document.createElement("div");
+            d.className = "cmp-line-add"; d.textContent = "+ " + r.text;
+            pre.appendChild(d);
+          }
+          if (l && l.type === "same") {
+            const d = document.createElement("div");
+            d.textContent = "  " + l.text;
+            pre.appendChild(d);
+          }
+        }
+      }
+    });
+  });
+}
+
+// ═══════════════════════════ FLOW BUILDER ═════════════════════════════════════
+
+let flowSteps = [];
+let flowNextId = 1;
+
+function flowAddStep(method, url, headers, body) {
+  flowSteps.push({
+    id: flowNextId++,
+    method: method || "GET",
+    url: url || "",
+    headers: headers || "",
+    body: body || "",
+    extractors: [],
+  });
+  flowRenderSteps();
+}
+
+function flowRenderSteps() {
+  const container = document.getElementById("flow-steps");
+  if (!container) return;
+  container.replaceChildren();
+  for (let i = 0; i < flowSteps.length; i++) {
+    const s = flowSteps[i];
+    const div = document.createElement("div");
+    div.className = "flow-step";
+
+    const extractHtml = s.extractors.map((ex, ei) => `
+      <div class="settings-row" style="font-size:11px">
+        <select class="filter-sel flow-ext-type" data-step="${i}" data-ext="${ei}" style="width:80px">
+          <option value="regex" ${ex.type === "regex" ? "selected" : ""}>Regex</option>
+          <option value="header" ${ex.type === "header" ? "selected" : ""}>Header</option>
+          <option value="jsonpath" ${ex.type === "jsonpath" ? "selected" : ""}>JSON key</option>
+          <option value="cookie" ${ex.type === "cookie" ? "selected" : ""}>Cookie</option>
+        </select>
+        <input class="settings-inp flow-ext-expr" data-step="${i}" data-ext="${ei}" value="${esc(ex.expr)}" placeholder="expression" spellcheck="false" style="flex:1">
+        <span>\u2192</span>
+        <input class="settings-inp flow-ext-var" data-step="${i}" data-ext="${ei}" value="${esc(ex.varName)}" placeholder="{{var}}" spellcheck="false" style="width:80px">
+        <button class="btn btn-xs btn-ghost flow-ext-del" data-step="${i}" data-ext="${ei}">\u2715</button>
+      </div>
+    `).join("");
+
+    // safe: all interpolated values escaped via esc(), class names are static
+    div.innerHTML = `
+      <div class="flow-step-hdr">
+        <span class="pane-label">Step ${i + 1}</span>
+        <button class="btn btn-xs btn-ghost flow-step-del" data-step="${i}">\u2715 Remove</button>
+      </div>
+      <div class="flow-step-fields">
+        <div class="settings-row">
+          <select class="filter-sel flow-method" data-step="${i}" style="width:80px">
+            ${METHODS.map(m => `<option ${m === s.method ? "selected" : ""}>${esc(m)}</option>`).join("")}
+          </select>
+          <input class="settings-inp flow-url" data-step="${i}" value="${esc(s.url)}" placeholder="https://target.com/api/endpoint" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <input class="settings-inp flow-headers" data-step="${i}" value="${esc(s.headers)}" placeholder="Header: value (one per line or \\n separated)" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <input class="settings-inp flow-body" data-step="${i}" value="${esc(s.body)}" placeholder="Request body (use {{var}} for extracted values)" spellcheck="false" style="flex:1">
+        </div>
+      </div>
+      <div class="flow-extract">
+        <div class="flow-extract-hdr">EXTRACTORS \u2014 capture values from this step's response</div>
+        ${extractHtml}
+        <button class="btn btn-xs btn-ghost flow-ext-add" data-step="${i}">+ Extractor</button>
+      </div>
+    `;
+    container.appendChild(div);
+  }
+
+  // Wire step events via delegation
+  container.querySelectorAll(".flow-step-del").forEach(btn => {
+    btn.addEventListener("click", () => { flowSteps.splice(parseInt(btn.dataset.step), 1); flowRenderSteps(); });
+  });
+  container.querySelectorAll(".flow-ext-add").forEach(btn => {
+    btn.addEventListener("click", () => {
+      flowSteps[parseInt(btn.dataset.step)].extractors.push({ type: "regex", expr: "", varName: "" });
+      flowRenderSteps();
+    });
+  });
+  container.querySelectorAll(".flow-ext-del").forEach(btn => {
+    btn.addEventListener("click", () => {
+      flowSteps[parseInt(btn.dataset.step)].extractors.splice(parseInt(btn.dataset.ext), 1);
+      flowRenderSteps();
+    });
+  });
+  container.querySelectorAll(".flow-method,.flow-url,.flow-headers,.flow-body").forEach(inp => {
+    inp.addEventListener("change", () => {
+      const s = flowSteps[parseInt(inp.dataset.step)];
+      if (inp.classList.contains("flow-method")) s.method = inp.value;
+      if (inp.classList.contains("flow-url")) s.url = inp.value;
+      if (inp.classList.contains("flow-headers")) s.headers = inp.value;
+      if (inp.classList.contains("flow-body")) s.body = inp.value;
+    });
+  });
+  container.querySelectorAll(".flow-ext-type,.flow-ext-expr,.flow-ext-var").forEach(inp => {
+    inp.addEventListener("change", () => {
+      const ex = flowSteps[parseInt(inp.dataset.step)].extractors[parseInt(inp.dataset.ext)];
+      if (inp.classList.contains("flow-ext-type")) ex.type = inp.value;
+      if (inp.classList.contains("flow-ext-expr")) ex.expr = inp.value;
+      if (inp.classList.contains("flow-ext-var")) ex.varName = inp.value;
+    });
+  });
+}
+
+function flowExtractValue(resp, extractor) {
+  const { type, expr } = extractor;
+  if (!expr) return "";
+  const body = resp.body || "";
+  const hdrs = resp.headers || {};
+  switch (type) {
+    case "regex": {
+      try { const m = body.match(new RegExp(expr)); return m ? (m[1] || m[0]) : ""; } catch { return ""; }
+    }
+    case "header": {
+      const key = expr.toLowerCase();
+      for (const [k, v] of Object.entries(hdrs)) { if (k.toLowerCase() === key) return v; }
+      return "";
+    }
+    case "jsonpath": {
+      try { const obj = JSON.parse(body); return String(expr.split(".").reduce((o, k) => o?.[k], obj) ?? ""); } catch { return ""; }
+    }
+    case "cookie": {
+      const setCookie = hdrs["set-cookie"] || hdrs["Set-Cookie"] || "";
+      const m = setCookie.match(new RegExp(`${expr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=([^;]+)`));
+      return m ? m[1] : "";
+    }
+    default: return "";
+  }
+}
+
+function flowInjectVars(text, vars) {
+  return text.replace(/\{\{(\w+)\}\}/g, (_, name) => vars[name] || `{{${name}}}`);
+}
+
+async function intrRunFlow(url, method, rawHeaders, body) {
+  if (!flowSteps.length) {
+    flowSteps.push({ id: flowNextId++, method, url, headers: rawHeaders, body, extractors: [] });
+    flowRenderSteps();
+  }
+
+  const vars = {};
+  const results = [];
+
+  for (let i = 0; i < flowSteps.length; i++) {
+    const step = flowSteps[i];
+    const stepUrl = flowInjectVars(step.url, vars);
+    const stepHeaders = flowInjectVars(step.headers, vars);
+    const stepBody = flowInjectVars(step.body, vars);
+
+    const t0 = Date.now();
+    const res = await bg({
+      type: "SEND_REQUEST",
+      url: stepUrl,
+      method: step.method,
+      rawHeaders: stepHeaders,
+      body: stepBody || undefined,
+    });
+    const elapsed = Date.now() - t0;
+
+    const status = res?.status || 0;
+    const respBody = res?.body || "";
+    const respHeaders = res?.headers || {};
+
+    const extracted = [];
+    for (const ex of step.extractors) {
+      const val = flowExtractValue({ body: respBody, headers: respHeaders }, ex);
+      if (ex.varName) vars[ex.varName] = val;
+      extracted.push(`${ex.varName}=${val.slice(0, 50)}`);
+    }
+
+    results.push({
+      id: i + 1,
+      payload: `Step ${i + 1}: ${step.method} ${stepUrl.slice(0, 60)}`,
+      status,
+      length: respBody.length,
+      elapsed,
+      respBody,
+      respHeaders,
+      grepMatch: false,
+      grepExtract: extracted.join("; ") || "",
+    });
+  }
+
+  return results;
+}
+
+// ═══════════════════════════ SCRIPTS ENGINE ══════════════════════════════════
+// Intentional: the Scripts tab is a user-scripting feature — users write and
+// execute their own automation scripts. Dynamic code execution via
+// Function() is the core purpose, equivalent to a browser console.
+
+let scriptVars = {};
+let scriptRunning = false;
+let scriptAbort = null;
+let scriptSavedScripts = {};
+
+function scriptLog(msg) {
+  const con = document.getElementById("script-console");
+  if (!con) return;
+  const div = document.createElement("div");
+  div.textContent = String(msg);
+  con.appendChild(div);
+  con.scrollTop = con.scrollHeight;
+}
+
+function scriptLogError(msg) {
+  const con = document.getElementById("script-console");
+  if (!con) return;
+  const div = document.createElement("div");
+  div.style.color = "var(--red)";
+  div.textContent = String(msg);
+  con.appendChild(div);
+  con.scrollTop = con.scrollHeight;
+}
+
+async function scriptRun() {
+  const code = document.getElementById("script-editor").value;
+  if (!code.trim()) return;
+
+  scriptRunning = true;
+  scriptAbort = new AbortController();
+  document.getElementById("script-run").disabled = true;
+  document.getElementById("script-stop").disabled = false;
+  document.getElementById("script-console").replaceChildren();
+  scriptLog("[Script started]");
+
+  const api = {
+    request: async (opts) => {
+      if (!scriptRunning) throw new Error("Script stopped");
+      const res = await bg({
+        type: "SEND_REQUEST",
+        url: opts.url,
+        method: opts.method || "GET",
+        rawHeaders: typeof opts.headers === "string" ? opts.headers :
+          Object.entries(opts.headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n"),
+        body: opts.body || undefined,
+      });
+      return {
+        status: res?.status || 0,
+        headers: res?.headers || {},
+        body: res?.body || "",
+        elapsed: res?.elapsed || 0,
+      };
+    },
+    history: async () => [...historyData],
+    log: (msg) => scriptLog(msg),
+    addFinding: (f) => {
+      const entry = {
+        id: notesNextId++,
+        title: f.title || "Script finding",
+        severity: f.severity || "info",
+        detail: f.detail || "",
+        host: "",
+        created: Date.now(),
+      };
+      notes.push(entry);
+      scriptLog(`[Finding added: ${entry.severity.toUpperCase()} \u2014 ${entry.title}]`);
+    },
+    sleep: (ms) => new Promise(r => setTimeout(r, Math.min(ms, 30000))),
+    storage: async (type) => storFetch(type || "local"),
+    setVar: (name, value) => { scriptVars[name] = value; },
+    getVar: (name) => scriptVars[name],
+  };
+
+  try {
+    // User scripting engine: wraps user code in async function with void.* API.
+    // This is intentional dynamic code execution — the Scripts tab is an
+    // automation console, similar to browser DevTools console.
+    const wrappedCode = `return (async function(voidApi) {
+      const void_ = voidApi;
+      ${code.replace(/\bvoid\./g, "void_.")}
+    })(api);`;
+    const fn = new Function("api", wrappedCode); // intentional: user scripting engine
+    await fn(api);
+    scriptLog("[Script completed]");
+  } catch (e) {
+    scriptLogError(`Error: ${e.message}`);
+  }
+
+  scriptRunning = false;
+  document.getElementById("script-run").disabled = false;
+  document.getElementById("script-stop").disabled = true;
+}
+
+function scriptStop() {
+  scriptRunning = false;
+  if (scriptAbort) { scriptAbort.abort(); scriptAbort = null; }
+  scriptLog("[Script stopped by user]");
+  document.getElementById("script-run").disabled = false;
+  document.getElementById("script-stop").disabled = true;
+}
+
+async function scriptSave() {
+  const name = document.getElementById("script-name").value.trim();
+  const code = document.getElementById("script-editor").value;
+  if (!name) { showToast("Enter a name"); return; }
+  scriptSavedScripts[name] = code;
+  await new Promise(r => chrome.storage.local.set({ voidScripts: scriptSavedScripts }, r));
+  scriptLoadLibrary();
+  showToast(`Saved: ${name}`);
+}
+
+async function scriptDelete() {
+  const name = document.getElementById("script-name").value.trim();
+  if (!name || !scriptSavedScripts[name]) return;
+  delete scriptSavedScripts[name];
+  await new Promise(r => chrome.storage.local.set({ voidScripts: scriptSavedScripts }, r));
+  scriptLoadLibrary();
+  document.getElementById("script-name").value = "";
+  document.getElementById("script-editor").value = "";
+  showToast(`Deleted: ${name}`);
+}
+
+function scriptLoadLibrary() {
+  const sel = document.getElementById("script-lib");
+  sel.replaceChildren();
+  const opt0 = document.createElement("option");
+  opt0.value = ""; opt0.textContent = "New Script";
+  sel.appendChild(opt0);
+  for (const name of Object.keys(scriptSavedScripts).sort()) {
+    const opt = document.createElement("option");
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
+  }
+}
+
 // ═══════════════════════════ INIT ════════════════════════════════════════════
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -7042,7 +7612,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const paneConfigs = {
       tgt:  {},
       ep:   {},
-      hist: { openBtn: true, openLabel: " Open", reflectBadge: true, renderPane: true },
+      hist: { openBtn: true, openLabel: " Open", reflectBadge: true, renderPane: true, timelineBtn: true },
       log:  { openBtn: true },
       intr: { intruderBtn: false, openBtn: true, openLabel: " Open", subPaneClass: "intr-sub-pane" },
       sens: { openBtn: true },
@@ -8575,6 +9145,98 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!epDetailEntry) return;
       const h = historyData.find(he => he.url === epDetailEntry.url) || epDetailEntry;
       notesFromEntry(h);
+    });
+  });
+
+  // ── Storage tab ─────────────────────────────────────────────────────────────
+  initBlock("storage", () => {
+    let storPmTimer = null;
+
+    // Sub-tab switching
+    document.querySelectorAll("[data-storsub]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-storsub]").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        storSubTab = btn.dataset.storsub;
+        const isPostMsg = storSubTab === "postmsg";
+        document.getElementById("stor-kv-panel").classList.toggle("hidden", isPostMsg);
+        document.getElementById("stor-postmsg-panel").classList.toggle("hidden", !isPostMsg);
+        if (isPostMsg) {
+          storStartPostMessageMonitor();
+          if (!storPmTimer) storPmTimer = setInterval(storPollPostMessages, 2000);
+        } else {
+          if (storPmTimer) { clearInterval(storPmTimer); storPmTimer = null; }
+          storRefresh();
+        }
+      });
+    });
+
+    document.getElementById("stor-refresh").addEventListener("click", () => {
+      if (storSubTab === "postmsg") storPollPostMessages();
+      else storRefresh();
+    });
+    document.getElementById("stor-filter").addEventListener("input", e => { storFilter = e.target.value; storRender(); });
+    document.getElementById("stor-export").addEventListener("click", () => {
+      const data = storSubTab === "postmsg" ? storPostMessages : storData;
+      navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+      showToast("Copied to clipboard");
+    });
+    document.getElementById("stor-clear-all").addEventListener("click", () => {
+      if (storSubTab === "postmsg") { storPostMessages = []; storPmNextId = 1; storRenderPostMessages(); }
+      else storClearAll();
+    });
+
+    // Delegated click for copy/delete buttons
+    document.getElementById("stor-tbody").addEventListener("click", e => {
+      const btn = e.target.closest(".stor-copy-btn");
+      if (btn) { const entry = storData[parseInt(btn.dataset.idx)]; if (entry) { navigator.clipboard.writeText(entry.value || ""); showToast("Copied"); } return; }
+      const del = e.target.closest(".stor-del-btn");
+      if (del) { storDeleteKey(parseInt(del.dataset.idx)); }
+    });
+  });
+
+  // ── History Timeline wiring ────────────────────────────────────────────────
+  initBlock("timeline", () => {
+    document.getElementById("hist-detail-timeline").addEventListener("click", () => {
+      if (histDetailEntry) timelineShow(histDetailEntry);
+    });
+  });
+
+  // ── Flow Builder wiring ────────────────────────────────────────────────────
+  initBlock("flow-builder", () => {
+    document.getElementById("flow-add-step").addEventListener("click", () => flowAddStep());
+  });
+
+  // ── Scripts tab ────────────────────────────────────────────────────────────
+  initBlock("scripts", () => {
+    document.getElementById("script-run").addEventListener("click", scriptRun);
+    document.getElementById("script-stop").addEventListener("click", scriptStop);
+    document.getElementById("script-save").addEventListener("click", scriptSave);
+    document.getElementById("script-delete").addEventListener("click", scriptDelete);
+    document.getElementById("script-lib").addEventListener("change", e => {
+      const name = e.target.value;
+      if (name && scriptSavedScripts[name]) {
+        document.getElementById("script-name").value = name;
+        document.getElementById("script-editor").value = scriptSavedScripts[name];
+      } else {
+        document.getElementById("script-name").value = "";
+        document.getElementById("script-editor").value = "";
+      }
+    });
+    // Load saved scripts from storage
+    chrome.storage.local.get("voidScripts", r => {
+      scriptSavedScripts = r.voidScripts || {};
+      scriptLoadLibrary();
+    });
+    // Tab key inserts spaces instead of changing focus
+    document.getElementById("script-editor").addEventListener("keydown", e => {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const ta = e.target;
+        const start = ta.selectionStart;
+        ta.value = ta.value.substring(0, start) + "  " + ta.value.substring(ta.selectionEnd);
+        ta.selectionStart = ta.selectionEnd = start + 2;
+      }
     });
   });
 

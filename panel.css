@@ -2525,6 +2525,43 @@ body {
 /* ── Response render frame ──────────────────────────────────────────── */
 .render-frame { width: 100%; height: 100%; border: none; background: #fff; }
 
+/* ── Storage tab ──────────────────────────────────────────────────── */
+.stor-panel { flex: 1; overflow: auto; }
+.stor-pm-bar { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--border); }
+
+/* ── Flow Builder ─────────────────────────────────────────────────── */
+.flow-steps { display: flex; flex-direction: column; gap: var(--sp-3); max-height: 300px; overflow-y: auto; }
+.flow-step { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: var(--sp-3); }
+.flow-step-hdr { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-2); }
+.flow-step-hdr .pane-label { margin: 0; flex: 1; }
+.flow-step-fields { display: flex; flex-direction: column; gap: var(--sp-2); }
+.flow-step-fields .settings-row { display: flex; align-items: center; gap: var(--sp-3); }
+.flow-extract { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: var(--sp-2); margin-top: var(--sp-2); }
+.flow-extract-hdr { font-size: 10px; color: var(--muted); margin-bottom: var(--sp-1); }
+
+/* ── Scripts tab ──────────────────────────────────────────────────── */
+.script-split { display: flex; flex-direction: column; flex: 1; gap: var(--sp-2); padding: var(--sp-2); overflow: hidden; }
+.script-editor-wrap { display: flex; flex-direction: column; flex: 3; min-height: 0; }
+.script-console-wrap { display: flex; flex-direction: column; flex: 1; min-height: 60px; }
+.script-ta { flex: 1; resize: none; font: 12px var(--mono); tab-size: 2; }
+.script-console { flex: 1; overflow: auto; font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r); padding: var(--sp-3); min-height: 40px; white-space: pre-wrap; word-break: break-all; }
+.script-api-ref { padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--border); }
+.script-api-body { padding: var(--sp-3); font-size: 11px; line-height: 1.6; }
+.script-api-body code { background: var(--bg3); padding: 1px var(--sp-2); border-radius: var(--r); font-size: 11px; }
+
+/* ── Response Timeline ────────────────────────────────────────────── */
+.timeline-panel { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.timeline-list { flex: 1; overflow-y: auto; }
+.timeline-entry { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12px; }
+.timeline-entry:hover { background: var(--bg3); }
+.timeline-entry.selected { background: var(--bg4); }
+.timeline-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.timeline-dot-same { background: var(--green); }
+.timeline-dot-changed { background: var(--yellow); }
+.timeline-dot-status { background: var(--red); }
+.timeline-meta { color: var(--muted); font-size: 10px; }
+.timeline-diff-panel { flex: 1; overflow: auto; border-top: 1px solid var(--border); }
+
 /* ── Light theme ────────────────────────────────────────────────────── */
 html.theme-light {
   --bg:      #ffffff;
