@@ -1660,8 +1660,6 @@ function renderRepTabs() {
         const tab = groupTabs[i];
         const btn = repMakeTabBtn(tab);
         btn.classList.add("grouped", `grp-${grp.color || "blue"}`);
-        // Last tab gets the bottom border to close the group visually
-        if (i === groupTabs.length - 1) btn.classList.add("group-last");
         bar.insertBefore(btn, addBtn);
       }
     }

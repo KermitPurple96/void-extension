@@ -1497,22 +1497,23 @@ body {
 }
 .rep-group-gear:hover { color: var(--text); }
 
-/* Grouped tabs — subtle bg tint on active, bottom border on last */
-.rep-tab-btn.grouped { border-bottom: 2px solid transparent; }
+/* Grouped tabs + header — continuous color bar across all elements */
+.rep-group-hdr:not(.collapsed),
+.rep-tab-btn.grouped { border-bottom: 3px solid var(--accent); }
 .rep-tab-btn.grouped.active { color: var(--text); }
-.rep-tab-btn.grouped.group-last { border-bottom: 3px solid var(--accent); }
-.rep-tab-btn.grouped.grp-green.group-last  { border-bottom-color: var(--green); }
-.rep-tab-btn.grouped.grp-yellow.group-last { border-bottom-color: var(--yellow); }
-.rep-tab-btn.grouped.grp-red.group-last    { border-bottom-color: var(--red); }
-.rep-tab-btn.grouped.grp-purple.group-last { border-bottom-color: var(--purple); }
-.rep-tab-btn.grouped.grp-orange.group-last { border-bottom-color: var(--orange); }
+/* Per-color bottom bar — header + all tabs */
+.rep-group-hdr.grp-green:not(.collapsed),  .rep-tab-btn.grouped.grp-green  { border-bottom-color: var(--green); }
+.rep-group-hdr.grp-yellow:not(.collapsed), .rep-tab-btn.grouped.grp-yellow { border-bottom-color: var(--yellow); }
+.rep-group-hdr.grp-red:not(.collapsed),    .rep-tab-btn.grouped.grp-red    { border-bottom-color: var(--red); }
+.rep-group-hdr.grp-purple:not(.collapsed), .rep-tab-btn.grouped.grp-purple { border-bottom-color: var(--purple); }
+.rep-group-hdr.grp-orange:not(.collapsed), .rep-tab-btn.grouped.grp-orange { border-bottom-color: var(--orange); }
 /* Per-color active tints */
-.rep-tab-btn.grouped.grp-blue.active    { background: rgba(88,166,255,.12); border-bottom-color: var(--accent); }
-.rep-tab-btn.grouped.grp-green.active   { background: rgba(63,185,80,.12);  border-bottom-color: var(--green); }
-.rep-tab-btn.grouped.grp-yellow.active  { background: rgba(227,179,65,.12); border-bottom-color: var(--yellow); }
-.rep-tab-btn.grouped.grp-red.active     { background: rgba(248,81,73,.12);  border-bottom-color: var(--red); }
-.rep-tab-btn.grouped.grp-purple.active  { background: rgba(188,140,255,.12); border-bottom-color: var(--purple); }
-.rep-tab-btn.grouped.grp-orange.active  { background: rgba(255,166,87,.12); border-bottom-color: var(--orange); }
+.rep-tab-btn.grouped.grp-blue.active    { background: rgba(88,166,255,.12); }
+.rep-tab-btn.grouped.grp-green.active   { background: rgba(63,185,80,.12); }
+.rep-tab-btn.grouped.grp-yellow.active  { background: rgba(227,179,65,.12); }
+.rep-tab-btn.grouped.grp-red.active     { background: rgba(248,81,73,.12); }
+.rep-tab-btn.grouped.grp-purple.active  { background: rgba(188,140,255,.12); }
+.rep-tab-btn.grouped.grp-orange.active  { background: rgba(255,166,87,.12); }
 
 /* ── Group dropdown menu ─────────────────────────────────────── */
 .rep-group-menu {
