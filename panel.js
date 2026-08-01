@@ -7194,10 +7194,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const url = document.getElementById("rep2-url").value;
     if (url) chrome.tabs.create({ url });
   });
-  wireActionBar("rep2", () => {
-    const url = document.getElementById("rep2-url").value;
-    return url ? { method: document.getElementById("rep2-method").value, url, headers: rawToHeaders(document.getElementById("rep2-headers").value), body: document.getElementById("rep2-body-ta").value, respBody: document.getElementById("resp2-body-pre").textContent } : null;
-  });
+  // wireActionBar for rep2 is called inside initBlock("copy-render") where wireActionBar is defined
 
   // Diff between primary and compare responses
   document.getElementById("rep-diff").addEventListener("click", () => {
@@ -7815,6 +7812,11 @@ document.addEventListener("DOMContentLoaded", () => {
       const tab = repTabs.find(t => t.id === repActiveTab);
       if (!tab) return null;
       return { method: tab.method, url: tab.url, headers: rawToHeaders(tab.headers || ""), body: tab.body || "", respBody: tab.response?.body || "", respHeaders: tab.response?.headers || {}, status: tab.response?.status };
+    });
+    // Right Repeater action bar
+    wireActionBar("rep2", () => {
+      const url = document.getElementById("rep2-url")?.value;
+      return url ? { method: document.getElementById("rep2-method").value, url, headers: rawToHeaders(document.getElementById("rep2-headers").value), body: document.getElementById("rep2-body-ta").value, respBody: document.getElementById("resp2-body-pre")?.textContent || "" } : null;
     });
   });
 
