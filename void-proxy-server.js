@@ -347,18 +347,26 @@ async function handle(clientReq, clientRes, isTls) {
 
 // ── Servers ──────────────────────────────────────────────────────────────────
 
-ensureCA();
+let hasOpenSSL = true;
+try { ensureCA(); } catch (e) {
+  hasOpenSSL = false;
+  console.log("[Void Proxy] openssl not found — HTTPS MITM disabled (HTTP proxy + AI chat still work)");
+  console.log("[Void Proxy] Install OpenSSL or add it to PATH to enable HTTPS interception");
+}
 
 // Everything CONNECT-tunnelled is re-terminated here so we can read the plaintext.
-const mitm = https.createServer({
-  SNICallback: (servername, cb) => {
-    try { cb(null, leafContext(servername)); }
-    catch (e) { cb(e); }
-  },
-}, (req, res) => handle(req, res, true));
-mitm.on("clientError", (e, sock) => { try { sock.destroy(); } catch {} });
-mitm.on("error", onListenError("internal TLS", "(ephemeral)"));
-mitm.listen(0, "127.0.0.1");
+let mitm = null;
+if (hasOpenSSL) {
+  mitm = https.createServer({
+    SNICallback: (servername, cb) => {
+      try { cb(null, leafContext(servername)); }
+      catch (e) { cb(e); }
+    },
+  }, (req, res) => handle(req, res, true));
+  mitm.on("clientError", (e, sock) => { try { sock.destroy(); } catch {} });
+  mitm.on("error", onListenError("internal TLS", "(ephemeral)"));
+  mitm.listen(0, "127.0.0.1");
+}
 
 // ── LLM Chat Proxy ──────────────────────────────────────────────────────────
 // POST /api/chat — proxies to whichever LLM API the user configured.
@@ -647,6 +655,11 @@ const proxy = http.createServer((req, res) => {
 });
 
 proxy.on("connect", (req, clientSocket, head) => {
+  if (!mitm) {
+    clientSocket.write("HTTP/1.1 502 HTTPS MITM unavailable (no openssl)\r\n\r\n");
+    clientSocket.destroy();
+    return;
+  }
   const [host, port] = req.url.split(":");
   if (!host) { clientSocket.destroy(); return; }
   // Pre-generate before the handshake so a slow openssl call doesn't stall TLS
