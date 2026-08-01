@@ -8157,6 +8157,23 @@ const AI_TOOLS = [
   { name: "get_postmessages", description: "Get captured postMessage events from the Storage tab.", parameters: { type: "object", properties: {} } },
   { name: "get_intruder_results", description: "Get the latest Intruder attack results.", parameters: { type: "object", properties: {} } },
   { name: "get_scan_findings", description: "Get the latest Active Scanner findings.", parameters: { type: "object", properties: {} } },
+  // ── Actions (write/modify state) ──
+  { name: "set_scope", description: "Set the scope include/exclude patterns. One pattern per line, supports * wildcard.", parameters: { type: "object", properties: { include: { type: "string", description: "Include patterns, one per line" }, exclude: { type: "string", description: "Exclude patterns, one per line" } } } },
+  { name: "toggle_intercept", description: "Toggle request interception on/off.", parameters: { type: "object", properties: { enabled: { type: "boolean" } }, required: ["enabled"] } },
+  { name: "get_intercepted", description: "Get currently paused/intercepted requests.", parameters: { type: "object", properties: {} } },
+  { name: "forward_request", description: "Forward a paused intercepted request.", parameters: { type: "object", properties: { requestId: { type: "string" } }, required: ["requestId"] } },
+  { name: "drop_request", description: "Drop a paused intercepted request.", parameters: { type: "object", properties: { requestId: { type: "string" } }, required: ["requestId"] } },
+  { name: "run_intruder_attack", description: "Run an Intruder attack with payloads. Returns results array.", parameters: { type: "object", properties: { url: { type: "string" }, method: { type: "string" }, headers: { type: "string" }, body: { type: "string" }, payloads: { type: "array", items: { type: "string" }, description: "List of payloads to inject" }, marker: { type: "string", description: "String to replace with payloads (default FUZZ)" }, injectIn: { type: "string", enum: ["url", "body", "header"], description: "Where to inject" }, threads: { type: "number" } }, required: ["url", "payloads"] } },
+  { name: "get_match_replace_rules", description: "Get current Match & Replace rules.", parameters: { type: "object", properties: {} } },
+  { name: "add_match_replace_rule", description: "Add a Match & Replace rule.", parameters: { type: "object", properties: { type: { type: "string", enum: ["req-header", "req-body", "resp-header", "resp-body"], description: "What to match on" }, match: { type: "string" }, replace: { type: "string" }, scope: { type: "string", description: "URL pattern to limit rule to (optional)" } }, required: ["type", "match", "replace"] } },
+  { name: "get_sensitive_findings", description: "Get Sensitive Discoverer findings (PII, tokens, errors found in traffic).", parameters: { type: "object", properties: {} } },
+  { name: "run_sensitive_scan", description: "Run the Sensitive Discoverer scan over captured history.", parameters: { type: "object", properties: {} } },
+  { name: "generate_csrf_poc", description: "Generate a CSRF proof-of-concept HTML for a request.", parameters: { type: "object", properties: { url: { type: "string" }, method: { type: "string" }, body: { type: "string", description: "Form body (URL-encoded)" }, contentType: { type: "string" } }, required: ["url"] } },
+  { name: "get_logger_entries", description: "Get Logger tab entries (aggregated from all sources: proxy, repeater, containers).", parameters: { type: "object", properties: { limit: { type: "number" }, filter: { type: "string" } } } },
+  { name: "set_canary", description: "Set a canary token value for tracking reflections across requests.", parameters: { type: "object", properties: { value: { type: "string" } }, required: ["value"] } },
+  { name: "get_repeater_tabs", description: "Get all Repeater tabs with their request/response data.", parameters: { type: "object", properties: {} } },
+  { name: "compare_responses", description: "Diff two response bodies line by line. Useful for spotting differences between requests.", parameters: { type: "object", properties: { body1: { type: "string" }, body2: { type: "string" } }, required: ["body1", "body2"] } },
+  { name: "run_flow", description: "Run a Flow Builder chain — sequential requests with variable extraction between steps.", parameters: { type: "object", properties: { steps: { type: "array", items: { type: "object", properties: { method: { type: "string" }, url: { type: "string" }, headers: { type: "string" }, body: { type: "string" }, extractors: { type: "array", items: { type: "object", properties: { type: { type: "string" }, expr: { type: "string" }, varName: { type: "string" } } } } } }, description: "Ordered request steps with extractors" } }, required: ["steps"] } },
 ];
 
 const AI_SYSTEM_PROMPT = `You are an expert security researcher and penetration tester embedded in the Void Extension — a Chrome DevTools security toolkit similar to Burp Suite. You have access to tools that let you read HTTP traffic, send requests, scan for vulnerabilities, encode/decode values, and manage findings.
@@ -8378,6 +8395,116 @@ async function aiExecTool(name, args) {
     case "get_postmessages": return storPostMessages.slice(-50);
     case "get_intruder_results": return intrResults.slice(0, 50).map(r => ({ id: r.id, payload: r.payload, status: r.status, length: r.length, elapsed: r.elapsed, grepExtract: r.grepExtract }));
     case "get_scan_findings": return scanFindings;
+    // ── Actions ──
+    case "set_scope": {
+      if (args.include !== undefined) { settings.scopeInclude = args.include; document.getElementById("tgt-scope-include").value = args.include; }
+      if (args.exclude !== undefined) { settings.scopeExclude = args.exclude; document.getElementById("tgt-scope-exclude").value = args.exclude; }
+      saveSettings();
+      return { ok: true };
+    }
+    case "toggle_intercept": {
+      const btn = document.getElementById("btn-intercept");
+      if (btn && !!args.enabled !== state.intercepting) btn.click();
+      return { ok: true, intercepting: args.enabled };
+    }
+    case "get_intercepted": return intercepted.map(r => ({ requestId: r.requestId, method: r.method, url: r.url }));
+    case "forward_request": {
+      await bg({ type: "FORWARD", requestId: args.requestId });
+      return { ok: true };
+    }
+    case "drop_request": {
+      await bg({ type: "DROP", requestId: args.requestId });
+      return { ok: true };
+    }
+    case "run_intruder_attack": {
+      const url = args.url;
+      const method = args.method || "GET";
+      const rawHeaders = args.headers || "";
+      const body = args.body || "";
+      const payloads = args.payloads || [];
+      const marker = args.marker || "FUZZ";
+      const injectIn = args.injectIn || "url";
+      const threads = args.threads || 3;
+      const results = [];
+      const running = [];
+      for (let i = 0; i < payloads.length; i++) {
+        const pl = payloads[i];
+        const testUrl = injectIn === "url" ? url.replace(marker, pl) : url;
+        const testBody = injectIn === "body" ? body.replace(marker, pl) : body;
+        const testHdrs = injectIn === "header" ? rawHeaders.replace(marker, pl) : rawHeaders;
+        const p = (async () => {
+          const t0 = Date.now();
+          const res = await bg({ type: "SEND_REQUEST", url: testUrl, method, rawHeaders: testHdrs, body: testBody || undefined });
+          return { payload: pl, status: res?.status || 0, length: (res?.body || "").length, elapsed: Date.now() - t0, body: (res?.body || "").slice(0, 1000) };
+        })();
+        running.push(p);
+        if (running.length >= threads) { results.push(await Promise.race(running.map((pr, idx) => pr.then(r => { running.splice(idx, 1); return r; })))); }
+      }
+      results.push(...await Promise.all(running));
+      return results;
+    }
+    case "get_match_replace_rules": return settings.matchReplace || [];
+    case "add_match_replace_rule": {
+      settings.matchReplace = settings.matchReplace || [];
+      settings.matchReplace.push({ enabled: true, type: args.type, match: args.match, replace: args.replace, scope: args.scope || "" });
+      saveSettings();
+      return { ok: true, ruleCount: settings.matchReplace.length };
+    }
+    case "get_sensitive_findings": return sensFindings.slice(0, 100).map(f => ({ category: f.category, severity: f.severity, name: f.name, url: f.url, match: (f.match || "").slice(0, 100) }));
+    case "run_sensitive_scan": {
+      sensScan();
+      return { ok: true, findings: sensFindings.length };
+    }
+    case "generate_csrf_poc": {
+      const method = (args.method || "POST").toUpperCase();
+      const url = args.url || "";
+      const body = args.body || "";
+      const params = body.split("&").filter(Boolean).map(p => { const eq = p.indexOf("="); return eq > 0 ? { name: decodeURIComponent(p.slice(0, eq)), value: decodeURIComponent(p.slice(eq + 1)) } : null; }).filter(Boolean);
+      let html = `<html>\n<body>\n<h1>CSRF PoC</h1>\n<form action="${esc(url)}" method="${method}">\n`;
+      for (const p of params) html += `  <input type="hidden" name="${esc(p.name)}" value="${esc(p.value)}" />\n`;
+      html += `  <input type="submit" value="Submit" />\n</form>\n<script>document.forms[0].submit();</script>\n</body>\n</html>`;
+      return html;
+    }
+    case "get_logger_entries": {
+      let items = [...logEntries];
+      if (args.filter) { const f = args.filter.toLowerCase(); items = items.filter(e => (e.url || "").toLowerCase().includes(f)); }
+      return items.slice(-(args.limit || 50)).map(e => ({ method: e.method, url: e.url, status: e.status, source: e._logLabel, elapsed: e.elapsed }));
+    }
+    case "set_canary": {
+      canaryValue = args.value;
+      const inp = document.getElementById("canary-value");
+      if (inp) inp.value = args.value;
+      return { ok: true, canary: canaryValue };
+    }
+    case "get_repeater_tabs": {
+      return repTabs.map(t => ({
+        id: t.id, label: t.customLabel || t.label, group: t.group,
+        method: t.method, url: t.url,
+        hasResponse: !!t.response,
+        status: t.response?.status, elapsed: t.response?.elapsed,
+      }));
+    }
+    case "compare_responses": {
+      const left = (args.body1 || "").split("\n");
+      const right = (args.body2 || "").split("\n");
+      const diff = cmpLineDiff(left, right, false);
+      const changes = [];
+      for (let i = 0; i < diff.left.length; i++) {
+        if (diff.left[i]?.type === "del") changes.push({ type: "removed", line: diff.left[i].num, text: diff.left[i].text });
+        if (diff.right[i]?.type === "add") changes.push({ type: "added", line: diff.right[i].num, text: diff.right[i].text });
+      }
+      return { totalChanges: changes.length, changes: changes.slice(0, 50) };
+    }
+    case "run_flow": {
+      const steps = args.steps || [];
+      if (!steps.length) return { error: "No steps provided" };
+      flowSteps = steps.map((s, i) => ({
+        id: i + 1, method: s.method || "GET", url: s.url || "", headers: s.headers || "", body: s.body || "",
+        extractors: (s.extractors || []).map(ex => ({ type: ex.type || "regex", expr: ex.expr || "", varName: ex.varName || "" })),
+      }));
+      const results = await intrRunFlow(steps[0].url, steps[0].method || "GET", steps[0].headers || "", steps[0].body || "");
+      return results;
+    }
     default: return { error: `Unknown tool: ${name}` };
   }
 }
