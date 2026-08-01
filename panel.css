@@ -2525,6 +2525,9 @@ body {
 /* ── Response render frame ──────────────────────────────────────────── */
 .render-frame { width: 100%; height: 100%; border: none; background: #fff; }
 
+/* ── Intruder payload warning ──────────────────────────────────── */
+.intr-warning { padding: var(--sp-2) var(--sp-4); font-size: 11px; color: var(--yellow); background: rgba(227,179,65,.08); border: 1px solid rgba(227,179,65,.25); border-radius: var(--r); margin: var(--sp-2) var(--sp-4); }
+
 /* ── Cookie sync indicator ─────────────────────────────────────── */
 .cookie-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--yellow); animation: cookie-pulse 1s ease-in-out 3; }
 @keyframes cookie-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }

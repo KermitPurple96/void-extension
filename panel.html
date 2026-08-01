@@ -595,6 +595,7 @@
                 <option value="graphql">GraphQL Explorer</option>
                 <option value="upload-scan">Upload Scanner</option>
                 <option value="flow">Flow Builder (chained requests)</option>
+                <option value="sequencer">Sequencer (token entropy)</option>
               </optgroup>
             </select>
             <label class="settings-label-sm" for="intr-threads">Threads</label>
@@ -744,6 +745,29 @@
               <div class="settings-row"><label class="settings-label-sm">Schema</label></div>
               <textarea id="intr-gql-schema" class="raw-ta settings-ta" rows="4" readonly spellcheck="false" placeholder="Run introspection to discover schema…"></textarea>
             </div>
+            <!-- Sequencer -->
+            <div id="intr-cfg-sequencer" class="intr-spec hidden">
+              <div class="pane-label">SEQUENCER — token randomness analysis</div>
+              <div class="settings-row">
+                <label class="settings-label-sm" for="intr-seq-extract">Extract from</label>
+                <select id="intr-seq-extract" class="filter-sel">
+                  <option value="cookie">Set-Cookie</option>
+                  <option value="header">Response header</option>
+                  <option value="body-regex">Body regex</option>
+                  <option value="marked">§ marked value§</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label-sm" for="intr-seq-token">Token name/regex</label>
+                <input id="intr-seq-token" type="text" class="settings-inp" placeholder="session_id, X-CSRF-Token, or regex" spellcheck="false" style="flex:1">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label-sm" for="intr-seq-count">Samples</label>
+                <input id="intr-seq-count" type="number" class="settings-inp settings-inp-sm" value="100" min="10" max="5000">
+                <label class="settings-label-sm" for="intr-seq-delay">Delay ms</label>
+                <input id="intr-seq-delay" type="number" class="settings-inp settings-inp-sm" value="0" min="0">
+              </div>
+            </div>
             <!-- Flow Builder -->
             <div id="intr-cfg-flow" class="intr-spec hidden">
               <div class="pane-label">FLOW BUILDER — chained requests with variable extraction</div>
@@ -769,6 +793,7 @@
             <button id="intr-stop"  class="btn btn-sm btn-danger" disabled>Stop</button>
             <span id="intr-status" class="intr-status"></span>
           </div>
+          <div id="intr-warning" class="intr-warning hidden"></div>
         </div>
 
         <!-- Results table -->

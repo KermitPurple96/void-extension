@@ -2967,6 +2967,9 @@ function intrCountPositions() {
   const needed = Math.max(1, n);
   while (intrPayloadSets.length < needed) intrPayloadSets.push("");
   renderPayloadSetTabs(needed);
+
+  // Validate markers against selected attack mode
+  intrValidatePositions();
 }
 
 function renderPayloadSetTabs(count) {
@@ -3113,7 +3116,7 @@ async function intrStart() {
   if (!url) { document.getElementById("intr-url").focus(); return; }
 
   // Specialized attack modes — dispatch directly
-  const specialModes = ["auth-idor", "race", "param-miner", "jwt-attack", "cors-scan", "smuggling", "graphql", "upload-scan", "flow"];
+  const specialModes = ["auth-idor", "race", "param-miner", "jwt-attack", "cors-scan", "smuggling", "graphql", "upload-scan", "flow", "sequencer"];
   if (specialModes.includes(attackType)) {
     intrRunning = true;
     intrResults = [];
@@ -3135,6 +3138,7 @@ async function intrStart() {
         case "graphql":      results = await intrRunGraphQL(url, rawHeaders); break;
         case "upload-scan":  results = await intrRunUploadScan(url, method, rawHeaders); break;
         case "flow":         results = await intrRunFlow(url, method, rawHeaders, body); break;
+        case "sequencer":   results = await intrRunSequencer(url, method, rawHeaders, body); break;
       }
     } catch (e) { document.getElementById("intr-status").textContent = "Error: " + e.message; }
 
@@ -6697,9 +6701,10 @@ function intrUpdateSpecConfig() {
   const cfgMap = {
     "auth-idor": "intr-cfg-auth", "race": "intr-cfg-race", "param-miner": "intr-cfg-param",
     "jwt-attack": "intr-cfg-jwt", "cors-scan": "intr-cfg-cors", "smuggling": "intr-cfg-smuggling",
-    "graphql": "intr-cfg-graphql", "upload-scan": "intr-cfg-upload", "flow": "intr-cfg-flow",
+    "graphql": "intr-cfg-graphql", "upload-scan": "intr-cfg-upload", "flow": "intr-cfg-flow", "sequencer": "intr-cfg-sequencer",
   };
   if (cfgMap[mode]) document.getElementById(cfgMap[mode]).classList.remove("hidden");
+  intrValidatePositions();
 }
 
 // ── Auth / IDOR tester ──────────────────────────────────────────────
@@ -7119,6 +7124,207 @@ async function sessionCheckAndRenew(res) {
       showToast(`Session renewed: ${settings.sessionTokenName}`);
     }
   }
+}
+
+// ═══════════════════════════ INTRUDER PAYLOAD VALIDATION ═════════════════════
+
+// Validates that § markers contain content appropriate for the selected attack mode
+function intrValidatePositions() {
+  const raw = document.getElementById("intr-request")?.value || "";
+  const mode = document.getElementById("intr-attack")?.value || "sniper";
+  const warning = document.getElementById("intr-warning");
+  if (!warning) return;
+
+  const markers = raw.match(/§([^§]*)§/g) || [];
+  const markedValues = markers.map(m => m.slice(1, -1));
+  const warnings = [];
+
+  // Common: no markers at all (except for specialized modes that don't need them)
+  const needsMarkers = ["sniper", "battering-ram", "pitchfork", "cluster-bomb"];
+  if (needsMarkers.includes(mode) && !markers.length) {
+    warnings.push("\u26A0 No \u00A7payload\u00A7 positions marked. Use the \u00A7 Add \u00A7 button or manually wrap values with \u00A7.");
+  }
+
+  // JWT Attacker: check if any marked value or Authorization header contains a JWT
+  if (mode === "jwt-attack") {
+    const hasJwt = raw.match(/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/);
+    if (!hasJwt) {
+      warnings.push("\u26A0 JWT attack selected but no JWT found in request. Expected a token like eyJhbG...eyJzdW...signature in the Authorization header.");
+    }
+  }
+
+  // Auth/IDOR: should have a Cookie header
+  if (mode === "auth-idor") {
+    if (!/^cookie\s*:/im.test(raw)) {
+      warnings.push("\u26A0 Auth/IDOR test selected but no Cookie header found. Add cookies for User A/B comparison.");
+    }
+  }
+
+  // CORS: should have a URL that we can vary Origin against
+  if (mode === "cors-scan") {
+    if (!/^https?:\/\//i.test(document.getElementById("intr-url")?.value || "")) {
+      warnings.push("\u26A0 CORS scanner needs a valid URL to test Origin header variations.");
+    }
+  }
+
+  // GraphQL: check for graphql-looking content
+  if (mode === "graphql") {
+    const url = document.getElementById("intr-url")?.value || "";
+    if (!/graphql/i.test(url) && !/graphql/i.test(raw)) {
+      warnings.push("\u26A0 GraphQL mode selected but URL doesn't contain '/graphql'. Set the endpoint in the config below.");
+    }
+  }
+
+  // Upload Scanner: check for multipart or file-related content
+  if (mode === "upload-scan") {
+    if (!/multipart|upload|file/i.test(raw) && !/upload|file/i.test(document.getElementById("intr-url")?.value || "")) {
+      warnings.push("\u26A0 Upload scanner selected but request doesn't appear to be a file upload (no multipart/file references).");
+    }
+  }
+
+  // Sequencer: check extraction config
+  if (mode === "sequencer") {
+    const extractType = document.getElementById("intr-seq-extract")?.value || "";
+    const tokenName = document.getElementById("intr-seq-token")?.value?.trim() || "";
+    if (extractType !== "marked" && !tokenName) {
+      warnings.push("\u26A0 Sequencer needs a token name or regex pattern to extract from responses.");
+    }
+    if (extractType === "marked" && !markers.length) {
+      warnings.push("\u26A0 Sequencer set to extract \u00A7marked value\u00A7 but no \u00A7 positions found in request.");
+    }
+  }
+
+  // Flow Builder: check if steps are defined
+  if (mode === "flow" && !flowSteps.length) {
+    warnings.push("\u26A0 Flow Builder has no steps. Click \u201C+ Add Step\u201D to define your request chain.");
+  }
+
+  // Smuggling: should be HTTP (not HTTPS)
+  if (mode === "smuggling") {
+    const url = document.getElementById("intr-url")?.value || "";
+    if (/^https:/i.test(url)) {
+      warnings.push("\u26A0 Request smuggling typically works on HTTP (not HTTPS). TLS may prevent header manipulation.");
+    }
+  }
+
+  // Standard modes: validate marker content makes sense
+  if (needsMarkers.includes(mode) && markedValues.length) {
+    // Check for markers around empty content
+    const emptyMarkers = markedValues.filter(v => !v.trim());
+    if (emptyMarkers.length) {
+      warnings.push(`\u26A0 ${emptyMarkers.length} empty \u00A7\u00A7 position(s) found. Mark actual values to replace, e.g. \u00A7admin\u00A7.`);
+    }
+  }
+
+  if (warnings.length) {
+    warning.classList.remove("hidden");
+    warning.innerHTML = warnings.map(w => esc(w)).join("<br>"); // safe: w comes from static strings above, esc() for defense
+  } else {
+    warning.classList.add("hidden");
+    warning.textContent = "";
+  }
+}
+
+// ═══════════════════════════ INTRUDER SEQUENCER ══════════════════════════════
+
+async function intrRunSequencer(url, method, rawHeaders, body) {
+  const extractType = document.getElementById("intr-seq-extract").value;
+  const tokenName = document.getElementById("intr-seq-token").value.trim();
+  const count = parseInt(document.getElementById("intr-seq-count").value) || 100;
+  const delay = parseInt(document.getElementById("intr-seq-delay").value) || 0;
+  const template = document.getElementById("intr-request").value;
+
+  // Collect tokens
+  const tokens = [];
+  const status = document.getElementById("intr-status");
+
+  for (let i = 0; i < count; i++) {
+    if (!intrRunning) break;
+    status.textContent = `Collecting ${i + 1}/${count}`;
+
+    const res = await bg({ type: "SEND_REQUEST", url, method, rawHeaders, body: body || undefined });
+    if (!res || res.error) continue;
+
+    let token = null;
+    if (extractType === "cookie") {
+      const setCookies = Object.entries(res.headers || {}).filter(([k]) => k.toLowerCase() === "set-cookie").map(([, v]) => v);
+      const allCookies = setCookies.join("; ");
+      const re = new RegExp(`(?:^|;\\s*)${tokenName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=([^;]+)`);
+      const m = allCookies.match(re);
+      if (m) token = m[1];
+    } else if (extractType === "header") {
+      token = Object.entries(res.headers || {}).find(([k]) => k.toLowerCase() === tokenName.toLowerCase())?.[1] || null;
+    } else if (extractType === "body-regex") {
+      try { const re = new RegExp(tokenName); const m = (res.body || "").match(re); token = m ? (m[1] || m[0]) : null; }
+      catch { status.textContent = "Invalid regex"; return []; }
+    } else if (extractType === "marked") {
+      // Extract value at the § position from the response body
+      const posRegex = /§([^§]*)§/g;
+      const posMatch = posRegex.exec(template);
+      if (posMatch) {
+        // Use the marked value as a regex to find in response
+        const markedVal = posMatch[1];
+        try {
+          const re = new RegExp(markedVal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\d\+/g, "\\d+"), "i");
+          const m = (res.body || "").match(re);
+          if (m) token = m[0];
+        } catch {}
+      }
+    }
+
+    if (token) tokens.push(token);
+    if (delay > 0 && intrRunning) await new Promise(r => setTimeout(r, delay));
+  }
+
+  // Also update the standalone Sequencer tab's data for analysis
+  seqTokens = tokens;
+  if (tokens.length) seqAnalyze();
+
+  // Build results for Intruder display
+  if (!tokens.length) {
+    return [{ id: 1, payload: "No tokens extracted", status: 0, length: 0, elapsed: 0, respBody: "", respHeaders: {}, grepMatch: false, grepExtract: "Check extraction config" }];
+  }
+
+  // Run entropy analysis inline
+  const unique = new Set(tokens);
+  const charFreq = {};
+  let totalChars = 0;
+  for (const t of tokens) for (const c of t) { charFreq[c] = (charFreq[c] || 0) + 1; totalChars++; }
+  const charSet = Object.keys(charFreq);
+  const maxLen = Math.max(...tokens.map(t => t.length));
+  let totalEntropy = 0, posCount = 0;
+  for (let pos = 0; pos < maxLen; pos++) {
+    const freq = {};
+    let n = 0;
+    for (const t of tokens) { if (pos < t.length) { freq[t[pos]] = (freq[t[pos]] || 0) + 1; n++; } }
+    if (n < 2) continue;
+    let h = 0;
+    for (const c in freq) { const p = freq[c] / n; if (p > 0) h -= p * Math.log2(p); }
+    totalEntropy += h; posCount++;
+  }
+  const avgEntropy = posCount > 0 ? totalEntropy / posCount : 0;
+  const maxPossible = Math.log2(charSet.length || 1);
+  const entropyPct = maxPossible > 0 ? (avgEntropy / maxPossible) * 100 : 0;
+  const rating = entropyPct >= 85 ? "EXCELLENT" : entropyPct >= 60 ? "GOOD" : "POOR";
+
+  const results = [];
+  results.push({
+    id: 1, payload: `Entropy: ${avgEntropy.toFixed(3)} bits/char`, status: 0,
+    length: tokens.length, elapsed: 0, respBody: "", respHeaders: {},
+    grepMatch: entropyPct < 60, grepExtract: `${rating} (${entropyPct.toFixed(1)}%) — ${unique.size}/${tokens.length} unique, charset=${charSet.length}`,
+  });
+
+  // Add sample tokens as result rows
+  const sampleCount = Math.min(tokens.length, 20);
+  for (let i = 0; i < sampleCount; i++) {
+    results.push({
+      id: i + 2, payload: tokens[i], status: 0, length: tokens[i].length,
+      elapsed: 0, respBody: "", respHeaders: {},
+      grepMatch: false, grepExtract: i === 0 && tokens[0] === tokens[1] ? "DUPLICATE — not random!" : "",
+    });
+  }
+
+  return results;
 }
 
 // ═══════════════════════════ STORAGE INSPECTOR ═══════════════════════════════
