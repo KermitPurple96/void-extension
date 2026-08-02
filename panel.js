@@ -8867,6 +8867,107 @@ async function aiExecTool(name, args) {
   }
 }
 
+// ── Pentest Project Management ──────────────────────────────────────────────
+
+let pentestProjects = [];
+let pentestActiveProjectId = null;
+
+function pentestLoadProjects() {
+  return new Promise(resolve => {
+    chrome.storage.local.get(['voidPentestProjects', 'voidPentestActiveProject'], r => {
+      pentestProjects = r.voidPentestProjects || [];
+      pentestActiveProjectId = r.voidPentestActiveProject || null;
+      resolve();
+    });
+  });
+}
+
+function pentestSaveProjects() {
+  chrome.storage.local.set({
+    voidPentestProjects: pentestProjects,
+    voidPentestActiveProject: pentestActiveProjectId,
+  });
+  pentestRenderProjectList();
+  pentestRenderContextBar();
+}
+
+function pentestGetActive() {
+  if (!pentestActiveProjectId) return null;
+  return pentestProjects.find(p => p.id === pentestActiveProjectId) || null;
+}
+
+function pentestCreateProject(data) {
+  const project = {
+    id: 'proj_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    name: data.name || 'Untitled Project',
+    description: data.description || '',
+    createdAt: new Date().toISOString(),
+    scope: {
+      inScope: data.inScope || [],
+      outScope: data.outScope || [],
+    },
+    credentials: {
+      username: data.username || '',
+      password: data.password || '',
+      loginUrl: data.loginUrl || '',
+      authType: data.authType || 'FORM',
+      apiToken: data.apiToken || '',
+      extraHeaders: data.extraHeaders || '',
+    },
+    config: {
+      environment: data.environment || 'unknown',
+      mode: data.mode || 'ask',
+      vulnModes: {},
+      allowBruteforce: data.allowBruteforce || false,
+      allowDestructive: data.allowDestructive || false,
+      oobServer: data.oobServer || '',
+      oobToken: data.oobToken || '',
+    },
+    workflow: {
+      selectedId: data.workflowId || 'full-pentest',
+    },
+    findings: [],
+    notes: '',
+  };
+  pentestProjects.push(project);
+  pentestActiveProjectId = project.id;
+  pentestSaveProjects();
+  return project;
+}
+
+function pentestDeleteProject(id) {
+  pentestProjects = pentestProjects.filter(p => p.id !== id);
+  if (pentestActiveProjectId === id) {
+    pentestActiveProjectId = pentestProjects.length > 0 ? pentestProjects[0].id : null;
+  }
+  pentestSaveProjects();
+}
+
+function pentestActivateProject(id) {
+  if (!pentestProjects.find(p => p.id === id)) return;
+  pentestActiveProjectId = id;
+  pentestSaveProjects();
+}
+
+function pentestDeactivateProject() {
+  pentestActiveProjectId = null;
+  pentestSaveProjects();
+}
+
+function pentestAddFinding(projectId, finding) {
+  const proj = pentestProjects.find(p => p.id === projectId);
+  if (!proj) return null;
+  finding.id = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  finding.timestamp = new Date().toISOString();
+  proj.findings.push(finding);
+  pentestSaveProjects();
+  return finding;
+}
+
+// Stub render functions — will be implemented when HTML is ready
+function pentestRenderProjectList() {}
+function pentestRenderContextBar() {}
+
 // ── Chat session management ──────────────────────────────────────────────────
 
 function aiNewSession() {
