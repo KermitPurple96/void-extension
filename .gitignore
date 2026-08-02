@@ -4,3 +4,13 @@
 *.pem
 node_modules/
 google-chrome-stable_current_amd64.deb
+
+# Proxy server runtime data (CA certs, keys generated at runtime)
+.void/
+
+# Environment files with secrets
+.env
+.env.*
+
+# Local test configs with API keys
+tests/*.local.js

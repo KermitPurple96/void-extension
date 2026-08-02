@@ -12,7 +12,7 @@
  *   If no model specified, tests all known Ollama Cloud models.
  */
 
-const OLLAMA_KEY = process.env.OLLAMA_API_KEY || 'b43f0edc20a74721979f01b5e7ae8deb._QZ3p0h2b5Axz7hc4M4IeZxw';
+const OLLAMA_KEY = process.env.OLLAMA_API_KEY || '';
 const OLLAMA_BASE = 'https://ollama.com/v1';
 
 // Models known to be live on Ollama Cloud as of 2026-07
