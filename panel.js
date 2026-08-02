@@ -3986,11 +3986,11 @@ function getActiveSystemPrompt() {
     ctx += '\n- Mode: ' + (proj.config?.mode || 'ask');
     if (!proj.config?.allowBruteforce) ctx += '\n- Bruteforce/fuzzing: DISABLED';
     if (!proj.config?.allowDestructive) ctx += '\n- Destructive testing: DISABLED';
-    // Credentials hint (never expose actual passwords)
-    if (proj.credentials?.username) {
-      ctx += '\n\nCredentials available: username="' + proj.credentials.username + '", auth type=' + (proj.credentials.authType || 'FORM');
+    // Credentials hint (never expose usernames or passwords to LLM)
+    if (proj.credentials?.username || proj.credentials?.apiToken) {
+      ctx += '\n\nCredentials configured: auth type=' + (proj.credentials.authType || 'FORM');
       if (proj.credentials.loginUrl) ctx += ', login URL=' + proj.credentials.loginUrl;
-      ctx += '\nUse the authenticated_request tool or manually add auth headers.';
+      ctx += '\nUse the authenticated_request tool to send requests with stored credentials.';
     }
     // Workflow
     if (proj.workflow?.selectedId) {
@@ -9048,7 +9048,7 @@ async function aiExecTool(name, args) {
         cwe: args.cwe || "",
       });
       // Also add to Notes tab
-      aiExecTool("add_finding", { title: args.title, severity: args.severity, detail: args.evidence });
+      await aiExecTool("add_finding", { title: args.title, severity: args.severity, detail: args.evidence });
       return { ok: true, findingId: finding?.id, message: "Finding added to project " + proj.name };
     }
     case "get_pentest_findings": {
@@ -9393,7 +9393,7 @@ function wizOpen() {
   const wfSel = document.getElementById('wiz-workflow');
   if (wfSel && window.VOID_WORKFLOWS) {
     wfSel.innerHTML = window.VOID_WORKFLOWS.map(w =>
-      '<option value="' + w.id + '">' + w.name + '</option>'
+      '<option value="' + esc(w.id) + '">' + esc(w.name) + '</option>'
     ).join('');
     wizUpdateWorkflowPreview();
   }
@@ -9493,7 +9493,7 @@ function wizUpdateWorkflowPreview() {
   if (descEl) descEl.textContent = wf ? wf.description : '';
   if (stepsEl && wf) {
     stepsEl.innerHTML = (wf.steps || []).map(s =>
-      '<div class="ai-wizard-wf-step"><span class="ai-wizard-wf-step-name">' + esc(s.name) + '</span><span class="ai-wizard-wf-step-type">' + s.type + '</span></div>'
+      '<div class="ai-wizard-wf-step"><span class="ai-wizard-wf-step-name">' + esc(s.name) + '</span><span class="ai-wizard-wf-step-type">' + esc(s.type) + '</span></div>'
     ).join('');
   }
 }

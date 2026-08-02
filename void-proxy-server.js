@@ -441,6 +441,7 @@ async function llmFetch(url, headers, body) {
         catch { resolve({ status: res.statusCode, body: { error: Buffer.concat(chunks).toString().slice(0, 500) } }); }
       });
     });
+    req.setTimeout(60000, () => { req.destroy(new Error("LLM request timed out (60s)")); });
     req.on("error", e => reject(e));
     req.write(JSON.stringify(body));
     req.end();
@@ -710,8 +711,10 @@ const proxy = http.createServer((req, res) => {
   if (req.url === "/api/judge" && req.method === "POST") {
     res.setHeader("access-control-allow-origin", "*");
     let body = "";
-    req.on("data", c => body += c);
+    let bodyLen = 0;
+    req.on("data", c => { bodyLen += c.length; if (bodyLen > MAX_BODY) return; body += c; });
     req.on("end", async () => {
+      if (bodyLen > MAX_BODY) { res.writeHead(413).end(JSON.stringify({ error: "Request too large" })); return; }
       try {
         const data = JSON.parse(body);
         const { provider, apiKey, model, endpoint, candidate } = data;
