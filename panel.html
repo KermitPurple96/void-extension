@@ -2030,6 +2030,14 @@
         </div>
 
         <div id="ai-messages" class="ai-messages"></div>
+        <!-- Slash command autocomplete -->
+        <div id="ai-slash-panel" class="ai-slash-panel hidden">
+          <div class="ai-slash-header">
+            <span class="ai-slash-title">Commands</span>
+            <span id="ai-slash-count" class="ai-slash-count"></span>
+          </div>
+          <div id="ai-slash-list" class="ai-slash-list"></div>
+        </div>
         <div class="ai-input-bar">
           <textarea id="ai-input" class="raw-ta ai-input-ta" rows="2" placeholder="Ask the AI to analyze traffic, test for vulns, encode payloads..." spellcheck="false" aria-label="Chat message"></textarea>
           <button id="ai-send" class="btn btn-accent">Send</button>

@@ -9223,6 +9223,159 @@ function wizCreate() {
   wizClose();
 }
 
+// ── Slash Command Autocomplete ──────────────────────────────────────────────
+
+let slashActive = false;
+let slashSelectedIdx = 0;
+let slashActiveSkill = null; // skill slug to inject into next message
+
+function slashBuildItems() {
+  const items = [];
+  // Skills
+  if (window.VOID_SKILLS) {
+    for (const [slug, skill] of Object.entries(window.VOID_SKILLS)) {
+      items.push({ type: 'skill', cmd: '/' + slug, label: skill.name, desc: skill.description, icon: 'menu_book' });
+    }
+  }
+  // Agents
+  if (window.VOID_AGENTS) {
+    for (const agent of window.VOID_AGENTS) {
+      items.push({ type: 'agent', cmd: '/agent ' + agent.id, label: agent.title, desc: agent.description, icon: agent.icon || 'psychology_alt' });
+    }
+  }
+  // Workflows
+  if (window.VOID_WORKFLOWS) {
+    for (const wf of window.VOID_WORKFLOWS) {
+      items.push({ type: 'workflow', cmd: '/workflow ' + wf.id, label: wf.name, desc: wf.description, icon: 'account_tree' });
+    }
+  }
+  // Built-in commands
+  items.push({ type: 'command', cmd: '/scan', label: 'Run Scanner', desc: 'Run active vulnerability scanner on target', icon: 'radar' });
+  items.push({ type: 'command', cmd: '/findings', label: 'Show Findings', desc: 'List current project findings', icon: 'flag' });
+  items.push({ type: 'command', cmd: '/report', label: 'Generate Report', desc: 'Generate engagement report from findings', icon: 'description' });
+  items.push({ type: 'command', cmd: '/recon', label: 'Run Recon', desc: 'Map the attack surface of the target', icon: 'explore' });
+  return items;
+}
+
+function slashFilter(query) {
+  const all = slashBuildItems();
+  if (!query) return all;
+  const q = query.toLowerCase();
+  return all.filter(item =>
+    item.cmd.toLowerCase().includes(q) ||
+    item.label.toLowerCase().includes(q) ||
+    item.desc.toLowerCase().includes(q)
+  );
+}
+
+function slashShow(query) {
+  const panel = document.getElementById('ai-slash-panel');
+  const list = document.getElementById('ai-slash-list');
+  const count = document.getElementById('ai-slash-count');
+  if (!panel || !list) return;
+
+  const items = slashFilter(query);
+  if (items.length === 0) {
+    slashHide();
+    return;
+  }
+
+  slashActive = true;
+  slashSelectedIdx = 0;
+  if (count) count.textContent = items.length + ' commands';
+
+  list.replaceChildren();
+  items.forEach((item, i) => {
+    const div = document.createElement('div');
+    div.className = 'ai-slash-item' + (i === 0 ? ' selected' : '');
+    div.innerHTML = '<span class="ai-slash-item-icon material-symbols-outlined">' + esc(item.icon) + '</span>' +
+      '<span class="ai-slash-item-cmd">' + esc(item.cmd) + '</span>' +
+      '<span class="ai-slash-item-desc">' + esc(item.desc) + '</span>' +
+      '<span class="ai-slash-item-type">' + esc(item.type) + '</span>';
+    div.addEventListener('click', () => slashSelect(item));
+    div.addEventListener('mouseenter', () => {
+      list.querySelectorAll('.ai-slash-item').forEach(el => el.classList.remove('selected'));
+      div.classList.add('selected');
+      slashSelectedIdx = i;
+    });
+    list.appendChild(div);
+  });
+
+  panel.classList.remove('hidden');
+}
+
+function slashHide() {
+  slashActive = false;
+  const panel = document.getElementById('ai-slash-panel');
+  if (panel) panel.classList.add('hidden');
+}
+
+function slashSelect(item) {
+  const input = document.getElementById('ai-input');
+  if (!input) return;
+
+  if (item.type === 'skill') {
+    // Set the skill as active for the next message
+    const slug = item.cmd.replace('/', '');
+    slashActiveSkill = slug;
+    // Replace the slash command in the input with a descriptive prompt
+    const skill = window.VOID_SKILLS?.[slug];
+    input.value = 'Test for ' + (skill?.name || slug) + ' vulnerabilities on the target.';
+  } else if (item.type === 'agent') {
+    const agentId = item.cmd.replace('/agent ', '');
+    settings.aiPersona = agentId;
+    saveSettings();
+    updatePersonaPreview();
+    input.value = '';
+  } else if (item.type === 'workflow') {
+    const wfId = item.cmd.replace('/workflow ', '');
+    const wf = window.VOID_WORKFLOWS?.find(w => w.id === wfId);
+    input.value = 'Run the "' + (wf?.name || wfId) + '" workflow on the target.';
+  } else {
+    // Built-in commands
+    input.value = item.cmd + ' ';
+  }
+
+  slashHide();
+  input.focus();
+}
+
+function slashHandleKey(e) {
+  if (!slashActive) return false;
+  const list = document.getElementById('ai-slash-list');
+  if (!list) return false;
+  const items = list.querySelectorAll('.ai-slash-item');
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    items[slashSelectedIdx]?.classList.remove('selected');
+    slashSelectedIdx = Math.min(slashSelectedIdx + 1, items.length - 1);
+    items[slashSelectedIdx]?.classList.add('selected');
+    items[slashSelectedIdx]?.scrollIntoView({ block: 'nearest' });
+    return true;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    items[slashSelectedIdx]?.classList.remove('selected');
+    slashSelectedIdx = Math.max(slashSelectedIdx - 1, 0);
+    items[slashSelectedIdx]?.classList.add('selected');
+    items[slashSelectedIdx]?.scrollIntoView({ block: 'nearest' });
+    return true;
+  }
+  if (e.key === 'Enter' || e.key === 'Tab') {
+    e.preventDefault();
+    const allItems = slashFilter(document.getElementById('ai-input')?.value?.slice(1) || '');
+    if (allItems[slashSelectedIdx]) slashSelect(allItems[slashSelectedIdx]);
+    return true;
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    slashHide();
+    return true;
+  }
+  return false;
+}
+
 // ── Chat session management ──────────────────────────────────────────────────
 
 function aiNewSession() {
@@ -11201,6 +11354,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initBlock("ai-chat", () => {
     document.getElementById("ai-send").addEventListener("click", aiSendMessage);
     document.getElementById("ai-input").addEventListener("keydown", e => {
+      if (slashHandleKey(e)) return;
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); aiSendMessage(); }
       // Arrow key history
       if (e.key === "ArrowUp" && e.target.selectionStart === 0) {
@@ -11220,6 +11374,14 @@ document.addEventListener("DOMContentLoaded", () => {
           aiInputHistIdx = -1;
           e.target.value = aiInputDraft;
         }
+      }
+    });
+    document.getElementById("ai-input").addEventListener("input", e => {
+      const val = e.target.value;
+      if (val.startsWith('/') && val.length >= 1) {
+        slashShow(val.slice(1));
+      } else {
+        slashHide();
       }
     });
     document.getElementById("ai-new-chat").addEventListener("click", () => aiNewSession());
