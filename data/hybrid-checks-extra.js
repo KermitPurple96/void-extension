@@ -155,7 +155,7 @@ Object.assign(window.VOID_HYBRID_CHECKS, {
       /\*/,        // wildcard sources
       /data:/i,
       /blob:/i,
-      /http:/i,    // non-HTTPS sources in CSP
+      /\bhttp:\/\//i,    // non-HTTPS sources in CSP (excludes https://)
     ],
     headerCheck: true, // passive: parse Content-Security-Policy header
   },
