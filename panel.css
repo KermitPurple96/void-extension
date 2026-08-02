@@ -2925,3 +2925,16 @@ html.theme-hacker {
 .ai-slash-item-cmd { font-family: var(--mono); font-weight: 600; color: var(--accent); font-size: 13px; min-width: 120px; }
 .ai-slash-item-desc { font-size: 12px; opacity: 0.7; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-slash-item-type { font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; opacity: 0.4; padding: 2px 6px; border-radius: 3px; background: var(--bg2); }
+
+/* ── AI input toolbar ───────────────────────────────────── */
+.ai-input-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid var(--border); gap: 8px; }
+.ai-agent-switch { display: flex; gap: 3px; }
+.ai-agent-btn { display: inline-flex; align-items: center; gap: 3px; padding: 3px 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); border-radius: 3px; cursor: pointer; font-size: 11px; font-family: inherit; transition: color 0.15s, border-color 0.15s; }
+.ai-agent-btn .material-symbols-outlined { font-size: 14px; }
+.ai-agent-btn:hover { color: var(--text); border-color: var(--text); }
+.ai-agent-btn.active { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.ai-mode-switch { display: flex; gap: 3px; }
+.ai-mode-btn { padding: 3px 10px; border: 1px solid var(--border); background: transparent; color: var(--muted); border-radius: 3px; cursor: pointer; font-size: 11px; font-family: inherit; transition: color 0.15s, border-color 0.15s; }
+.ai-mode-btn:hover { color: var(--text); }
+.ai-mode-btn.active { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.ai-mode-btn[data-aimode="autonomous"].active { color: #f59e0b; border-color: #f59e0b; }

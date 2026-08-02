@@ -3959,6 +3959,17 @@ function getActiveSystemPrompt() {
     prompt = agent ? agent.systemPrompt : AI_SYSTEM_PROMPT;
   }
 
+  // Inject active skill if set
+  if (slashActiveSkill && window.VOID_SKILLS?.[slashActiveSkill]) {
+    const skill = window.VOID_SKILLS[slashActiveSkill];
+    if (skill.body) {
+      prompt += '\n\n## Active Skill: ' + skill.name + '\n\nFollow this methodology:\n\n' + skill.body;
+    } else {
+      // Skill has no body yet (Phase 3 placeholder) — add description as guidance
+      prompt += '\n\n## Active Skill: ' + skill.name + '\n' + skill.description;
+    }
+  }
+
   // Inject active project context
   const proj = pentestGetActive();
   if (proj) {
@@ -4395,6 +4406,8 @@ function loadSettingsUI() {
   setVal('ai-oob-server', settings.engagementOobServer || '');
   setVal('ai-oob-token', settings.engagementOobToken || '');
   updatePersonaPreview();
+  // Update quick-switch buttons
+  document.querySelectorAll('.ai-agent-btn').forEach(b => b.classList.toggle('active', b.dataset.agent === (settings.aiPersona || 'pentester')));
   updateSafetyStatus();
   renderVulnClassTable();
   renderMRRules();
@@ -9693,6 +9706,7 @@ async function aiSendMessage() {
     aiAddMessage("error", `Connection error: ${e.message}. Is void-proxy-server.js running?`);
   }
 
+  slashActiveSkill = null;
   aiSending = false;
   document.getElementById("ai-send").disabled = false;
   input.focus();
@@ -11385,6 +11399,26 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
     document.getElementById("ai-new-chat").addEventListener("click", () => aiNewSession());
+
+    // Quick agent switch
+    document.querySelectorAll('.ai-agent-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const agentId = btn.dataset.agent;
+        settings.aiPersona = agentId;
+        saveSettings();
+        updatePersonaPreview();
+        document.querySelectorAll('.ai-agent-btn').forEach(b => b.classList.toggle('active', b.dataset.agent === agentId));
+      });
+    });
+
+    // Autonomous/Interactive mode toggle
+    document.querySelectorAll('.ai-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.ai-mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        settings.aiAutonomousMode = btn.dataset.aimode === 'autonomous';
+      });
+    });
 
     // Load chat sessions
     aiLoadSessions();

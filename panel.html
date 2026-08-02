@@ -2039,6 +2039,24 @@
           <div id="ai-slash-list" class="ai-slash-list"></div>
         </div>
         <div class="ai-input-bar">
+          <!-- Quick toolbar -->
+          <div class="ai-input-toolbar">
+            <div class="ai-agent-switch">
+              <button class="ai-agent-btn" data-agent="analyst" title="Switch to Analyst">
+                <span class="material-symbols-outlined">chat</span> Analyst
+              </button>
+              <button class="ai-agent-btn active" data-agent="pentester" title="Switch to Pentester">
+                <span class="material-symbols-outlined">security</span> Pentester
+              </button>
+              <button class="ai-agent-btn" data-agent="orchestrator" title="Switch to Orchestrator">
+                <span class="material-symbols-outlined">account_tree</span> Orchestrator
+              </button>
+            </div>
+            <div class="ai-mode-switch">
+              <button class="ai-mode-btn active" data-aimode="interactive" title="Interactive: AI waits for input">Interactive</button>
+              <button class="ai-mode-btn" data-aimode="autonomous" title="Autonomous: AI chains tool calls">Autonomous</button>
+            </div>
+          </div>
           <textarea id="ai-input" class="raw-ta ai-input-ta" rows="2" placeholder="Ask the AI to analyze traffic, test for vulns, encode payloads..." spellcheck="false" aria-label="Chat message"></textarea>
           <button id="ai-send" class="btn btn-accent">Send</button>
         </div>
