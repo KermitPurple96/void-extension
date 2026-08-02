@@ -14,3 +14,5 @@ google-chrome-stable_current_amd64.deb
 
 # Local test configs with API keys
 tests/*.local.js
+test-results/
+node_modules/
