@@ -4152,6 +4152,160 @@ function applyModelPreset(preset) {
   }
 }
 
+// ── Skills Browser ──────────────────────────────────────────────────────────
+
+let aiSkillsSelectedSlug = null;
+
+function renderSkillsBrowser() {
+  const list = document.getElementById('ai-skills-list');
+  const preview = document.getElementById('ai-skills-preview');
+  const countEl = document.getElementById('ai-skills-count');
+  const searchEl = document.getElementById('ai-skills-search');
+  const catEl = document.getElementById('ai-skills-cat-filter');
+  if (!list || !window.VOID_SKILLS) return;
+
+  const skills = window.VOID_SKILLS;
+  const slugs = Object.keys(skills);
+  const search = (searchEl?.value || '').toLowerCase();
+  const catFilter = catEl?.value || '';
+
+  // Populate category dropdown (once)
+  if (catEl && catEl.options.length <= 1) {
+    const cats = [...new Set(slugs.map(s => skills[s].category))].sort();
+    for (const c of cats) {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      catEl.appendChild(opt);
+    }
+  }
+
+  // Filter
+  const filtered = slugs.filter(s => {
+    const sk = skills[s];
+    if (catFilter && sk.category !== catFilter) return false;
+    if (search && !s.includes(search) && !sk.name.toLowerCase().includes(search) && !sk.description.toLowerCase().includes(search) && !(sk.tags || []).some(t => t.includes(search))) return false;
+    return true;
+  });
+
+  if (countEl) countEl.textContent = filtered.length + '/' + slugs.length;
+
+  list.replaceChildren();
+  for (const slug of filtered) {
+    const sk = skills[slug];
+    const item = document.createElement('div');
+    item.className = 'ai-skill-item' + (slug === aiSkillsSelectedSlug ? ' active' : '');
+    item.innerHTML = '<div><span class="ai-skill-item-slug">/' + esc(slug) + '</span><span class="ai-skill-item-name">' + esc(sk.name) + '</span></div><div class="ai-skill-item-cat">' + esc(sk.category) + '</div>';
+    item.addEventListener('click', () => {
+      aiSkillsSelectedSlug = slug;
+      renderSkillsBrowser();
+      if (preview) {
+        const body = sk.body || sk.description || '(no methodology loaded)';
+        preview.innerHTML = '';
+        const pre = document.createElement('div');
+        pre.style.whiteSpace = 'pre-wrap';
+        pre.textContent = body.substring(0, 10000) + (body.length > 10000 ? '\n\n... (' + body.length + ' chars total)' : '');
+        preview.appendChild(pre);
+      }
+    });
+    list.appendChild(item);
+  }
+}
+
+// ── Workflows Browser ───────────────────────────────────────────────────────
+
+let aiWfSelectedId = null;
+
+function renderWorkflowsBrowser() {
+  const list = document.getElementById('ai-wf-list');
+  const detail = document.getElementById('ai-wf-detail');
+  if (!list || !window.VOID_WORKFLOWS) return;
+
+  list.replaceChildren();
+  for (const wf of window.VOID_WORKFLOWS) {
+    const card = document.createElement('div');
+    card.className = 'ai-wf-card' + (wf.id === aiWfSelectedId ? ' active' : '');
+    card.innerHTML = '<div class="ai-wf-card-name">' + esc(wf.name) + '</div>' +
+      '<div class="ai-wf-card-desc">' + esc(wf.description) + '</div>' +
+      '<div class="ai-wf-card-meta">' + esc(wf.category) + ' · ' + wf.steps.length + ' steps</div>';
+    card.addEventListener('click', () => {
+      aiWfSelectedId = wf.id;
+      renderWorkflowsBrowser();
+      renderWorkflowDetail(wf);
+    });
+    list.appendChild(card);
+  }
+}
+
+function renderWorkflowDetail(wf) {
+  const detail = document.getElementById('ai-wf-detail');
+  const nameEl = document.getElementById('ai-wf-detail-name');
+  const descEl = document.getElementById('ai-wf-detail-desc');
+  const stepsEl = document.getElementById('ai-wf-steps');
+  if (!detail) return;
+
+  detail.classList.remove('hidden');
+  if (nameEl) nameEl.textContent = wf.name;
+  if (descEl) descEl.textContent = wf.description;
+  if (stepsEl) {
+    stepsEl.replaceChildren();
+    wf.steps.forEach((s, i) => {
+      const row = document.createElement('div');
+      row.className = 'ai-wf-step-row';
+      row.innerHTML = '<span class="ai-wf-step-idx">' + (i + 1) + '</span>' +
+        '<span class="ai-wf-step-name">' + esc(s.name) + '</span>' +
+        '<span class="ai-wf-step-type">' + esc(s.type) + '</span>' +
+        (s.dependsOn?.length ? '<span class="ai-wf-step-deps">after: ' + s.dependsOn.map(d => esc(d)).join(', ') + '</span>' : '');
+      stepsEl.appendChild(row);
+    });
+  }
+}
+
+// ── Prompts Browser ─────────────────────────────────────────────────────────
+
+let aiPromptSelectedId = null;
+
+function renderPromptsBrowser() {
+  const list = document.getElementById('ai-prompts-list');
+  if (!list || !window.VOID_PROMPTS) return;
+
+  list.replaceChildren();
+  for (const p of window.VOID_PROMPTS) {
+    const item = document.createElement('div');
+    item.className = 'ai-prompt-item' + (p.id === aiPromptSelectedId ? ' active' : '');
+    item.innerHTML = '<span class="ai-prompt-item-name">' + esc(p.name) + '</span>' +
+      '<span class="ai-prompt-item-cat">' + esc(p.category) + '</span>';
+    item.addEventListener('click', () => {
+      aiPromptSelectedId = p.id;
+      renderPromptsBrowser();
+      renderPromptDetail(p);
+    });
+    list.appendChild(item);
+  }
+}
+
+function renderPromptDetail(p) {
+  const detail = document.getElementById('ai-prompt-detail');
+  const nameEl = document.getElementById('ai-prompt-detail-name');
+  const catEl = document.getElementById('ai-prompt-detail-cat');
+  const bodyEl = document.getElementById('ai-prompt-detail-body');
+  const tagsEl = document.getElementById('ai-prompt-detail-tags');
+  if (!detail) return;
+
+  detail.classList.remove('hidden');
+  if (nameEl) nameEl.textContent = p.name;
+  if (catEl) catEl.textContent = p.category;
+  if (bodyEl) bodyEl.textContent = p.template;
+  if (tagsEl) {
+    tagsEl.replaceChildren();
+    for (const tag of (p.tags || [])) {
+      const span = document.createElement('span');
+      span.className = 'ai-prompt-tag';
+      span.textContent = '{{' + tag + '}}';
+      tagsEl.appendChild(span);
+    }
+  }
+}
+
 async function probeModelCapability() {
   const resultEl = document.getElementById('ai-probe-result');
   if (resultEl) { resultEl.classList.remove('hidden'); resultEl.textContent = 'Probing model capability...'; }
@@ -12046,7 +12200,25 @@ document.addEventListener("DOMContentLoaded", () => {
         tab.classList.add('active');
         const target = tab.dataset.aitab;
         document.querySelectorAll('.ai-settings-pane').forEach(p => p.classList.toggle('hidden', p.dataset.aitab !== target));
+        // Render browser content on first visit
+        if (target === 'skills') renderSkillsBrowser();
+        if (target === 'workflows') renderWorkflowsBrowser();
+        if (target === 'prompts') renderPromptsBrowser();
       });
+    });
+
+    // Skills browser search/filter
+    document.getElementById('ai-skills-search')?.addEventListener('input', renderSkillsBrowser);
+    document.getElementById('ai-skills-cat-filter')?.addEventListener('change', renderSkillsBrowser);
+
+    // Prompt "Send to Chat" button
+    document.getElementById('ai-prompt-send')?.addEventListener('click', () => {
+      const p = window.VOID_PROMPTS?.find(pr => pr.id === aiPromptSelectedId);
+      if (!p) return;
+      const input = document.getElementById('ai-input');
+      if (input) { input.value = p.template; input.focus(); }
+      // Switch to AI Chat tab
+      showTab('aichat');
     });
 
     // Execution mode buttons

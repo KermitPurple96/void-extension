@@ -2710,7 +2710,10 @@
         <button class="ai-settings-tab active" data-aitab="models">Models</button>
         <button class="ai-settings-tab" data-aitab="persona">Persona</button>
         <button class="ai-settings-tab" data-aitab="engagement">Engagement</button>
-        <button class="ai-settings-tab" data-aitab="vulns">Vuln Classes</button>
+        <button class="ai-settings-tab" data-aitab="vulns">Vulns</button>
+        <button class="ai-settings-tab" data-aitab="skills">Skills</button>
+        <button class="ai-settings-tab" data-aitab="workflows">Workflows</button>
+        <button class="ai-settings-tab" data-aitab="prompts">Prompts</button>
       </div>
 
       <div class="ai-settings-body">
@@ -2943,6 +2946,66 @@
             </table>
           </div>
         </div><!-- end vulns pane -->
+
+        <!-- ═══ TAB: Skills ══════════════════════════════════ -->
+        <div class="ai-settings-pane hidden" data-aitab="skills">
+          <div class="settings-section">
+            <div class="settings-section-title">Skills Library</div>
+            <div class="settings-section-desc">Pentesting methodologies injected into the AI system prompt via slash commands (/xss, /sqli, etc.)</div>
+            <div class="settings-row" style="margin-bottom:8px">
+              <input id="ai-skills-search" type="text" class="settings-inp" placeholder="Search skills..." spellcheck="false" style="flex:1">
+              <select id="ai-skills-cat-filter" class="filter-sel" style="min-width:120px">
+                <option value="">All categories</option>
+              </select>
+              <span id="ai-skills-count" style="font-size:11px;opacity:0.6;font-family:var(--mono);white-space:nowrap"></span>
+            </div>
+            <div class="ai-skills-split">
+              <div id="ai-skills-list" class="ai-skills-list"></div>
+              <div id="ai-skills-preview" class="ai-skills-preview">
+                <div class="ai-skills-empty">Select a skill to preview</div>
+              </div>
+            </div>
+          </div>
+        </div><!-- end skills pane -->
+
+        <!-- ═══ TAB: Workflows ════════════════════════════════ -->
+        <div class="ai-settings-pane hidden" data-aitab="workflows">
+          <div class="settings-section">
+            <div class="settings-section-title">Workflows</div>
+            <div class="settings-section-desc">Pre-defined testing sequences. Select one when creating a pentest project, or trigger via /workflow command.</div>
+            <div id="ai-wf-list" class="ai-wf-list"></div>
+            <div id="ai-wf-detail" class="ai-wf-detail hidden">
+              <div class="ai-wf-detail-header">
+                <span id="ai-wf-detail-name" class="ai-wf-detail-name"></span>
+                <span id="ai-wf-detail-desc" class="ai-wf-detail-desc"></span>
+              </div>
+              <div class="pane-label" style="margin-top:10px">STEPS</div>
+              <div id="ai-wf-steps" class="ai-wf-steps"></div>
+            </div>
+          </div>
+        </div><!-- end workflows pane -->
+
+        <!-- ═══ TAB: Prompts ══════════════════════════════════ -->
+        <div class="ai-settings-pane hidden" data-aitab="prompts">
+          <div class="settings-section">
+            <div class="settings-section-title">Prompt Templates</div>
+            <div class="settings-section-desc">Reusable prompts with tag placeholders. Includes hybrid judge/refute templates for vulnerability verification.</div>
+            <div id="ai-prompts-list" class="ai-prompts-list"></div>
+            <div id="ai-prompt-detail" class="ai-prompt-detail hidden">
+              <div class="ai-prompt-detail-header">
+                <span id="ai-prompt-detail-name" class="ai-prompt-detail-name"></span>
+                <span id="ai-prompt-detail-cat" class="ai-prompt-detail-cat"></span>
+              </div>
+              <div class="pane-label" style="margin-top:8px">TEMPLATE</div>
+              <pre id="ai-prompt-detail-body" class="ai-prompt-detail-body"></pre>
+              <div class="pane-label" style="margin-top:8px">TAGS</div>
+              <div id="ai-prompt-detail-tags" class="ai-prompt-detail-tags"></div>
+              <div class="settings-row" style="margin-top:10px">
+                <button id="ai-prompt-send" class="btn btn-sm btn-accent">Send to Chat</button>
+              </div>
+            </div>
+          </div>
+        </div><!-- end prompts pane -->
 
       </div><!-- end ai-settings-body -->
 
