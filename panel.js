@@ -8576,6 +8576,16 @@ const AI_TOOLS = [
   { name: "set_dns_override", description: "Override DNS resolution for a hostname. Like /etc/hosts but only for proxy requests.", parameters: { type: "object", properties: { hostname: { type: "string" }, ip: { type: "string" } }, required: ["hostname", "ip"] } },
   { name: "compare_responses", description: "Diff two response bodies line by line. Useful for spotting differences between requests.", parameters: { type: "object", properties: { body1: { type: "string" }, body2: { type: "string" } }, required: ["body1", "body2"] } },
   { name: "run_flow", description: "Run a Flow Builder chain — sequential requests with variable extraction between steps.", parameters: { type: "object", properties: { steps: { type: "array", items: { type: "object", properties: { method: { type: "string" }, url: { type: "string" }, headers: { type: "string" }, body: { type: "string" }, extractors: { type: "array", items: { type: "object", properties: { type: { type: "string" }, expr: { type: "string" }, varName: { type: "string" } } } } } }, description: "Ordered request steps with extractors" } }, required: ["steps"] } },
+  { name: "get_skill", description: "Get a pentest skill methodology by slug. Returns the skill's full description and body for context injection.", parameters: { type: "object", properties: { slug: { type: "string", description: "Skill slug (e.g., 'xss', 'sqli', 'cors')" } }, required: ["slug"] } },
+  { name: "get_payloads", description: "Get curated payload list by category for vulnerability testing.", parameters: { type: "object", properties: { category: { type: "string", description: "Payload category: xss_tags, sqli_auth_bypass, ssti_detect, cmdi_detect, ssrf_bypass, cors_origins, idor_patterns, jwt_attacks, cache_deception, oauth_redirect" } }, required: ["category"] } },
+  { name: "get_project_scope", description: "Get the active pentest project's in-scope and out-of-scope targets.", parameters: { type: "object", properties: {} } },
+  { name: "get_project_config", description: "Get the active pentest project's engagement configuration (environment, mode, safety settings).", parameters: { type: "object", properties: {} } },
+  { name: "add_pentest_finding", description: "Add a structured finding to the active pentest project. Requires evidence from real tool output.", parameters: { type: "object", properties: { title: { type: "string" }, severity: { type: "string", enum: ["critical", "high", "medium", "low", "info"] }, url: { type: "string" }, evidence: { type: "string", description: "Exact text from the response proving the vulnerability" }, request: { type: "string", description: "The HTTP request that triggered the vuln" }, responseSnippet: { type: "string", description: "Relevant portion of the response" }, vulnType: { type: "string", description: "Vulnerability type (e.g., xss_reflected, sqli, cmdi)" }, payloadUsed: { type: "string" }, cwe: { type: "string", description: "CWE identifier (e.g., CWE-79)" } }, required: ["title", "severity", "evidence"] } },
+  { name: "get_pentest_findings", description: "List findings for the active pentest project.", parameters: { type: "object", properties: { severity: { type: "string", description: "Filter by severity" } } } },
+  { name: "run_hybrid_scan", description: "Run deterministic hybrid vulnerability checks against a URL. Sends curated payloads and pattern-matches responses. Returns candidate hits for review.", parameters: { type: "object", properties: { url: { type: "string", description: "Target URL to scan" }, checks: { type: "array", items: { type: "string" }, description: "Check IDs to run (e.g., ['sqli', 'xss_reflected', 'cmdi']). Empty = all checks." } }, required: ["url"] } },
+  { name: "get_available_checks", description: "List all available hybrid vulnerability checks with their descriptions.", parameters: { type: "object", properties: {} } },
+  { name: "get_workflows", description: "List available pentest workflows with their steps.", parameters: { type: "object", properties: {} } },
+  { name: "get_agents", description: "List available AI agent personas with their descriptions.", parameters: { type: "object", properties: {} } },
 ];
 
 const AI_SYSTEM_PROMPT = `You are an expert security researcher and penetration tester embedded in the Void Extension — a Chrome DevTools security toolkit similar to Burp Suite. You have access to tools that let you read HTTP traffic, send requests, scan for vulnerabilities, encode/decode values, and manage findings.
@@ -8920,6 +8930,68 @@ async function aiExecTool(name, args) {
       const results = await intrRunFlow(steps[0].url, steps[0].method || "GET", steps[0].headers || "", steps[0].body || "");
       flowSteps = savedSteps;
       return results;
+    }
+    case "get_skill": {
+      const slug = args.slug;
+      const skill = window.VOID_SKILLS?.[slug];
+      if (!skill) return { error: "Unknown skill: " + slug };
+      return { slug, name: skill.name, category: skill.category, description: skill.description, body: skill.body || "(full methodology not loaded yet)" };
+    }
+    case "get_payloads": {
+      const cat = args.category;
+      const payloads = window.VOID_PAYLOADS?.[cat];
+      if (!payloads) return { error: "Unknown category: " + cat + ". Available: " + Object.keys(window.VOID_PAYLOADS || {}).join(", ") };
+      return { category: cat, count: payloads.length, payloads: payloads };
+    }
+    case "get_project_scope": {
+      const proj = pentestGetActive();
+      if (!proj) return { error: "No active pentest project" };
+      return { project: proj.name, scope: proj.scope };
+    }
+    case "get_project_config": {
+      const proj = pentestGetActive();
+      if (!proj) return { error: "No active pentest project" };
+      return { project: proj.name, config: proj.config, workflow: proj.workflow };
+    }
+    case "add_pentest_finding": {
+      const proj = pentestGetActive();
+      if (!proj) return { error: "No active pentest project. Create one first." };
+      if (!args.evidence) return { error: "Evidence is required. Include exact text from the response." };
+      const finding = pentestAddFinding(proj.id, {
+        title: args.title || "Untitled",
+        severity: args.severity || "info",
+        url: args.url || "",
+        evidence: args.evidence || "",
+        request: args.request || "",
+        responseSnippet: args.responseSnippet || "",
+        vulnType: args.vulnType || "",
+        payloadUsed: args.payloadUsed || "",
+        cwe: args.cwe || "",
+      });
+      // Also add to Notes tab
+      aiExecTool("add_finding", { title: args.title, severity: args.severity, detail: args.evidence });
+      return { ok: true, findingId: finding?.id, message: "Finding added to project " + proj.name };
+    }
+    case "get_pentest_findings": {
+      const proj = pentestGetActive();
+      if (!proj) return { error: "No active pentest project" };
+      let findings = proj.findings || [];
+      if (args.severity) findings = findings.filter(f => f.severity === args.severity);
+      return { project: proj.name, count: findings.length, findings: findings };
+    }
+    case "run_hybrid_scan": {
+      if (!args.url) return { error: "URL is required" };
+      return await runHybridScan(args.url, args.checks || []);
+    }
+    case "get_available_checks": {
+      const checks = window.VOID_HYBRID_CHECKS || {};
+      return { checks: Object.values(checks).map(c => ({ id: c.id, name: c.name, description: c.description, risk: c.riskIfFound })) };
+    }
+    case "get_workflows": {
+      return { workflows: (window.VOID_WORKFLOWS || []).map(w => ({ id: w.id, name: w.name, description: w.description, steps: w.steps.length })) };
+    }
+    case "get_agents": {
+      return { agents: (window.VOID_AGENTS || []).map(a => ({ id: a.id, title: a.title, description: a.description })) };
     }
     default: return { error: `Unknown tool: ${name}` };
   }
@@ -9623,6 +9695,111 @@ function autoNext() {
   const input = document.getElementById('ai-input');
   if (input) input.value = message;
   aiSendMessage();
+}
+
+// ── Hybrid Engine ───────────────────────────────────────────────────────────
+
+async function runHybridScan(targetUrl, checkIds) {
+  const checks = window.VOID_HYBRID_CHECKS;
+  if (!checks) return { error: 'Hybrid checks not loaded' };
+
+  const idsToRun = checkIds && checkIds.length > 0
+    ? checkIds.filter(id => checks[id])
+    : Object.keys(checks);
+
+  const results = [];
+
+  for (const checkId of idsToRun) {
+    const check = checks[checkId];
+    if (!check || check.passive || check.sessionCheck || check.headerCheck) continue;
+
+    for (const payload of (check.payloads || [])) {
+      // Build URL with payload injected
+      let testUrl = targetUrl;
+      if (check.injectIn === 'param') {
+        const sep = targetUrl.includes('?') ? '&' : '?';
+        testUrl = targetUrl + sep + 'test=' + encodeURIComponent(payload);
+      }
+
+      try {
+        // Use the existing send_request tool path
+        const resp = await aiExecTool('send_request', { url: testUrl, method: check.method || 'GET' });
+        const body = resp?.body || resp?.respBody || '';
+        const status = resp?.status || 0;
+
+        // Check for pattern matches
+        let matched = false;
+        let matchedPattern = '';
+
+        if (check.reflection) {
+          // Reflection check: is the payload in the response?
+          if (body.includes(payload)) {
+            matched = true;
+            matchedPattern = 'Payload reflected unencoded in response';
+          }
+        } else {
+          // Regex pattern matching
+          for (const pattern of (check.patterns || [])) {
+            if (pattern.test(body)) {
+              matched = true;
+              matchedPattern = pattern.toString();
+              break;
+            }
+          }
+        }
+
+        if (matched) {
+          results.push({
+            checkId: check.id,
+            checkName: check.name,
+            severity: check.riskIfFound,
+            payload: payload,
+            url: testUrl,
+            matchedPattern: matchedPattern,
+            responseStatus: status,
+            responseSnippet: body.substring(0, 500),
+            needsJudgment: true,
+          });
+        }
+      } catch (err) {
+        // Skip failed requests
+      }
+    }
+  }
+
+  return {
+    checksRun: idsToRun.length,
+    candidateHits: results.length,
+    results: results,
+  };
+}
+
+// Run passive checks (CSRF, session, CSP) against captured history
+function runPassiveHybridChecks() {
+  const checks = window.VOID_HYBRID_CHECKS;
+  if (!checks) return [];
+  const results = [];
+
+  // CSP check — look at response headers in history
+  if (checks.csp) {
+    const headers = typeof getHeadersAnalysis === 'function' ? getHeadersAnalysis() : [];
+    // Check each host's headers for CSP issues
+    for (const h of (Array.isArray(headers) ? headers : [])) {
+      const csp = h.headers?.['content-security-policy'] || '';
+      if (!csp) {
+        results.push({ checkId: 'csp', checkName: 'Missing CSP', severity: 'low', url: h.url || h.host, evidence: 'No Content-Security-Policy header', needsJudgment: false });
+      } else {
+        for (const pattern of checks.csp.patterns) {
+          if (pattern.test(csp)) {
+            results.push({ checkId: 'csp', checkName: 'Weak CSP', severity: 'low', url: h.url || h.host, evidence: 'CSP contains: ' + pattern.toString(), matchedPattern: pattern.toString(), needsJudgment: false });
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return results;
 }
 
 // ── Chat session management ──────────────────────────────────────────────────
