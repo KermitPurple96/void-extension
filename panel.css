@@ -2818,3 +2818,46 @@ html.theme-hacker {
   --btn-send-text: #0a0a0a;
   --btn-send-hover: #00cc33;
 }
+
+/* ── Settings split layout ─────────────────────────────────── */
+.settings-split { display: flex; gap: 0; height: 100%; }
+.settings-left { flex: 1; overflow-y: auto; min-width: 0; padding-right: 12px; border-right: 1px solid var(--border); }
+.settings-right { flex: 1; overflow-y: auto; min-width: 0; padding-left: 16px; }
+.settings-right .settings-section-title { color: var(--accent); }
+
+/* ── AI Pentest Config components ──────────────────────────── */
+.ai-model-slot { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+.ai-model-slot-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.6; margin-bottom: 8px; font-weight: 600; }
+.ai-model-slot-rec { font-size: 11px; opacity: 0.5; margin-top: 4px; font-style: italic; }
+.ai-exec-mode-bar { display: flex; gap: 4px; margin-bottom: 16px; }
+.ai-exec-mode-btn { flex: 1; padding: 10px 12px; border: 1px solid var(--border); background: var(--bg2); color: var(--fg2); border-radius: 4px; cursor: pointer; font-size: 13px; text-align: center; transition: border-color 0.15s, color 0.15s; font-family: inherit; }
+.ai-exec-mode-btn:hover { color: var(--fg); border-color: var(--fg2); }
+.ai-exec-mode-btn.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.ai-persona-preview { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; font-family: var(--mono); font-size: 11px; line-height: 1.5; max-height: 160px; overflow-y: auto; white-space: pre-wrap; margin-top: 8px; color: var(--fg2); }
+.ai-preset-bar { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.ai-preset-btn { padding: 6px 14px; border: 1px solid var(--border); background: transparent; color: var(--fg2); border-radius: 4px; cursor: pointer; font-size: 12px; transition: border-color 0.15s, color 0.15s; font-family: inherit; }
+.ai-preset-btn:hover { border-color: var(--accent); color: var(--accent); }
+.ai-preset-btn.ai-preset-prod { border-color: #ef4444; color: #ef4444; }
+.ai-preset-btn.ai-preset-prod:hover { background: rgba(239,68,68,0.1); }
+.ai-preset-btn.ai-preset-preprod { border-color: #f59e0b; color: #f59e0b; }
+.ai-preset-btn.ai-preset-preprod:hover { background: rgba(245,158,11,0.1); }
+.ai-preset-btn.ai-preset-lab { border-color: #22c55e; color: #22c55e; }
+.ai-preset-btn.ai-preset-lab:hover { background: rgba(34,197,94,0.1); }
+.ai-safety-toggle { display: flex; align-items: center; justify-content: space-between; background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; }
+.ai-safety-info { flex: 1; }
+.ai-safety-label { font-size: 13px; font-weight: 500; }
+.ai-safety-desc { font-size: 11px; opacity: 0.5; margin-top: 2px; }
+.ai-safety-status { font-size: 11px; font-weight: 600; margin-top: 4px; }
+.ai-safety-status.on { color: #f59e0b; }
+.ai-safety-status.off { color: #22c55e; }
+.ai-safety-status.danger { color: #ef4444; }
+.ai-vuln-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+.ai-vuln-table th { text-align: left; padding: 8px 10px; background: var(--bg2); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+.ai-vuln-table td { padding: 6px 10px; border-bottom: 1px solid var(--bg2); }
+.ai-vuln-table select { padding: 3px 6px; background: var(--bg1); color: var(--fg); border: 1px solid var(--border); border-radius: 3px; font-size: 12px; }
+.ai-risk-critical { color: #ef4444; font-weight: 600; text-transform: uppercase; font-size: 11px; }
+.ai-risk-high { color: #f97316; font-weight: 600; text-transform: uppercase; font-size: 11px; }
+.ai-risk-medium { color: #eab308; font-weight: 600; text-transform: uppercase; font-size: 11px; }
+.ai-risk-low { color: #22c55e; font-weight: 600; text-transform: uppercase; font-size: 11px; }
+.ai-mode-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.ai-probe-result { font-family: var(--mono); font-size: 12px; margin-top: 8px; padding: 8px; background: var(--bg2); border-radius: 4px; }

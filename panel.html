@@ -2015,7 +2015,8 @@
   </div>
 
   <div id="tab-settings" class="tab-panel hidden" role="tabpanel">
-    <div class="settings-scroll">
+    <div class="settings-split">
+    <div class="settings-left settings-scroll">
 
       <!-- ── Request Defaults ───────────────────────────────────── -->
       <div class="settings-section">
@@ -2441,60 +2442,245 @@
         </div>
       </div>
 
-      <!-- ── AI Chat ──────────────────────────────────────────── -->
-      <div class="settings-section">
-        <div class="settings-section-title">AI Chat</div>
-        <div class="settings-section-desc">Configure the AI provider for the Chat tab. Supports API-based providers, local models via Ollama, and Claude CLI (uses your existing Claude Code authentication).</div>
-        <div class="settings-row">
-          <label class="settings-label-sm" for="ai-provider">Provider</label>
-          <select id="ai-provider" class="filter-sel" aria-label="AI provider">
-            <option value="claude-cli">Claude CLI (no API key needed)</option>
-            <option value="anthropic">Anthropic API</option>
-            <option value="openai">OpenAI API</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="ollama">Ollama (local)</option>
-            <option value="custom">Custom (OpenAI-compatible)</option>
-          </select>
-        </div>
-        <div id="ai-apikey-wrap">
-          <div class="settings-row">
-            <label class="settings-label-sm" for="ai-apikey">API Key</label>
-            <input id="ai-apikey" type="password" class="settings-inp" placeholder="sk-…" spellcheck="false" aria-label="API key" style="flex:1">
-          </div>
-        </div>
-        <div class="settings-row">
-          <label class="settings-label-sm" for="ai-model">Model</label>
-          <input id="ai-model" type="text" class="settings-inp" placeholder="claude-sonnet-4-20250514" spellcheck="false" aria-label="Model name" style="flex:1">
-        </div>
-        <div id="ai-custom-url-wrap" class="hidden">
-          <div class="settings-row">
-            <label class="settings-label-sm" for="ai-custom-url">Endpoint URL</label>
-            <input id="ai-custom-url" type="text" class="settings-inp" placeholder="http://localhost:11434/v1/chat/completions" spellcheck="false" aria-label="Custom endpoint" style="flex:1">
-          </div>
-        </div>
-        <div id="ai-cli-wrap" class="hidden">
-          <div class="settings-row">
-            <label class="settings-label-sm" for="ai-cli-path">CLI Path</label>
-            <input id="ai-cli-path" type="text" class="settings-inp" placeholder="claude (or full path to binary)" spellcheck="false" style="flex:1">
-          </div>
-          <div class="settings-section-desc">Uses your existing Claude Code authentication. The CLI must be installed and logged in. No API key required.</div>
-        </div>
-        <div class="settings-row"><label class="settings-label-sm" for="ai-system">System Prompt</label></div>
-        <textarea id="ai-system" class="raw-ta settings-ta" rows="3" spellcheck="false" placeholder="You are a security researcher assistant with access to HTTP traffic..."></textarea>
-        <div class="settings-actions">
-          <button id="ai-save-config" class="btn btn-sm btn-accent">Save AI Config</button>
-          <span id="ai-status" class="settings-status"></span>
-        </div>
-      </div>
-
       <div class="settings-actions">
         <button id="cfg-save" class="btn btn-accent">Save Settings</button>
         <button id="cfg-reset" class="btn btn-sm btn-ghost">Reset Defaults</button>
         <span id="cfg-status" class="settings-status"></span>
       </div>
 
+    </div><!-- end settings-left -->
+    <div class="settings-right settings-scroll">
 
-    </div>
+      <!-- ── Execution Mode ───────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Execution Mode</div>
+        <div class="settings-section-desc">How the AI conducts pentesting. Full AI: model drives everything. Hybrid: deterministic scanner + AI judgment. Scanner Only: no AI.</div>
+        <div class="ai-exec-mode-bar">
+          <button class="ai-exec-mode-btn active" data-mode="full_ai">Full AI</button>
+          <button class="ai-exec-mode-btn" data-mode="hybrid">Hybrid</button>
+          <button class="ai-exec-mode-btn" data-mode="scanner_only">Scanner Only</button>
+        </div>
+      </div>
+
+      <!-- ── AI Models (triple config) ────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">AI Models</div>
+        <div class="settings-section-desc">Configure up to three models for different roles. Each can use a different provider.</div>
+
+        <!-- Primary Model -->
+        <div class="ai-model-slot">
+          <div class="ai-model-slot-title">Primary Model (Full AI mode)</div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Provider</label>
+            <select id="ai-primary-provider" class="filter-sel">
+              <option value="claude-cli">Claude CLI (no key needed)</option>
+              <option value="anthropic">Anthropic API</option>
+              <option value="openai">OpenAI API</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="ollama">Ollama</option>
+              <option value="custom">Custom (OpenAI-compatible)</option>
+            </select>
+          </div>
+          <div class="settings-row ai-primary-key-wrap">
+            <label class="settings-label-sm">API Key</label>
+            <input id="ai-primary-key" type="password" class="settings-inp" placeholder="sk-..." spellcheck="false" style="flex:1">
+          </div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Model</label>
+            <input id="ai-primary-model" type="text" class="settings-inp" placeholder="deepseek-v4-pro" spellcheck="false" style="flex:1">
+          </div>
+          <div class="settings-row ai-primary-endpoint-wrap">
+            <label class="settings-label-sm">Endpoint</label>
+            <input id="ai-primary-endpoint" type="text" class="settings-inp" placeholder="https://ollama.com/v1/chat/completions" spellcheck="false" style="flex:1">
+          </div>
+          <div class="ai-model-slot-rec">Recommended: deepseek-v4-pro on OpenRouter ($0.27/M tokens)</div>
+        </div>
+
+        <!-- Judge Model -->
+        <div class="ai-model-slot">
+          <div class="ai-model-slot-title">Judge Model (Hybrid mode)</div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Provider</label>
+            <select id="ai-judge-provider" class="filter-sel">
+              <option value="claude-cli">Claude CLI</option>
+              <option value="anthropic">Anthropic API</option>
+              <option value="openai">OpenAI API</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="ollama" selected>Ollama</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <div class="settings-row ai-judge-key-wrap">
+            <label class="settings-label-sm">API Key</label>
+            <input id="ai-judge-key" type="password" class="settings-inp" placeholder="sk-..." spellcheck="false" style="flex:1">
+          </div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Model</label>
+            <input id="ai-judge-model" type="text" class="settings-inp" placeholder="gemma3:12b" spellcheck="false" style="flex:1" value="gemma3:12b">
+          </div>
+          <div class="settings-row ai-judge-endpoint-wrap">
+            <label class="settings-label-sm">Endpoint</label>
+            <input id="ai-judge-endpoint" type="text" class="settings-inp" placeholder="http://localhost:11434/v1/chat/completions" spellcheck="false" style="flex:1" value="http://localhost:11434/v1/chat/completions">
+          </div>
+          <div class="ai-model-slot-rec">Recommended: gemma3:12b on local Ollama (free)</div>
+        </div>
+
+        <!-- Utility Model -->
+        <div class="ai-model-slot">
+          <div class="ai-model-slot-title">Utility Model (classify, summarize)</div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Provider</label>
+            <select id="ai-utility-provider" class="filter-sel">
+              <option value="claude-cli">Claude CLI</option>
+              <option value="anthropic">Anthropic API</option>
+              <option value="openai">OpenAI API</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="ollama" selected>Ollama</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <div class="settings-row ai-utility-key-wrap">
+            <label class="settings-label-sm">API Key</label>
+            <input id="ai-utility-key" type="password" class="settings-inp" placeholder="sk-..." spellcheck="false" style="flex:1">
+          </div>
+          <div class="settings-row">
+            <label class="settings-label-sm">Model</label>
+            <input id="ai-utility-model" type="text" class="settings-inp" placeholder="gemma3:12b" spellcheck="false" style="flex:1" value="gemma3:12b">
+          </div>
+          <div class="settings-row ai-utility-endpoint-wrap">
+            <label class="settings-label-sm">Endpoint</label>
+            <input id="ai-utility-endpoint" type="text" class="settings-inp" placeholder="http://localhost:11434/v1/chat/completions" spellcheck="false" style="flex:1" value="http://localhost:11434/v1/chat/completions">
+          </div>
+          <div class="ai-model-slot-rec">Recommended: same as Judge or cheaper</div>
+        </div>
+
+        <!-- Model Presets -->
+        <div class="ai-preset-bar">
+          <button id="ai-model-preset-default" class="ai-preset-btn">Default</button>
+          <button id="ai-model-preset-budget" class="ai-preset-btn">Budget</button>
+          <button id="ai-model-preset-max" class="ai-preset-btn">Max</button>
+          <button id="ai-model-preset-local" class="ai-preset-btn">Local Only</button>
+        </div>
+
+        <!-- Probe -->
+        <div class="settings-row">
+          <button id="ai-probe-btn" class="btn btn-sm btn-ghost">Probe Model Capability</button>
+        </div>
+        <div id="ai-probe-result" class="ai-probe-result hidden"></div>
+      </div>
+
+      <!-- ── Agent Persona ────────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Agent Persona</div>
+        <div class="settings-section-desc">Select the AI personality and system prompt used in chat.</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Persona</label>
+          <select id="ai-persona" class="filter-sel">
+            <option value="pentester">AI Pentester</option>
+            <option value="analyst">Analyst</option>
+            <option value="orchestrator">Orchestrator</option>
+            <option value="injector">Injector</option>
+            <option value="recon">Recon</option>
+            <option value="apihunter">API Hunter</option>
+            <option value="auditor">Auditor</option>
+            <option value="authhunter">Auth Hunter</option>
+            <option value="bughunter">Bug Hunter</option>
+            <option value="cryptoanalyst">Crypto Analyst</option>
+            <option value="redteam">Red Team</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div id="ai-persona-desc" class="settings-section-desc" style="margin-top:6px"></div>
+        <div id="ai-persona-preview" class="ai-persona-preview"></div>
+        <div id="ai-custom-prompt-wrap" class="hidden" style="margin-top:8px">
+          <textarea id="ai-custom-system" class="raw-ta settings-ta" rows="6" spellcheck="false" placeholder="Custom system prompt..."></textarea>
+        </div>
+      </div>
+
+      <!-- ── Engagement Config ────────────────────────────── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Engagement Config</div>
+        <div class="settings-section-desc">Default testing configuration. Per-project overrides are set in AI Chat.</div>
+
+        <div class="settings-row" style="gap:16px">
+          <div style="flex:1">
+            <label class="settings-label-sm">Environment</label>
+            <select id="ai-engagement-env" class="filter-sel" style="width:100%;margin-top:4px">
+              <option value="production">Production</option>
+              <option value="preproduction">Pre-production</option>
+              <option value="lab">Lab / CTF</option>
+              <option value="unknown" selected>Unknown</option>
+            </select>
+          </div>
+          <div style="flex:1">
+            <label class="settings-label-sm">Default Mode</label>
+            <select id="ai-engagement-mode" class="filter-sel" style="width:100%;margin-top:4px">
+              <option value="ask" selected>Ask — stop and ask before exploiting</option>
+              <option value="manual">Manual — AI tests carefully (no tools)</option>
+              <option value="tool">Tool — automated tools (noisy)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Environment Presets -->
+        <div class="ai-preset-bar" style="margin-top:12px">
+          <button id="ai-preset-prod" class="ai-preset-btn ai-preset-prod">Production — Ask everything</button>
+          <button id="ai-preset-preprod" class="ai-preset-btn ai-preset-preprod">Pre-prod — AI manual</button>
+          <button id="ai-preset-lab" class="ai-preset-btn ai-preset-lab">Lab — Full auto</button>
+        </div>
+
+        <!-- Safety Toggles -->
+        <div class="ai-safety-toggle">
+          <div class="ai-safety-info">
+            <div class="ai-safety-label">Bruteforce / Fuzzing</div>
+            <div class="ai-safety-desc">Login brute force, parameter fuzzing, high-volume requests</div>
+            <div id="ai-safety-brute-status" class="ai-safety-status off">DISABLED — no brute force or fuzzing</div>
+          </div>
+          <label class="settings-label"><input type="checkbox" id="ai-safety-brute"><span class="toggle-track"></span></label>
+        </div>
+        <div class="ai-safety-toggle">
+          <div class="ai-safety-info">
+            <div class="ai-safety-label">Destructive Testing</div>
+            <div class="ai-safety-desc">Buffer overflow, DoS payloads, crash-inducing inputs</div>
+            <div id="ai-safety-dest-status" class="ai-safety-status off">DISABLED — no destructive payloads</div>
+          </div>
+          <label class="settings-label"><input type="checkbox" id="ai-safety-destructive"><span class="toggle-track"></span></label>
+        </div>
+
+        <!-- Vuln Class Table -->
+        <div class="pane-label" style="margin-top:16px">PER-VULNERABILITY MODE</div>
+        <div class="settings-section-desc">Override the default mode for specific vulnerability classes.</div>
+        <div style="font-size:11px;opacity:0.7;margin-bottom:8px;display:flex;gap:16px">
+          <span><span style="color:#22c55e">&#9679;</span> Manual = AI-driven, safe</span>
+          <span><span style="color:#f59e0b">&#9679;</span> Tool = Automated, noisy</span>
+          <span><span style="color:#3b82f6">&#9679;</span> Ask = Detect then ask</span>
+        </div>
+        <table class="ai-vuln-table">
+          <thead><tr><th>Vulnerability</th><th>Risk</th><th>Mode</th><th>Effective</th><th>Note</th></tr></thead>
+          <tbody id="ai-vuln-tbody"></tbody>
+        </table>
+
+        <!-- OOB Server -->
+        <div class="pane-label" style="margin-top:16px">OOB CALLBACK SERVER</div>
+        <div class="settings-section-desc">For blind SSRF/XSS/XXE detection (interactsh, callback-catcher, etc.)</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Server URL</label>
+          <input id="ai-oob-server" type="text" class="settings-inp" placeholder="http://callback-catcher:9999" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Token</label>
+          <input id="ai-oob-token" type="password" class="settings-inp" placeholder="optional auth token" spellcheck="false" style="flex:1">
+        </div>
+      </div>
+
+      <!-- Save AI Config -->
+      <div class="settings-actions">
+        <button id="ai-cfg-save" class="btn btn-accent">Save AI Config</button>
+        <span id="ai-cfg-status" class="settings-status"></span>
+      </div>
+
+    </div><!-- end settings-right -->
+    </div><!-- end settings-split -->
   </div>
 
 
