@@ -12039,6 +12039,16 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   initBlock("ai-pentest-config", () => {
+    // AI Settings subtabs
+    document.querySelectorAll('.ai-settings-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.ai-settings-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset.aitab;
+        document.querySelectorAll('.ai-settings-pane').forEach(p => p.classList.toggle('hidden', p.dataset.aitab !== target));
+      });
+    });
+
     // Execution mode buttons
     document.querySelectorAll('.ai-exec-mode-btn').forEach(btn => {
       btn.addEventListener('click', () => {
