@@ -2861,3 +2861,55 @@ html.theme-hacker {
 .ai-risk-low { color: #22c55e; font-weight: 600; text-transform: uppercase; font-size: 11px; }
 .ai-mode-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
 .ai-probe-result { font-family: var(--mono); font-size: 12px; margin-top: 8px; padding: 8px; background: var(--bg2); border-radius: 4px; }
+
+/* ── Pentest Projects in AI Chat sidebar ────────────────── */
+.ai-projects-section { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
+.ai-projects-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; }
+.ai-projects-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.6; font-weight: 600; }
+.ai-project-list { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
+.ai-project-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; transition: background 0.15s; }
+.ai-project-item:hover { background: var(--bg3); }
+.ai-project-item.active { background: var(--bg3); border-left: 2px solid var(--accent); padding-left: 8px; }
+.ai-project-item .ai-proj-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-project-item .ai-proj-findings { font-size: 10px; opacity: 0.6; font-family: var(--mono); }
+.ai-project-item .ai-proj-del { opacity: 0; font-size: 14px; cursor: pointer; color: var(--red, #e55); padding: 0 2px; }
+.ai-project-item:hover .ai-proj-del { opacity: 0.6; }
+.ai-project-item .ai-proj-del:hover { opacity: 1; }
+
+/* ── Project context bar ────────────────────────────────── */
+.ai-context-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg2); border-bottom: 1px solid var(--border); font-size: 12px; gap: 12px; }
+.ai-ctx-info { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.ai-ctx-name { font-weight: 600; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-ctx-scope { opacity: 0.6; white-space: nowrap; }
+.ai-ctx-findings { font-family: var(--mono); font-size: 11px; }
+.ai-ctx-findings .sev-c { color: #ef4444; font-weight: 600; }
+.ai-ctx-findings .sev-h { color: #f97316; font-weight: 600; }
+.ai-ctx-findings .sev-m { color: #eab308; }
+.ai-ctx-findings .sev-l { color: #22c55e; }
+.ai-ctx-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.ai-context-bar .btn-xs { padding: 3px 8px; font-size: 11px; }
+
+/* ── Project creation wizard ────────────────────────────── */
+.ai-wizard-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+.ai-wizard-modal { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; width: 560px; max-width: 95vw; max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+.ai-wizard-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.ai-wizard-title { font-size: 16px; font-weight: 600; }
+.ai-wizard-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; padding: 0 4px; line-height: 1; }
+.ai-wizard-close:hover { color: var(--red, #e55); }
+.ai-wizard-steps { display: flex; justify-content: center; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+.ai-wizard-dot { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--muted); transition: border-color 0.15s, color 0.15s, background 0.15s; }
+.ai-wizard-dot.active { border-color: var(--accent); color: var(--accent); }
+.ai-wizard-dot.done { border-color: var(--green, #3fb950); color: var(--green, #3fb950); background: rgba(63,185,80,0.1); }
+.ai-wizard-step { padding: 16px 20px; }
+.ai-wizard-step-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+.ai-wizard-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.ai-wizard-list-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; font-size: 13px; }
+.ai-wizard-list-item .wiz-item-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-wizard-list-item .wiz-item-reason { font-size: 11px; opacity: 0.5; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-wizard-list-item .wiz-item-del { opacity: 0.5; cursor: pointer; font-size: 14px; color: var(--red, #e55); }
+.ai-wizard-list-item .wiz-item-del:hover { opacity: 1; }
+.ai-wizard-wf-steps { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.ai-wizard-wf-step { padding: 6px 10px; background: var(--bg2); border-radius: 4px; font-size: 12px; display: flex; gap: 8px; align-items: center; }
+.ai-wizard-wf-step-name { font-weight: 500; }
+.ai-wizard-wf-step-type { font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; opacity: 0.5; }
+.ai-wizard-nav { display: flex; align-items: center; padding: 12px 20px; border-top: 1px solid var(--border); gap: 8px; }

@@ -1998,18 +1998,181 @@
   <!-- ═══════════════════════════ AI CHAT ═══════════════════════════════════ -->
   <div id="tab-aichat" class="tab-panel hidden" role="tabpanel">
     <div class="ai-chat-layout">
-      <!-- Chat sessions sidebar -->
+      <!-- Sidebar: sessions + projects -->
       <div class="ai-sessions-bar">
         <button id="ai-new-chat" class="btn btn-sm btn-accent ai-new-chat-btn">+ New Chat</button>
         <div id="ai-sessions-list" class="ai-sessions-list"></div>
+
+        <!-- Pentest Projects section -->
+        <div class="ai-projects-section">
+          <div class="ai-projects-header">
+            <span class="ai-projects-title">AI Pentest Projects</span>
+            <button id="ai-new-project" class="btn btn-xs btn-ghost" title="New Project">+</button>
+          </div>
+          <div id="ai-project-list" class="ai-project-list"></div>
+        </div>
       </div>
-      <!-- Chat area -->
+
+      <!-- Chat area with context bar -->
       <div class="ai-chat-area">
+        <!-- Project context bar (hidden when no project active) -->
+        <div id="ai-context-bar" class="ai-context-bar hidden">
+          <div class="ai-ctx-info">
+            <span id="ai-ctx-name" class="ai-ctx-name"></span>
+            <span id="ai-ctx-scope" class="ai-ctx-scope"></span>
+            <span id="ai-ctx-findings" class="ai-ctx-findings"></span>
+          </div>
+          <div class="ai-ctx-actions">
+            <button id="ai-ctx-scope-btn" class="btn btn-xs btn-ghost" title="View Scope">Scope</button>
+            <button id="ai-ctx-findings-btn" class="btn btn-xs btn-ghost" title="View Findings">Findings</button>
+            <button id="ai-ctx-deactivate" class="btn btn-xs btn-ghost" title="Deactivate Project">&times;</button>
+          </div>
+        </div>
+
         <div id="ai-messages" class="ai-messages"></div>
         <div class="ai-input-bar">
-          <textarea id="ai-input" class="raw-ta ai-input-ta" rows="2" placeholder="Ask the AI to analyze traffic, test for vulns, encode payloads…" spellcheck="false" aria-label="Chat message"></textarea>
+          <textarea id="ai-input" class="raw-ta ai-input-ta" rows="2" placeholder="Ask the AI to analyze traffic, test for vulns, encode payloads..." spellcheck="false" aria-label="Chat message"></textarea>
           <button id="ai-send" class="btn btn-accent">Send</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Project Creation Wizard ═══════════════════════════════════════════ -->
+  <div id="ai-wizard-overlay" class="ai-wizard-overlay hidden">
+    <div class="ai-wizard-modal">
+      <div class="ai-wizard-header">
+        <span class="ai-wizard-title">New AI Pentest Project</span>
+        <button id="ai-wizard-close" class="ai-wizard-close">&times;</button>
+      </div>
+      <!-- Step indicators -->
+      <div class="ai-wizard-steps">
+        <span class="ai-wizard-dot active" data-step="0">1</span>
+        <span class="ai-wizard-dot" data-step="1">2</span>
+        <span class="ai-wizard-dot" data-step="2">3</span>
+        <span class="ai-wizard-dot" data-step="3">4</span>
+        <span class="ai-wizard-dot" data-step="4">5</span>
+      </div>
+
+      <!-- Step 0: Project Details -->
+      <div class="ai-wizard-step" data-step="0">
+        <div class="ai-wizard-step-title">Project Details</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Project Name *</label>
+          <input id="wiz-name" type="text" class="settings-inp" placeholder="e.g. DVWA Assessment" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Description</label>
+          <input id="wiz-desc" type="text" class="settings-inp" placeholder="Brief description..." spellcheck="false" style="flex:1">
+        </div>
+      </div>
+
+      <!-- Step 1: Scope -->
+      <div class="ai-wizard-step hidden" data-step="1">
+        <div class="ai-wizard-step-title">Scope</div>
+        <div class="pane-label">IN SCOPE</div>
+        <div class="settings-section-desc">Target URLs, domains, or IPs that can be tested.</div>
+        <div class="settings-row">
+          <input id="wiz-scope-input" type="text" class="settings-inp" placeholder="https://target.com" spellcheck="false" style="flex:1">
+          <button id="wiz-scope-add" class="btn btn-xs btn-accent">Add</button>
+        </div>
+        <div id="wiz-scope-list" class="ai-wizard-list"></div>
+        <div class="pane-label" style="margin-top:12px">OUT OF SCOPE</div>
+        <div class="settings-section-desc">URLs or domains that must NOT be tested.</div>
+        <div class="settings-row">
+          <input id="wiz-out-input" type="text" class="settings-inp" placeholder="*.google.com" spellcheck="false" style="flex:1">
+          <input id="wiz-out-reason" type="text" class="settings-inp" placeholder="Reason (optional)" spellcheck="false" style="flex:0.6">
+          <button id="wiz-out-add" class="btn btn-xs btn-accent">Add</button>
+        </div>
+        <div id="wiz-out-list" class="ai-wizard-list"></div>
+      </div>
+
+      <!-- Step 2: Credentials -->
+      <div class="ai-wizard-step hidden" data-step="2">
+        <div class="ai-wizard-step-title">Credentials</div>
+        <div class="settings-section-desc">Authentication details for the target. Optional — skip if testing unauthenticated.</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Auth Type</label>
+          <select id="wiz-auth-type" class="filter-sel">
+            <option value="FORM">Form Login</option>
+            <option value="BASIC">HTTP Basic</option>
+            <option value="BEARER">Bearer Token</option>
+            <option value="COOKIE">Cookie</option>
+            <option value="CUSTOM_HEADER">Custom Header</option>
+            <option value="API_TOKEN">API Token</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Username</label>
+          <input id="wiz-username" type="text" class="settings-inp" placeholder="admin" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Password</label>
+          <input id="wiz-password" type="password" class="settings-inp" placeholder="password" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Login URL</label>
+          <input id="wiz-login-url" type="text" class="settings-inp" placeholder="https://target.com/login" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">API Token</label>
+          <input id="wiz-api-token" type="password" class="settings-inp" placeholder="Bearer token or API key" spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Extra Headers</label>
+          <input id="wiz-extra-headers" type="text" class="settings-inp" placeholder='{"X-Custom": "value"}' spellcheck="false" style="flex:1">
+        </div>
+      </div>
+
+      <!-- Step 3: Workflow -->
+      <div class="ai-wizard-step hidden" data-step="3">
+        <div class="ai-wizard-step-title">Workflow</div>
+        <div class="settings-section-desc">Select a testing workflow. The AI will follow this methodology.</div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Workflow</label>
+          <select id="wiz-workflow" class="filter-sel" style="flex:1"></select>
+        </div>
+        <div id="wiz-workflow-desc" class="settings-section-desc" style="margin-top:8px"></div>
+        <div id="wiz-workflow-steps" class="ai-wizard-wf-steps"></div>
+      </div>
+
+      <!-- Step 4: Config -->
+      <div class="ai-wizard-step hidden" data-step="4">
+        <div class="ai-wizard-step-title">Configuration</div>
+        <div class="settings-section-desc">Override global defaults for this project. Leave as-is to inherit.</div>
+        <div class="settings-row" style="gap:16px">
+          <div style="flex:1">
+            <label class="settings-label-sm">Environment</label>
+            <select id="wiz-env" class="filter-sel" style="width:100%;margin-top:4px">
+              <option value="production">Production</option>
+              <option value="preproduction">Pre-production</option>
+              <option value="lab">Lab / CTF</option>
+              <option value="unknown" selected>Unknown</option>
+            </select>
+          </div>
+          <div style="flex:1">
+            <label class="settings-label-sm">Default Mode</label>
+            <select id="wiz-mode" class="filter-sel" style="width:100%;margin-top:4px">
+              <option value="ask" selected>Ask before exploiting</option>
+              <option value="manual">Manual (AI tests carefully)</option>
+              <option value="tool">Tool (automated, noisy)</option>
+            </select>
+          </div>
+        </div>
+        <div class="settings-row" style="margin-top:12px">
+          <label class="settings-label"><input type="checkbox" id="wiz-bruteforce"><span class="toggle-track"></span> Allow bruteforce / fuzzing</label>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label"><input type="checkbox" id="wiz-destructive"><span class="toggle-track"></span> Allow destructive testing</label>
+        </div>
+      </div>
+
+      <!-- Navigation buttons -->
+      <div class="ai-wizard-nav">
+        <button id="ai-wizard-back" class="btn btn-sm btn-ghost hidden">Back</button>
+        <div style="flex:1"></div>
+        <button id="ai-wizard-next" class="btn btn-sm btn-accent">Next</button>
+        <button id="ai-wizard-create" class="btn btn-sm btn-accent hidden">Create Project</button>
       </div>
     </div>
   </div>
