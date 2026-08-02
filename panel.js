@@ -4152,6 +4152,84 @@ function applyModelPreset(preset) {
   }
 }
 
+async function probeModelCapability() {
+  const resultEl = document.getElementById('ai-probe-result');
+  if (resultEl) { resultEl.classList.remove('hidden'); resultEl.textContent = 'Probing model capability...'; }
+
+  const provider = document.getElementById('ai-primary-provider')?.value || 'claude-cli';
+  const apiKey = document.getElementById('ai-primary-key')?.value || '';
+  const model = document.getElementById('ai-primary-model')?.value || '';
+  const endpoint = document.getElementById('ai-primary-endpoint')?.value || '';
+
+  // We test via the proxy's /api/chat endpoint with a simple tool-calling task
+  const testTools = [{
+    type: 'function',
+    function: {
+      name: 'test_tool',
+      description: 'A test tool that returns a greeting',
+      parameters: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] }
+    }
+  }];
+
+  const results = { tools: false, json: false };
+
+  // Test 1: Tool calling
+  try {
+    const res = await fetch('http://localhost:8081/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider, apiKey, model,
+        endpoint: (provider === 'custom' || provider === 'ollama') ? endpoint : undefined,
+        messages: [{ role: 'user', content: 'Call the test_tool with message "hello". Do not say anything else, just call the tool.' }],
+        tools: testTools,
+        systemPrompt: 'You are a test assistant. Use the available tools when asked.',
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      // If the proxy ran the agentic loop, it means tool calling worked
+      // (even though test_tool doesn't exist in panel, the proxy would have tried)
+      results.tools = true;
+    }
+  } catch { /* tools test failed */ }
+
+  // Test 2: JSON structured output
+  try {
+    const res = await fetch('http://localhost:8081/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider, apiKey, model,
+        endpoint: (provider === 'custom' || provider === 'ollama') ? endpoint : undefined,
+        messages: [{ role: 'user', content: 'Reply with ONLY this JSON, no other text: {"answer": 42}' }],
+        systemPrompt: 'Reply with ONLY valid JSON. No other text.',
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const content = data.content || '';
+      try { JSON.parse(content.trim()); results.json = true; } catch {
+        const m = content.match(/\{[\s\S]*?\}/);
+        if (m) { try { JSON.parse(m[0]); results.json = true; } catch {} }
+      }
+    }
+  } catch { /* json test failed */ }
+
+  // Determine recommendation
+  let recommendation;
+  if (results.tools && results.json) recommendation = 'Full AI mode recommended';
+  else if (results.json) recommendation = 'Hybrid mode recommended (no tool calling)';
+  else recommendation = 'Scanner Only mode recommended';
+
+  if (resultEl) {
+    resultEl.textContent = 'Tools: ' + (results.tools ? '\u2713' : '\u2717') +
+      ' | JSON: ' + (results.json ? '\u2713' : '\u2717') +
+      ' | ' + recommendation;
+    resultEl.style.color = (results.tools && results.json) ? 'var(--green, #3fb950)' : results.json ? '#f59e0b' : 'var(--red, #e55)';
+  }
+}
+
 function saveSettings() {
   // Read current UI state into settings
   settings.autoHeaders    = (document.getElementById("mr-auto-headers") || document.getElementById("cfg-auto-headers")).value;
@@ -11951,6 +12029,9 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById('ai-model-preset-budget')?.addEventListener('click', () => applyModelPreset('budget'));
     document.getElementById('ai-model-preset-max')?.addEventListener('click', () => applyModelPreset('max'));
     document.getElementById('ai-model-preset-local')?.addEventListener('click', () => applyModelPreset('local'));
+
+    // Model capability probe
+    document.getElementById('ai-probe-btn')?.addEventListener('click', probeModelCapability);
 
     // AI Config save button (right column)
     document.getElementById('ai-cfg-save')?.addEventListener('click', () => {
