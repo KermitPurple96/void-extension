@@ -3951,9 +3951,54 @@ function loadSettings() {
 
 function getActiveSystemPrompt() {
   const personaId = (settings || {}).aiPersona || 'pentester';
-  if (personaId === 'custom') return (settings || {}).aiCustomSystemPrompt || AI_SYSTEM_PROMPT;
-  const agent = window.VOID_AGENTS?.find(a => a.id === personaId);
-  return agent ? agent.systemPrompt : AI_SYSTEM_PROMPT;
+  let prompt;
+  if (personaId === 'custom') {
+    prompt = (settings || {}).aiCustomSystemPrompt || AI_SYSTEM_PROMPT;
+  } else {
+    const agent = window.VOID_AGENTS?.find(a => a.id === personaId);
+    prompt = agent ? agent.systemPrompt : AI_SYSTEM_PROMPT;
+  }
+
+  // Inject active project context
+  const proj = pentestGetActive();
+  if (proj) {
+    let ctx = '\n\n## Active Pentest Project: ' + proj.name;
+    if (proj.description) ctx += '\nDescription: ' + proj.description;
+    // Scope
+    const inScope = (proj.scope?.inScope || []).map(s => s.target || s).filter(Boolean);
+    const outScope = (proj.scope?.outScope || []).map(s => s.target || s).filter(Boolean);
+    if (inScope.length) ctx += '\n\nIn-scope targets:\n' + inScope.map(s => '- ' + s).join('\n');
+    if (outScope.length) ctx += '\n\nOut-of-scope (DO NOT TEST):\n' + outScope.map(s => '- ' + s).join('\n');
+    // Config
+    ctx += '\n\nEngagement config:';
+    ctx += '\n- Environment: ' + (proj.config?.environment || 'unknown');
+    ctx += '\n- Mode: ' + (proj.config?.mode || 'ask');
+    if (!proj.config?.allowBruteforce) ctx += '\n- Bruteforce/fuzzing: DISABLED';
+    if (!proj.config?.allowDestructive) ctx += '\n- Destructive testing: DISABLED';
+    // Credentials hint (never expose actual passwords)
+    if (proj.credentials?.username) {
+      ctx += '\n\nCredentials available: username="' + proj.credentials.username + '", auth type=' + (proj.credentials.authType || 'FORM');
+      if (proj.credentials.loginUrl) ctx += ', login URL=' + proj.credentials.loginUrl;
+      ctx += '\nUse the authenticated_request tool or manually add auth headers.';
+    }
+    // Workflow
+    if (proj.workflow?.selectedId) {
+      const wf = window.VOID_WORKFLOWS?.find(w => w.id === proj.workflow.selectedId);
+      if (wf) ctx += '\n\nSelected workflow: ' + wf.name + ' (' + (wf.steps || []).length + ' steps)';
+    }
+    // Existing findings
+    const findings = proj.findings || [];
+    if (findings.length > 0) {
+      ctx += '\n\nFindings so far (' + findings.length + '):';
+      for (const f of findings.slice(-10)) {
+        ctx += '\n- [' + (f.severity || 'info').toUpperCase() + '] ' + f.title;
+      }
+      if (findings.length > 10) ctx += '\n- ... and ' + (findings.length - 10) + ' more';
+    }
+    prompt += ctx;
+  }
+
+  return prompt;
 }
 
 function updatePersonaPreview() {
@@ -8964,9 +9009,219 @@ function pentestAddFinding(projectId, finding) {
   return finding;
 }
 
-// Stub render functions — will be implemented when HTML is ready
-function pentestRenderProjectList() {}
-function pentestRenderContextBar() {}
+// ── Project list & context bar rendering ────────────────────────────────────
+
+function pentestRenderProjectList() {
+  const container = document.getElementById('ai-project-list');
+  if (!container) return;
+  container.replaceChildren();
+  for (const proj of pentestProjects) {
+    const item = document.createElement('div');
+    item.className = 'ai-project-item' + (proj.id === pentestActiveProjectId ? ' active' : '');
+    const findingCount = (proj.findings || []).length;
+    item.innerHTML = '<span class="ai-proj-name"></span>' +
+      (findingCount > 0 ? '<span class="ai-proj-findings">' + findingCount + 'f</span>' : '') +
+      '<span class="ai-proj-del" title="Delete project">&times;</span>';
+    item.querySelector('.ai-proj-name').textContent = proj.name;
+    item.addEventListener('click', () => pentestActivateProject(proj.id));
+    item.querySelector('.ai-proj-del').addEventListener('click', e => {
+      e.stopPropagation();
+      if (confirm('Delete project "' + proj.name + '"?')) pentestDeleteProject(proj.id);
+    });
+    container.appendChild(item);
+  }
+}
+
+function pentestRenderContextBar() {
+  const bar = document.getElementById('ai-context-bar');
+  if (!bar) return;
+  const proj = pentestGetActive();
+  if (!proj) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+  const nameEl = document.getElementById('ai-ctx-name');
+  const scopeEl = document.getElementById('ai-ctx-scope');
+  const findingsEl = document.getElementById('ai-ctx-findings');
+  if (nameEl) nameEl.textContent = proj.name;
+  if (scopeEl) {
+    const inCount = (proj.scope?.inScope || []).length;
+    const outCount = (proj.scope?.outScope || []).length;
+    scopeEl.textContent = inCount + ' in-scope' + (outCount > 0 ? ', ' + outCount + ' excluded' : '');
+  }
+  if (findingsEl) {
+    const findings = proj.findings || [];
+    if (findings.length === 0) {
+      findingsEl.textContent = 'No findings';
+    } else {
+      const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+      for (const f of findings) counts[f.severity || 'info']++;
+      const parts = [];
+      if (counts.critical) parts.push('<span class="sev-c">' + counts.critical + 'C</span>');
+      if (counts.high) parts.push('<span class="sev-h">' + counts.high + 'H</span>');
+      if (counts.medium) parts.push('<span class="sev-m">' + counts.medium + 'M</span>');
+      if (counts.low) parts.push('<span class="sev-l">' + counts.low + 'L</span>');
+      findingsEl.innerHTML = parts.join(' ') || findings.length + ' findings';
+    }
+  }
+}
+
+// ── Project Wizard ──────────────────────────────────────────────────────────
+
+let wizStep = 0;
+let wizInScope = [];
+let wizOutScope = [];
+
+function wizOpen() {
+  wizStep = 0;
+  wizInScope = [];
+  wizOutScope = [];
+  document.getElementById('wiz-name').value = '';
+  document.getElementById('wiz-desc').value = '';
+  document.getElementById('wiz-username').value = '';
+  document.getElementById('wiz-password').value = '';
+  document.getElementById('wiz-login-url').value = '';
+  document.getElementById('wiz-api-token').value = '';
+  document.getElementById('wiz-extra-headers').value = '';
+  document.getElementById('wiz-auth-type').value = 'FORM';
+  document.getElementById('wiz-env').value = settings.engagementEnv || 'unknown';
+  document.getElementById('wiz-mode').value = settings.engagementMode || 'ask';
+  const bruteChk = document.getElementById('wiz-bruteforce');
+  if (bruteChk) bruteChk.checked = !!settings.engagementBruteforce;
+  const destChk = document.getElementById('wiz-destructive');
+  if (destChk) destChk.checked = !!settings.engagementDestructive;
+  // Populate workflow dropdown
+  const wfSel = document.getElementById('wiz-workflow');
+  if (wfSel && window.VOID_WORKFLOWS) {
+    wfSel.innerHTML = window.VOID_WORKFLOWS.map(w =>
+      '<option value="' + w.id + '">' + w.name + '</option>'
+    ).join('');
+    wizUpdateWorkflowPreview();
+  }
+  wizUpdateUI();
+  document.getElementById('ai-wizard-overlay').classList.remove('hidden');
+}
+
+function wizClose() {
+  document.getElementById('ai-wizard-overlay').classList.add('hidden');
+}
+
+function wizNext() {
+  if (wizStep === 0) {
+    const name = document.getElementById('wiz-name').value.trim();
+    if (!name) { document.getElementById('wiz-name').focus(); return; }
+  }
+  if (wizStep < 4) { wizStep++; wizUpdateUI(); }
+}
+
+function wizBack() {
+  if (wizStep > 0) { wizStep--; wizUpdateUI(); }
+}
+
+function wizUpdateUI() {
+  // Show/hide steps
+  document.querySelectorAll('.ai-wizard-step').forEach(el => {
+    el.classList.toggle('hidden', parseInt(el.dataset.step) !== wizStep);
+  });
+  // Update dots
+  document.querySelectorAll('.ai-wizard-dot').forEach(dot => {
+    const s = parseInt(dot.dataset.step);
+    dot.classList.toggle('active', s === wizStep);
+    dot.classList.toggle('done', s < wizStep);
+  });
+  // Show/hide nav buttons
+  document.getElementById('ai-wizard-back').classList.toggle('hidden', wizStep === 0);
+  document.getElementById('ai-wizard-next').classList.toggle('hidden', wizStep === 4);
+  document.getElementById('ai-wizard-create').classList.toggle('hidden', wizStep !== 4);
+  // Render scope lists
+  wizRenderScopeList();
+}
+
+function wizRenderScopeList() {
+  const inList = document.getElementById('wiz-scope-list');
+  if (inList) {
+    inList.innerHTML = wizInScope.map((s, i) =>
+      '<div class="ai-wizard-list-item"><span class="wiz-item-text">' + esc(s) + '</span><span class="wiz-item-del" data-idx="' + i + '" data-list="in">&times;</span></div>'
+    ).join('');
+  }
+  const outList = document.getElementById('wiz-out-list');
+  if (outList) {
+    outList.innerHTML = wizOutScope.map((s, i) =>
+      '<div class="ai-wizard-list-item"><span class="wiz-item-text">' + esc(s.target) + '</span>' +
+      (s.reason ? '<span class="wiz-item-reason">' + esc(s.reason) + '</span>' : '') +
+      '<span class="wiz-item-del" data-idx="' + i + '" data-list="out">&times;</span></div>'
+    ).join('');
+  }
+  // Wire delete buttons
+  document.querySelectorAll('.wiz-item-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.idx);
+      if (btn.dataset.list === 'in') wizInScope.splice(idx, 1);
+      else wizOutScope.splice(idx, 1);
+      wizRenderScopeList();
+    });
+  });
+}
+
+function wizAddInScope() {
+  const input = document.getElementById('wiz-scope-input');
+  const val = input.value.trim();
+  if (!val) return;
+  wizInScope.push(val);
+  input.value = '';
+  wizRenderScopeList();
+  input.focus();
+}
+
+function wizAddOutScope() {
+  const input = document.getElementById('wiz-out-input');
+  const reason = document.getElementById('wiz-out-reason');
+  const val = input.value.trim();
+  if (!val) return;
+  wizOutScope.push({ target: val, reason: reason.value.trim() });
+  input.value = '';
+  reason.value = '';
+  wizRenderScopeList();
+  input.focus();
+}
+
+function wizUpdateWorkflowPreview() {
+  const sel = document.getElementById('wiz-workflow');
+  const descEl = document.getElementById('wiz-workflow-desc');
+  const stepsEl = document.getElementById('wiz-workflow-steps');
+  if (!sel || !window.VOID_WORKFLOWS) return;
+  const wf = window.VOID_WORKFLOWS.find(w => w.id === sel.value);
+  if (descEl) descEl.textContent = wf ? wf.description : '';
+  if (stepsEl && wf) {
+    stepsEl.innerHTML = (wf.steps || []).map(s =>
+      '<div class="ai-wizard-wf-step"><span class="ai-wizard-wf-step-name">' + esc(s.name) + '</span><span class="ai-wizard-wf-step-type">' + s.type + '</span></div>'
+    ).join('');
+  }
+}
+
+function wizCreate() {
+  const name = document.getElementById('wiz-name').value.trim();
+  if (!name) return;
+  pentestCreateProject({
+    name,
+    description: document.getElementById('wiz-desc').value.trim(),
+    inScope: wizInScope.map(s => ({ target: s })),
+    outScope: wizOutScope,
+    username: document.getElementById('wiz-username').value,
+    password: document.getElementById('wiz-password').value,
+    loginUrl: document.getElementById('wiz-login-url').value,
+    authType: document.getElementById('wiz-auth-type').value,
+    apiToken: document.getElementById('wiz-api-token').value,
+    extraHeaders: document.getElementById('wiz-extra-headers').value,
+    workflowId: document.getElementById('wiz-workflow').value,
+    environment: document.getElementById('wiz-env').value,
+    mode: document.getElementById('wiz-mode').value,
+    allowBruteforce: document.getElementById('wiz-bruteforce')?.checked || false,
+    allowDestructive: document.getElementById('wiz-destructive')?.checked || false,
+  });
+  wizClose();
+}
 
 // ── Chat session management ──────────────────────────────────────────────────
 
@@ -10971,6 +11226,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Load chat sessions
     aiLoadSessions();
+
+    // Load pentest projects
+    pentestLoadProjects().then(() => {
+      pentestRenderProjectList();
+      pentestRenderContextBar();
+    });
+
+    // New project button
+    document.getElementById('ai-new-project')?.addEventListener('click', wizOpen);
+
+    // Context bar buttons
+    document.getElementById('ai-ctx-deactivate')?.addEventListener('click', pentestDeactivateProject);
+
+    // Wizard events
+    document.getElementById('ai-wizard-close')?.addEventListener('click', wizClose);
+    document.getElementById('ai-wizard-next')?.addEventListener('click', wizNext);
+    document.getElementById('ai-wizard-back')?.addEventListener('click', wizBack);
+    document.getElementById('ai-wizard-create')?.addEventListener('click', wizCreate);
+    document.getElementById('wiz-scope-add')?.addEventListener('click', wizAddInScope);
+    document.getElementById('wiz-scope-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); wizAddInScope(); } });
+    document.getElementById('wiz-out-add')?.addEventListener('click', wizAddOutScope);
+    document.getElementById('wiz-out-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); wizAddOutScope(); } });
+    document.getElementById('wiz-workflow')?.addEventListener('change', wizUpdateWorkflowPreview);
+    // Close wizard on overlay click
+    document.getElementById('ai-wizard-overlay')?.addEventListener('click', e => { if (e.target === e.currentTarget) wizClose(); });
   });
 
   initBlock("ai-pentest-config", () => {
