@@ -2967,3 +2967,14 @@ html.theme-hacker {
 .ai-finding-card:hover .ai-finding-del { opacity: 0.6; }
 .ai-finding-del:hover { opacity: 1 !important; }
 .ai-findings-actions { display: flex; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+
+/* ── Autonomous mode bar ────────────────────────────────── */
+.ai-auto-bar { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: rgba(245,158,11,0.1); border-bottom: 1px solid rgba(245,158,11,0.3); font-size: 12px; gap: 12px; }
+.ai-auto-info { display: flex; align-items: center; gap: 10px; }
+.ai-auto-status { font-weight: 600; color: #f59e0b; }
+.ai-auto-status.paused { color: var(--muted); }
+.ai-auto-step { opacity: 0.8; }
+.ai-auto-count { font-family: var(--mono); opacity: 0.6; }
+.ai-auto-controls { display: flex; gap: 4px; }
+.btn-danger-ghost { padding: 3px 8px; font-size: 11px; border: 1px solid var(--red, #e55); background: transparent; color: var(--red, #e55); border-radius: 3px; cursor: pointer; font-family: inherit; }
+.btn-danger-ghost:hover { background: rgba(229,85,85,0.1); }

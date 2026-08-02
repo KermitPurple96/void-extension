@@ -9514,6 +9514,117 @@ function slashHandleKey(e) {
   return false;
 }
 
+// ── Autonomous Mode ─────────────────────────────────────────────────────────
+
+let autoRunning = false;
+let autoPaused = false;
+let autoStepIndex = 0;
+let autoMaxSteps = 50;
+let autoWorkflowSteps = null; // array of workflow steps when running a workflow
+
+function autoStart(workflowId) {
+  if (autoRunning) return;
+  autoRunning = true;
+  autoPaused = false;
+  autoStepIndex = 0;
+
+  // If a workflow is specified, load its steps
+  if (workflowId && window.VOID_WORKFLOWS) {
+    const wf = window.VOID_WORKFLOWS.find(w => w.id === workflowId);
+    if (wf) {
+      autoWorkflowSteps = wf.steps.slice();
+      autoMaxSteps = wf.steps.length;
+    }
+  } else {
+    autoWorkflowSteps = null;
+    autoMaxSteps = 50;
+  }
+
+  autoUpdateUI();
+  autoNext();
+}
+
+function autoStop() {
+  autoRunning = false;
+  autoPaused = false;
+  autoWorkflowSteps = null;
+  autoUpdateUI();
+}
+
+function autoPause() {
+  autoPaused = !autoPaused;
+  const btn = document.getElementById('ai-auto-pause');
+  if (btn) btn.textContent = autoPaused ? 'Resume' : 'Pause';
+  autoUpdateUI();
+}
+
+function autoUpdateUI() {
+  const bar = document.getElementById('ai-auto-bar');
+  const status = document.getElementById('ai-auto-status');
+  const step = document.getElementById('ai-auto-step');
+  const count = document.getElementById('ai-auto-count');
+  if (!bar) return;
+
+  if (!autoRunning) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+
+  if (status) {
+    status.textContent = autoPaused ? 'Paused' : 'Autonomous';
+    status.className = 'ai-auto-status' + (autoPaused ? ' paused' : '');
+  }
+  if (step && autoWorkflowSteps) {
+    const current = autoWorkflowSteps[autoStepIndex];
+    step.textContent = current ? 'Step: ' + current.name : 'Complete';
+  } else if (step) {
+    step.textContent = '';
+  }
+  if (count) {
+    count.textContent = 'Step ' + (autoStepIndex + 1) + '/' + autoMaxSteps;
+  }
+}
+
+function autoNext() {
+  if (!autoRunning || autoPaused || aiSending) return;
+
+  if (autoStepIndex >= autoMaxSteps) {
+    autoStop();
+    aiAddMessage('assistant', 'Autonomous scan complete (' + autoStepIndex + ' steps).');
+    return;
+  }
+
+  let message;
+  if (autoWorkflowSteps && autoWorkflowSteps[autoStepIndex]) {
+    const step = autoWorkflowSteps[autoStepIndex];
+    const skill = step.skill ? window.VOID_SKILLS?.[step.skill] : null;
+    if (skill) {
+      slashActiveSkill = step.skill;
+      message = 'Execute step "' + step.name + '": Test for ' + skill.name + ' vulnerabilities on the target. Follow the methodology.';
+    } else if (step.type === 'AGENT') {
+      message = 'Execute step "' + step.name + '": ' + (step.agent || step.name) + '. Use the appropriate methodology.';
+    } else {
+      message = 'Execute step "' + step.name + '".';
+    }
+  } else {
+    // Free-form autonomous — AI decides what to do next
+    if (autoStepIndex === 0) {
+      message = 'Start the pentest. Begin with reconnaissance of the target. Map endpoints, technologies, and attack surface.';
+    } else {
+      message = 'Continue the pentest. Review findings so far and test the next vulnerability class. If all classes are covered, generate a summary report.';
+    }
+  }
+
+  autoStepIndex++;
+  autoUpdateUI();
+
+  // Inject the message into the chat input and send
+  const input = document.getElementById('ai-input');
+  if (input) input.value = message;
+  aiSendMessage();
+}
+
 // ── Chat session management ──────────────────────────────────────────────────
 
 function aiNewSession() {
@@ -9835,6 +9946,12 @@ async function aiSendMessage() {
   aiSending = false;
   document.getElementById("ai-send").disabled = false;
   input.focus();
+
+  // Autonomous mode: auto-send next step after a short delay
+  if (autoRunning && !autoPaused) {
+    setTimeout(() => autoNext(), 2000); // 2s pause between steps
+  }
+
   aiPersistSessions();
 }
 
@@ -11541,7 +11658,16 @@ document.addEventListener("DOMContentLoaded", () => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.ai-mode-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        settings.aiAutonomousMode = btn.dataset.aimode === 'autonomous';
+        const isAuto = btn.dataset.aimode === 'autonomous';
+        settings.aiAutonomousMode = isAuto;
+        if (isAuto && !autoRunning) {
+          // Start autonomous mode with the active project's workflow if available
+          const proj = pentestGetActive();
+          const wfId = proj?.workflow?.selectedId || null;
+          autoStart(wfId);
+        } else if (!isAuto && autoRunning) {
+          autoStop();
+        }
       });
     });
 
@@ -11559,6 +11685,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Context bar buttons
     document.getElementById('ai-ctx-deactivate')?.addEventListener('click', pentestDeactivateProject);
+
+    // Autonomous mode controls
+    document.getElementById('ai-auto-pause')?.addEventListener('click', autoPause);
+    document.getElementById('ai-auto-cancel')?.addEventListener('click', autoStop);
 
     // Slide panel buttons (from context bar)
     document.getElementById('ai-ctx-findings-btn')?.addEventListener('click', () => toggleSlidePanel('ai-findings-panel'));
