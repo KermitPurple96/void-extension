@@ -9080,6 +9080,131 @@ function pentestRenderContextBar() {
   }
 }
 
+// ── Findings Panel ──────────────────────────────────────────────────────────
+
+function pentestRenderFindings() {
+  const proj = pentestGetActive();
+  const list = document.getElementById('ai-findings-list');
+  const count = document.getElementById('ai-findings-count');
+  if (!list || !proj) { if (list) list.innerHTML = '<div style="opacity:0.5;text-align:center;padding:20px">No active project</div>'; return; }
+
+  const sevFilter = document.getElementById('ai-findings-sev-filter')?.value || 'all';
+  let findings = proj.findings || [];
+  if (sevFilter !== 'all') findings = findings.filter(f => f.severity === sevFilter);
+  if (count) count.textContent = findings.length + ' finding' + (findings.length !== 1 ? 's' : '');
+
+  list.replaceChildren();
+  if (findings.length === 0) {
+    list.innerHTML = '<div style="opacity:0.5;text-align:center;padding:20px">No findings' + (sevFilter !== 'all' ? ' matching filter' : '') + '</div>';
+    return;
+  }
+  for (const f of findings) {
+    const card = document.createElement('div');
+    card.className = 'ai-finding-card';
+    const sev = f.severity || 'info';
+    card.innerHTML = '<div class="ai-finding-card-head">' +
+      '<span class="ai-finding-sev ai-finding-sev-' + sev + '">' + sev + '</span>' +
+      '<span class="ai-finding-title"></span>' +
+      '<span class="ai-finding-del" title="Delete finding">&times;</span>' +
+      '</div>' +
+      (f.url ? '<div class="ai-finding-url"></div>' : '') +
+      (f.evidence ? '<div class="ai-finding-evidence"></div>' : '');
+    card.querySelector('.ai-finding-title').textContent = f.title || 'Untitled';
+    if (f.url) card.querySelector('.ai-finding-url').textContent = f.url;
+    if (f.evidence) card.querySelector('.ai-finding-evidence').textContent = f.evidence;
+    card.querySelector('.ai-finding-del').addEventListener('click', e => {
+      e.stopPropagation();
+      proj.findings = proj.findings.filter(x => x.id !== f.id);
+      pentestSaveProjects();
+      pentestRenderFindings();
+    });
+    list.appendChild(card);
+  }
+}
+
+function pentestExportFindings(format) {
+  const proj = pentestGetActive();
+  if (!proj || !proj.findings?.length) return;
+  let content, filename, mime;
+  if (format === 'json') {
+    content = JSON.stringify(proj.findings, null, 2);
+    filename = proj.name.replace(/\s+/g, '_') + '_findings.json';
+    mime = 'application/json';
+  } else {
+    const lines = ['# ' + proj.name + ' — Findings\n'];
+    for (const f of proj.findings) {
+      lines.push('## [' + (f.severity || 'info').toUpperCase() + '] ' + (f.title || 'Untitled'));
+      if (f.url) lines.push('**URL:** ' + f.url);
+      if (f.evidence) lines.push('**Evidence:** ' + f.evidence);
+      if (f.request) lines.push('**Request:**\n```\n' + f.request + '\n```');
+      if (f.responseSnippet) lines.push('**Response:**\n```\n' + f.responseSnippet + '\n```');
+      lines.push('');
+    }
+    content = lines.join('\n');
+    filename = proj.name.replace(/\s+/g, '_') + '_findings.md';
+    mime = 'text/markdown';
+  }
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Scope Panel ─────────────────────────────────────────────────────────────
+
+function pentestRenderScopePanel() {
+  const proj = pentestGetActive();
+  const inList = document.getElementById('ai-scope-in-list');
+  const outList = document.getElementById('ai-scope-out-list');
+  if (!inList || !outList || !proj) return;
+
+  inList.replaceChildren();
+  for (const [i, s] of (proj.scope?.inScope || []).entries()) {
+    const target = s.target || s;
+    const item = document.createElement('div');
+    item.className = 'ai-wizard-list-item';
+    item.innerHTML = '<span class="wiz-item-text"></span><span class="wiz-item-del" title="Remove">&times;</span>';
+    item.querySelector('.wiz-item-text').textContent = target;
+    item.querySelector('.wiz-item-del').addEventListener('click', () => {
+      proj.scope.inScope.splice(i, 1);
+      pentestSaveProjects();
+      pentestRenderScopePanel();
+    });
+    inList.appendChild(item);
+  }
+
+  outList.replaceChildren();
+  for (const [i, s] of (proj.scope?.outScope || []).entries()) {
+    const item = document.createElement('div');
+    item.className = 'ai-wizard-list-item';
+    item.innerHTML = '<span class="wiz-item-text"></span>' +
+      (s.reason ? '<span class="wiz-item-reason"></span>' : '') +
+      '<span class="wiz-item-del" title="Remove">&times;</span>';
+    item.querySelector('.wiz-item-text').textContent = s.target || s;
+    if (s.reason) item.querySelector('.wiz-item-reason').textContent = s.reason;
+    item.querySelector('.wiz-item-del').addEventListener('click', () => {
+      proj.scope.outScope.splice(i, 1);
+      pentestSaveProjects();
+      pentestRenderScopePanel();
+    });
+    outList.appendChild(item);
+  }
+}
+
+function toggleSlidePanel(panelId) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  const isHidden = panel.classList.contains('hidden');
+  // Close all slide panels first
+  document.querySelectorAll('.ai-slide-panel').forEach(p => p.classList.add('hidden'));
+  if (isHidden) {
+    panel.classList.remove('hidden');
+    if (panelId === 'ai-findings-panel') pentestRenderFindings();
+    if (panelId === 'ai-scope-panel') pentestRenderScopePanel();
+  }
+}
+
 // ── Project Wizard ──────────────────────────────────────────────────────────
 
 let wizStep = 0;
@@ -11434,6 +11559,50 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Context bar buttons
     document.getElementById('ai-ctx-deactivate')?.addEventListener('click', pentestDeactivateProject);
+
+    // Slide panel buttons (from context bar)
+    document.getElementById('ai-ctx-findings-btn')?.addEventListener('click', () => toggleSlidePanel('ai-findings-panel'));
+    document.getElementById('ai-ctx-scope-btn')?.addEventListener('click', () => toggleSlidePanel('ai-scope-panel'));
+
+    // Close buttons on slide panels
+    document.querySelectorAll('.ai-slide-close').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const panelId = btn.dataset.close;
+        if (panelId) document.getElementById(panelId)?.classList.add('hidden');
+      });
+    });
+
+    // Findings filter
+    document.getElementById('ai-findings-sev-filter')?.addEventListener('change', pentestRenderFindings);
+
+    // Findings export
+    document.getElementById('ai-findings-export-md')?.addEventListener('click', () => pentestExportFindings('md'));
+    document.getElementById('ai-findings-export-json')?.addEventListener('click', () => pentestExportFindings('json'));
+
+    // Scope panel add
+    document.getElementById('ai-scope-add-btn')?.addEventListener('click', () => {
+      const proj = pentestGetActive();
+      const input = document.getElementById('ai-scope-add-input');
+      if (!proj || !input || !input.value.trim()) return;
+      if (!proj.scope) proj.scope = { inScope: [], outScope: [] };
+      proj.scope.inScope.push({ target: input.value.trim() });
+      input.value = '';
+      pentestSaveProjects();
+      pentestRenderScopePanel();
+    });
+    document.getElementById('ai-scope-out-btn')?.addEventListener('click', () => {
+      const proj = pentestGetActive();
+      const input = document.getElementById('ai-scope-out-input');
+      if (!proj || !input || !input.value.trim()) return;
+      if (!proj.scope) proj.scope = { inScope: [], outScope: [] };
+      proj.scope.outScope.push({ target: input.value.trim() });
+      input.value = '';
+      pentestSaveProjects();
+      pentestRenderScopePanel();
+    });
+    document.getElementById('ai-scope-save')?.addEventListener('click', () => {
+      pentestSaveProjects();
+    });
 
     // Wizard events
     document.getElementById('ai-wizard-close')?.addEventListener('click', wizClose);

@@ -2675,7 +2675,7 @@ body {
 .ai-session-item:hover .ai-session-del { opacity: 1; }
 .ai-session-del:hover { color: var(--red); }
 
-.ai-chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.ai-chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 .ai-messages {
   flex: 1; overflow-y: auto; padding: var(--sp-4);
   display: flex; flex-direction: column; gap: var(--sp-4);
@@ -2938,3 +2938,32 @@ html.theme-hacker {
 .ai-mode-btn:hover { color: var(--text); }
 .ai-mode-btn.active { color: var(--accent); border-color: var(--accent); font-weight: 600; }
 .ai-mode-btn[data-aimode="autonomous"].active { color: #f59e0b; border-color: #f59e0b; }
+
+/* ── Slide-in panels ────────────────────────────────────── */
+.ai-slide-panel { position: absolute; top: 0; right: 0; bottom: 0; width: 380px; max-width: 90%; background: var(--bg); border-left: 1px solid var(--border); box-shadow: -4px 0 16px rgba(0,0,0,0.3); z-index: 50; display: flex; flex-direction: column; overflow: hidden; transition: transform 0.2s; }
+.ai-slide-panel.hidden { display: none; }
+.ai-slide-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.ai-slide-title { font-weight: 600; font-size: 14px; }
+.ai-slide-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 0 4px; }
+.ai-slide-close:hover { color: var(--red, #e55); }
+.ai-slide-body { flex: 1; overflow-y: auto; padding: 12px 14px; }
+.ai-slide-count { font-size: 11px; opacity: 0.6; font-family: var(--mono); }
+.ai-slide-actions { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.ai-findings-filters { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.ai-findings-list { display: flex; flex-direction: column; gap: 6px; }
+.ai-finding-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; cursor: pointer; transition: background 0.1s; }
+.ai-finding-card:hover { background: var(--bg3); }
+.ai-finding-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.ai-finding-sev { font-size: 10px; font-weight: 600; text-transform: uppercase; padding: 1px 6px; border-radius: 3px; }
+.ai-finding-sev-critical { background: #7a1a1a; color: #ffd5d5; }
+.ai-finding-sev-high { background: #b54518; color: #ffe4d2; }
+.ai-finding-sev-medium { background: #a58019; color: #fff1cf; }
+.ai-finding-sev-low { background: #1d588e; color: #d6ecff; }
+.ai-finding-sev-info { background: #3a3a3a; color: #d0d0d0; }
+.ai-finding-title { font-size: 13px; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-finding-url { font-size: 11px; opacity: 0.6; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-finding-evidence { font-size: 11px; opacity: 0.5; margin-top: 4px; max-height: 40px; overflow: hidden; }
+.ai-finding-del { opacity: 0; font-size: 13px; cursor: pointer; color: var(--red, #e55); }
+.ai-finding-card:hover .ai-finding-del { opacity: 0.6; }
+.ai-finding-del:hover { opacity: 1 !important; }
+.ai-findings-actions { display: flex; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }

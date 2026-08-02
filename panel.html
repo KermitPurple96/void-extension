@@ -2060,6 +2060,58 @@
           <textarea id="ai-input" class="raw-ta ai-input-ta" rows="2" placeholder="Ask the AI to analyze traffic, test for vulns, encode payloads..." spellcheck="false" aria-label="Chat message"></textarea>
           <button id="ai-send" class="btn btn-accent">Send</button>
         </div>
+
+      <!-- Findings slide-in panel -->
+      <div id="ai-findings-panel" class="ai-slide-panel hidden">
+        <div class="ai-slide-header">
+          <span class="ai-slide-title">Findings</span>
+          <button class="ai-slide-close" data-close="ai-findings-panel">&times;</button>
+        </div>
+        <div class="ai-slide-body">
+          <div id="ai-findings-filters" class="ai-findings-filters">
+            <select id="ai-findings-sev-filter" class="filter-sel filter-sel-sm">
+              <option value="all">All severities</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="info">Info</option>
+            </select>
+            <span id="ai-findings-count" class="ai-slide-count"></span>
+          </div>
+          <div id="ai-findings-list" class="ai-findings-list"></div>
+          <div class="ai-findings-actions">
+            <button id="ai-findings-export-md" class="btn btn-xs btn-ghost">Export MD</button>
+            <button id="ai-findings-export-json" class="btn btn-xs btn-ghost">Export JSON</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scope slide-in panel -->
+      <div id="ai-scope-panel" class="ai-slide-panel hidden">
+        <div class="ai-slide-header">
+          <span class="ai-slide-title">Project Scope</span>
+          <button class="ai-slide-close" data-close="ai-scope-panel">&times;</button>
+        </div>
+        <div class="ai-slide-body">
+          <div class="pane-label">IN SCOPE</div>
+          <div class="settings-row">
+            <input id="ai-scope-add-input" type="text" class="settings-inp" placeholder="https://target.com" spellcheck="false" style="flex:1">
+            <button id="ai-scope-add-btn" class="btn btn-xs btn-accent">Add</button>
+          </div>
+          <div id="ai-scope-in-list" class="ai-wizard-list"></div>
+          <div class="pane-label" style="margin-top:12px">OUT OF SCOPE</div>
+          <div class="settings-row">
+            <input id="ai-scope-out-input" type="text" class="settings-inp" placeholder="*.google.com" spellcheck="false" style="flex:1">
+            <button id="ai-scope-out-btn" class="btn btn-xs btn-accent">Add</button>
+          </div>
+          <div id="ai-scope-out-list" class="ai-wizard-list"></div>
+          <div class="ai-slide-actions">
+            <button id="ai-scope-save" class="btn btn-sm btn-accent">Save Scope</button>
+          </div>
+        </div>
+      </div>
+
       </div>
     </div>
   </div>
