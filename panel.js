@@ -8664,6 +8664,7 @@ const AI_TOOLS = [
   { name: "get_available_checks", description: "List all available hybrid vulnerability checks with their descriptions.", parameters: { type: "object", properties: {} } },
   { name: "get_workflows", description: "List available pentest workflows with their steps.", parameters: { type: "object", properties: {} } },
   { name: "get_agents", description: "List available AI agent personas with their descriptions.", parameters: { type: "object", properties: {} } },
+  { name: "judge_candidate", description: "Run two-pass judge/refute verification on a candidate vulnerability finding. Uses the configured Judge model.", parameters: { type: "object", properties: { checkName: { type: "string" }, payload: { type: "string" }, url: { type: "string" }, responseSnippet: { type: "string" }, matchedPattern: { type: "string" } }, required: ["url", "responseSnippet"] } },
 ];
 
 const AI_SYSTEM_PROMPT = `You are an expert security researcher and penetration tester embedded in the Void Extension — a Chrome DevTools security toolkit similar to Burp Suite. You have access to tools that let you read HTTP traffic, send requests, scan for vulnerabilities, encode/decode values, and manage findings.
@@ -9070,6 +9071,15 @@ async function aiExecTool(name, args) {
     }
     case "get_agents": {
       return { agents: (window.VOID_AGENTS || []).map(a => ({ id: a.id, title: a.title, description: a.description })) };
+    }
+    case "judge_candidate": {
+      return await judgeCandidate({
+        checkName: args.checkName || '',
+        payload: args.payload || '',
+        url: args.url || '',
+        responseSnippet: args.responseSnippet || '',
+        matchedPattern: args.matchedPattern || '',
+      });
     }
     default: return { error: `Unknown tool: ${name}` };
   }
@@ -9773,6 +9783,31 @@ function autoNext() {
   const input = document.getElementById('ai-input');
   if (input) input.value = message;
   aiSendMessage();
+}
+
+// ── Judge / Refute Engine ────────────────────────────────────────────────────
+
+async function judgeCandidate(candidate) {
+  // Use the judge model config from settings
+  const provider = settings.aiJudgeProvider || settings.aiPrimaryProvider || 'ollama';
+  const apiKey = settings.aiJudgeKey || settings.aiPrimaryKey || '';
+  const model = settings.aiJudgeModel || 'gemma3:12b';
+  const endpoint = settings.aiJudgeEndpoint || '';
+
+  try {
+    const resp = await fetch('http://localhost:8081/api/judge', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider, apiKey, model, endpoint, candidate }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      return { verdict: 'error', error: err.error || resp.statusText };
+    }
+    return await resp.json();
+  } catch (e) {
+    return { verdict: 'error', error: e.message };
+  }
 }
 
 // ── Hybrid Engine ───────────────────────────────────────────────────────────

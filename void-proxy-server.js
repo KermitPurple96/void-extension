@@ -707,6 +707,136 @@ const proxy = http.createServer((req, res) => {
     handleAiChat(req, res);
     return;
   }
+  if (req.url === "/api/judge" && req.method === "POST") {
+    res.setHeader("access-control-allow-origin", "*");
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", async () => {
+      try {
+        const data = JSON.parse(body);
+        const { provider, apiKey, model, endpoint, candidate } = data;
+        // candidate: { checkName, payload, url, responseSnippet, matchedPattern, severity }
+
+        if (!candidate) {
+          res.writeHead(400).end(JSON.stringify({ error: "candidate is required" }));
+          return;
+        }
+
+        const baseUrl = endpoint || AI_ENDPOINTS[provider] || AI_ENDPOINTS.ollama;
+        const apiHeaders = {};
+        if (provider === "anthropic") {
+          apiHeaders["x-api-key"] = apiKey;
+          apiHeaders["anthropic-version"] = "2023-06-01";
+        } else if (apiKey) {
+          apiHeaders["authorization"] = "Bearer " + apiKey;
+        }
+        if (provider === "openrouter") {
+          apiHeaders["http-referer"] = "https://void-extension.local";
+          apiHeaders["x-title"] = "Void Extension Judge";
+        }
+
+        // Pass 1: Judge
+        const judgePrompt = "You are a vulnerability judge. Given the HTTP exchange below, determine if " + (candidate.checkName || "a vulnerability") + " is present.\n\n" +
+          "Payload: " + (candidate.payload || "N/A") + "\n" +
+          "URL: " + (candidate.url || "N/A") + "\n" +
+          "Response (first 2000 chars): " + (candidate.responseSnippet || "").substring(0, 2000) + "\n" +
+          "Pattern matched: " + (candidate.matchedPattern || "N/A") + "\n\n" +
+          "Respond ONLY with JSON: {\"vulnerable\": true or false, \"evidence\": \"exact text from response proving it\", \"confidence\": 0.0 to 1.0}";
+
+        const isAnthropic = provider === "anthropic";
+        const judgeBody = isAnthropic
+          ? { model: model || "claude-sonnet-4-20250514", max_tokens: 512, temperature: 0, messages: [{ role: "user", content: judgePrompt }] }
+          : { model: model || "gemma3:12b", max_tokens: 512, temperature: 0, messages: [{ role: "user", content: judgePrompt }] };
+
+        let judgeRes;
+        try {
+          judgeRes = await llmFetch(baseUrl, apiHeaders, judgeBody);
+        } catch (e) {
+          res.writeHead(502).end(JSON.stringify({ error: "Judge LLM error: " + e.message }));
+          return;
+        }
+
+        let judgeText = "";
+        if (isAnthropic) {
+          judgeText = (judgeRes.body?.content || []).filter(c => c.type === "text").map(c => c.text).join("");
+        } else {
+          judgeText = judgeRes.body?.choices?.[0]?.message?.content || "";
+        }
+
+        // Parse judge JSON
+        let judgeResult;
+        try {
+          const jsonMatch = judgeText.match(/\{[\s\S]*?\}/);
+          judgeResult = jsonMatch ? JSON.parse(jsonMatch[0]) : { vulnerable: false, evidence: "", confidence: 0 };
+        } catch {
+          judgeResult = { vulnerable: false, evidence: judgeText.substring(0, 200), confidence: 0 };
+        }
+
+        if (!judgeResult.vulnerable) {
+          res.writeHead(200).end(JSON.stringify({
+            verdict: "not_vulnerable",
+            judge: judgeResult,
+            refute: null,
+          }));
+          return;
+        }
+
+        // Pass 2: Refute
+        const refutePrompt = "A " + (candidate.checkName || "vulnerability") + " finding was reported at " + (candidate.url || "N/A") + ".\n" +
+          "Evidence: " + (judgeResult.evidence || "N/A") + "\n" +
+          "Payload: " + (candidate.payload || "N/A") + "\n\n" +
+          "Actively look for reasons this could be a FALSE POSITIVE. Consider: is the reflection in a safe context? Could the pattern match be coincidental? Is the behavior normal?\n\n" +
+          "Respond ONLY with JSON: {\"false_positive\": true or false, \"reason\": \"explanation\"}";
+
+        const refuteBody = isAnthropic
+          ? { model: model || "claude-sonnet-4-20250514", max_tokens: 512, temperature: 0, messages: [{ role: "user", content: refutePrompt }] }
+          : { model: model || "gemma3:12b", max_tokens: 512, temperature: 0, messages: [{ role: "user", content: refutePrompt }] };
+
+        let refuteRes;
+        try {
+          refuteRes = await llmFetch(baseUrl, apiHeaders, refuteBody);
+        } catch {
+          // Refute failure is non-fatal — accept the judge result
+          res.writeHead(200).end(JSON.stringify({
+            verdict: "vulnerable",
+            judge: judgeResult,
+            refute: null,
+            confidence: judgeResult.confidence || 0.7,
+          }));
+          return;
+        }
+
+        let refuteText = "";
+        if (isAnthropic) {
+          refuteText = (refuteRes.body?.content || []).filter(c => c.type === "text").map(c => c.text).join("");
+        } else {
+          refuteText = refuteRes.body?.choices?.[0]?.message?.content || "";
+        }
+
+        let refuteResult;
+        try {
+          const jsonMatch = refuteText.match(/\{[\s\S]*?\}/);
+          refuteResult = jsonMatch ? JSON.parse(jsonMatch[0]) : { false_positive: false, reason: "" };
+        } catch {
+          refuteResult = { false_positive: false, reason: refuteText.substring(0, 200) };
+        }
+
+        const verdict = refuteResult.false_positive ? "false_positive" : "vulnerable";
+        const confidence = refuteResult.false_positive ? 0 : (judgeResult.confidence || 0.8);
+
+        res.writeHead(200).end(JSON.stringify({
+          verdict,
+          judge: judgeResult,
+          refute: refuteResult,
+          confidence,
+        }));
+
+      } catch (e) {
+        res.writeHead(500).end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
   handle(req, res, false);
 });
 
