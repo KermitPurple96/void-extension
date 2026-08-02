@@ -3949,6 +3949,153 @@ function loadSettings() {
   });
 }
 
+function getActiveSystemPrompt() {
+  const personaId = (settings || {}).aiPersona || 'pentester';
+  if (personaId === 'custom') return (settings || {}).aiCustomSystemPrompt || AI_SYSTEM_PROMPT;
+  const agent = window.VOID_AGENTS?.find(a => a.id === personaId);
+  return agent ? agent.systemPrompt : AI_SYSTEM_PROMPT;
+}
+
+function updatePersonaPreview() {
+  const sel = document.getElementById('ai-persona');
+  const desc = document.getElementById('ai-persona-desc');
+  const preview = document.getElementById('ai-persona-preview');
+  const customWrap = document.getElementById('ai-custom-prompt-wrap');
+  if (!sel) return;
+  const id = sel.value;
+  if (id === 'custom') {
+    if (desc) desc.textContent = 'Write your own system prompt below.';
+    if (preview) preview.textContent = '';
+    if (preview) preview.classList.add('hidden');
+    if (customWrap) customWrap.classList.remove('hidden');
+  } else {
+    const agent = window.VOID_AGENTS?.find(a => a.id === id);
+    if (desc) desc.textContent = agent ? agent.description : '';
+    if (preview) { preview.textContent = agent ? agent.systemPrompt : ''; preview.classList.remove('hidden'); }
+    if (customWrap) customWrap.classList.add('hidden');
+  }
+}
+
+function updateSafetyStatus() {
+  const bruteChk = document.getElementById('ai-safety-brute');
+  const bruteSt = document.getElementById('ai-safety-brute-status');
+  const destChk = document.getElementById('ai-safety-destructive');
+  const destSt = document.getElementById('ai-safety-dest-status');
+  if (bruteChk && bruteSt) {
+    bruteSt.textContent = bruteChk.checked ? 'ENABLED \u2014 high request volume allowed' : 'DISABLED \u2014 no brute force or fuzzing';
+    bruteSt.className = 'ai-safety-status ' + (bruteChk.checked ? 'on' : 'off');
+  }
+  if (destChk && destSt) {
+    destSt.textContent = destChk.checked ? 'ENABLED \u2014 may crash processes/systems' : 'DISABLED \u2014 no destructive payloads';
+    destSt.className = 'ai-safety-status ' + (destChk.checked ? 'danger' : 'off');
+  }
+}
+
+function renderVulnClassTable() {
+  const tbody = document.getElementById('ai-vuln-tbody');
+  if (!tbody || !window.VOID_VULN_CLASSES) return;
+  const vulnModes = settings.engagementVulnModes || {};
+  const globalMode = settings.engagementMode || 'ask';
+  const modeColors = { manual: '#22c55e', tool: '#f59e0b', ask: '#3b82f6' };
+
+  // Build rows from trusted static data (window.VOID_VULN_CLASSES is a bundled extension file)
+  tbody.replaceChildren();
+  window.VOID_VULN_CLASSES.forEach(v => {
+    const override = vulnModes[v.id] || 'global';
+    const effective = override === 'global' ? globalMode : override;
+    const tr = document.createElement('tr');
+
+    const tdName = document.createElement('td');
+    tdName.style.fontWeight = '500';
+    tdName.textContent = v.name;
+    tr.appendChild(tdName);
+
+    const tdRisk = document.createElement('td');
+    const riskSpan = document.createElement('span');
+    riskSpan.className = 'ai-risk-' + v.risk;
+    riskSpan.textContent = v.risk;
+    tdRisk.appendChild(riskSpan);
+    tr.appendChild(tdRisk);
+
+    const tdSel = document.createElement('td');
+    const selEl = document.createElement('select');
+    selEl.dataset.vuln = v.id;
+    selEl.className = 'ai-vuln-mode-sel';
+    [['global','Use global default'],['manual','Manual (AI)'],['tool','Tool (automated)'],['ask','Ask user']].forEach(([val,label]) => {
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = label;
+      if (val === override) opt.selected = true;
+      selEl.appendChild(opt);
+    });
+    selEl.addEventListener('change', () => {
+      if (!settings.engagementVulnModes) settings.engagementVulnModes = {};
+      if (selEl.value === 'global') delete settings.engagementVulnModes[selEl.dataset.vuln];
+      else settings.engagementVulnModes[selEl.dataset.vuln] = selEl.value;
+      renderVulnClassTable();
+    });
+    tdSel.appendChild(selEl);
+    tr.appendChild(tdSel);
+
+    const tdEff = document.createElement('td');
+    const dot = document.createElement('span');
+    dot.className = 'ai-mode-dot';
+    dot.style.background = modeColors[effective] || '#888';
+    tdEff.appendChild(dot);
+    tdEff.appendChild(document.createTextNode(effective));
+    tr.appendChild(tdEff);
+
+    const tdNote = document.createElement('td');
+    tdNote.style.fontSize = '12px';
+    tdNote.style.opacity = '0.6';
+    tdNote.textContent = v.note;
+    tr.appendChild(tdNote);
+
+    tbody.appendChild(tr);
+  });
+}
+
+function applyEngagementPreset(preset) {
+  const presets = {
+    production: { env: 'production', mode: 'ask', bruteforce: false, destructive: false },
+    preproduction: { env: 'preproduction', mode: 'manual', bruteforce: false, destructive: false },
+    lab: { env: 'lab', mode: 'tool', bruteforce: true, destructive: false },
+  };
+  const p = presets[preset];
+  if (!p) return;
+  settings.engagementEnv = p.env;
+  settings.engagementMode = p.mode;
+  settings.engagementBruteforce = p.bruteforce;
+  settings.engagementDestructive = p.destructive;
+  settings.engagementVulnModes = {};
+  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  setVal('ai-engagement-env', p.env);
+  setVal('ai-engagement-mode', p.mode);
+  const bruteChk = document.getElementById('ai-safety-brute');
+  if (bruteChk) bruteChk.checked = p.bruteforce;
+  const destChk = document.getElementById('ai-safety-destructive');
+  if (destChk) destChk.checked = p.destructive;
+  updateSafetyStatus();
+  renderVulnClassTable();
+}
+
+function applyModelPreset(preset) {
+  const presets = {
+    default:  { primary: { provider: 'openrouter', model: 'deepseek/deepseek-chat' }, judge: { provider: 'ollama', model: 'gemma3:12b', endpoint: 'http://localhost:11434/v1/chat/completions' }, utility: { provider: 'ollama', model: 'gemma3:12b', endpoint: 'http://localhost:11434/v1/chat/completions' } },
+    budget:   { primary: { provider: 'openrouter', model: 'openai/gpt-4o-mini' }, judge: { provider: 'ollama', model: 'phi4:14b', endpoint: 'http://localhost:11434/v1/chat/completions' }, utility: { provider: 'ollama', model: 'phi4:14b', endpoint: 'http://localhost:11434/v1/chat/completions' } },
+    max:      { primary: { provider: 'claude-cli', model: '' }, judge: { provider: 'ollama', model: 'gemma3:27b', endpoint: 'http://localhost:11434/v1/chat/completions' }, utility: { provider: 'ollama', model: 'gemma3:12b', endpoint: 'http://localhost:11434/v1/chat/completions' } },
+    local:    { primary: { provider: 'ollama', model: 'qwen3:32b', endpoint: 'http://localhost:11434/v1/chat/completions' }, judge: { provider: 'ollama', model: 'gemma3:12b', endpoint: 'http://localhost:11434/v1/chat/completions' }, utility: { provider: 'ollama', model: 'gemma3:12b', endpoint: 'http://localhost:11434/v1/chat/completions' } },
+  };
+  const p = presets[preset];
+  if (!p) return;
+  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  for (const [role, cfg] of Object.entries(p)) {
+    setVal('ai-' + role + '-provider', cfg.provider);
+    setVal('ai-' + role + '-model', cfg.model);
+    if (cfg.endpoint) setVal('ai-' + role + '-endpoint', cfg.endpoint);
+  }
+}
+
 function saveSettings() {
   // Read current UI state into settings
   settings.autoHeaders    = (document.getElementById("mr-auto-headers") || document.getElementById("cfg-auto-headers")).value;
@@ -4043,6 +4190,31 @@ function saveSettings() {
   settings.collabUrl      = (document.getElementById("mr-collab-url") || document.getElementById("cfg-collab-url")).value;
   // Dencoder saved chains
   settings.decoderChains  = typeof decSavedChains !== "undefined" ? decSavedChains : {};
+
+  // AI Pentest Config
+  settings.aiExecMode = document.querySelector('.ai-exec-mode-btn.active')?.dataset?.mode || 'full_ai';
+  settings.aiPrimaryProvider = document.getElementById('ai-primary-provider')?.value || 'claude-cli';
+  settings.aiPrimaryKey = document.getElementById('ai-primary-key')?.value || '';
+  settings.aiPrimaryModel = document.getElementById('ai-primary-model')?.value || '';
+  settings.aiPrimaryEndpoint = document.getElementById('ai-primary-endpoint')?.value || '';
+  settings.aiJudgeProvider = document.getElementById('ai-judge-provider')?.value || 'ollama';
+  settings.aiJudgeKey = document.getElementById('ai-judge-key')?.value || '';
+  settings.aiJudgeModel = document.getElementById('ai-judge-model')?.value || '';
+  settings.aiJudgeEndpoint = document.getElementById('ai-judge-endpoint')?.value || '';
+  settings.aiUtilityProvider = document.getElementById('ai-utility-provider')?.value || 'ollama';
+  settings.aiUtilityKey = document.getElementById('ai-utility-key')?.value || '';
+  settings.aiUtilityModel = document.getElementById('ai-utility-model')?.value || '';
+  settings.aiUtilityEndpoint = document.getElementById('ai-utility-endpoint')?.value || '';
+  settings.aiPersona = document.getElementById('ai-persona')?.value || 'pentester';
+  settings.aiCustomSystemPrompt = document.getElementById('ai-custom-system')?.value || '';
+  settings.engagementEnv = document.getElementById('ai-engagement-env')?.value || 'unknown';
+  settings.engagementMode = document.getElementById('ai-engagement-mode')?.value || 'ask';
+  settings.engagementBruteforce = document.getElementById('ai-safety-brute')?.checked || false;
+  settings.engagementDestructive = document.getElementById('ai-safety-destructive')?.checked || false;
+  settings.engagementOobServer = document.getElementById('ai-oob-server')?.value || '';
+  settings.engagementOobToken = document.getElementById('ai-oob-token')?.value || '';
+  // engagementVulnModes is updated live by dropdown handlers, just persist what we have
+  if (!settings.engagementVulnModes) settings.engagementVulnModes = {};
 
   chrome.storage.local.set({ voidSettings: settings });
 
@@ -4153,6 +4325,33 @@ function loadSettingsUI() {
   if (settings.decoderChains && typeof decSavedChains !== "undefined") {
     Object.assign(decSavedChains, settings.decoderChains);
   }
+  // AI Pentest Config
+  document.querySelectorAll('.ai-exec-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === (settings.aiExecMode || 'full_ai')));
+  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = val; };
+  setVal('ai-primary-provider', settings.aiPrimaryProvider || 'claude-cli');
+  setVal('ai-primary-key', settings.aiPrimaryKey || '');
+  setVal('ai-primary-model', settings.aiPrimaryModel || '');
+  setVal('ai-primary-endpoint', settings.aiPrimaryEndpoint || '');
+  setVal('ai-judge-provider', settings.aiJudgeProvider || 'ollama');
+  setVal('ai-judge-key', settings.aiJudgeKey || '');
+  setVal('ai-judge-model', settings.aiJudgeModel || 'gemma3:12b');
+  setVal('ai-judge-endpoint', settings.aiJudgeEndpoint || 'http://localhost:11434/v1/chat/completions');
+  setVal('ai-utility-provider', settings.aiUtilityProvider || 'ollama');
+  setVal('ai-utility-key', settings.aiUtilityKey || '');
+  setVal('ai-utility-model', settings.aiUtilityModel || 'gemma3:12b');
+  setVal('ai-utility-endpoint', settings.aiUtilityEndpoint || 'http://localhost:11434/v1/chat/completions');
+  setVal('ai-persona', settings.aiPersona || 'pentester');
+  setVal('ai-custom-system', settings.aiCustomSystemPrompt || '');
+  setVal('ai-engagement-env', settings.engagementEnv || 'unknown');
+  setVal('ai-engagement-mode', settings.engagementMode || 'ask');
+  setChk('ai-safety-brute', !!settings.engagementBruteforce);
+  setChk('ai-safety-destructive', !!settings.engagementDestructive);
+  setVal('ai-oob-server', settings.engagementOobServer || '');
+  setVal('ai-oob-token', settings.engagementOobToken || '');
+  updatePersonaPreview();
+  updateSafetyStatus();
+  renderVulnClassTable();
   renderMRRules();
 }
 
@@ -8934,13 +9133,13 @@ async function aiSendMessage() {
   aiLlmMessages.push({ role: "user", content: text });
   aiAddMessage("thinking", "Connecting\u2026");
 
-  // Read config from Settings tab
-  const provider = document.getElementById("ai-provider").value;
-  const apiKey = document.getElementById("ai-apikey").value;
-  const model = document.getElementById("ai-model").value;
-  const systemPrompt = document.getElementById("ai-system").value || AI_SYSTEM_PROMPT;
-  const customUrl = document.getElementById("ai-custom-url").value;
-  const cliPath = document.getElementById("ai-cli-path")?.value || "claude";
+  // Read config from Settings — use primary model config
+  const provider = document.getElementById("ai-primary-provider")?.value || settings.aiPrimaryProvider || "claude-cli";
+  const apiKey = document.getElementById("ai-primary-key")?.value || settings.aiPrimaryKey || "";
+  const model = document.getElementById("ai-primary-model")?.value || settings.aiPrimaryModel || "";
+  const systemPrompt = getActiveSystemPrompt();
+  const customUrl = document.getElementById("ai-primary-endpoint")?.value || settings.aiPrimaryEndpoint || "";
+  const cliPath = "claude";
 
   // Connect proxy WS for tool execution — wait for connection
   await aiConnectProxy();
@@ -10669,51 +10868,49 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.getElementById("ai-new-chat").addEventListener("click", () => aiNewSession());
 
-    // Provider change — show/hide fields
-    document.getElementById("ai-provider").addEventListener("change", e => {
-      const prov = e.target.value;
-      document.getElementById("ai-custom-url-wrap").classList.toggle("hidden", prov !== "custom" && prov !== "ollama");
-      document.getElementById("ai-apikey-wrap").classList.toggle("hidden", prov === "claude-cli");
-      document.getElementById("ai-cli-wrap").classList.toggle("hidden", prov !== "claude-cli");
-      const modelInp = document.getElementById("ai-model");
-      const defaults = { "claude-cli": "claude-sonnet-4-20250514", anthropic: "claude-sonnet-4-20250514", openai: "gpt-4o", openrouter: "anthropic/claude-sonnet-4-20250514", ollama: "llama3.1", custom: "" };
-      modelInp.placeholder = defaults[prov] || "";
-      if (prov === "ollama") document.getElementById("ai-custom-url").value = "http://localhost:11434/v1/chat/completions";
-    });
-    // Trigger initial visibility
-    document.getElementById("ai-provider").dispatchEvent(new Event("change"));
-
-    // Save/load config
-    document.getElementById("ai-save-config").addEventListener("click", () => {
-      aiConfig = {
-        provider: document.getElementById("ai-provider").value,
-        apiKey: document.getElementById("ai-apikey").value,
-        model: document.getElementById("ai-model").value,
-        endpoint: document.getElementById("ai-custom-url").value,
-        systemPrompt: document.getElementById("ai-system").value,
-        cliPath: document.getElementById("ai-cli-path")?.value || "claude",
-      };
-      chrome.storage.local.set({ voidAiConfig: aiConfig });
-      const st = document.getElementById("ai-status");
-      st.textContent = "Saved"; setTimeout(() => { st.textContent = ""; }, 1500);
-    });
-    chrome.storage.local.get("voidAiConfig", r => {
-      if (r.voidAiConfig) {
-        aiConfig = r.voidAiConfig;
-        document.getElementById("ai-provider").value = aiConfig.provider || "claude-cli";
-        document.getElementById("ai-apikey").value = aiConfig.apiKey || "";
-        document.getElementById("ai-model").value = aiConfig.model || "";
-        document.getElementById("ai-custom-url").value = aiConfig.endpoint || "";
-        document.getElementById("ai-system").value = aiConfig.systemPrompt || AI_SYSTEM_PROMPT;
-        if (document.getElementById("ai-cli-path")) document.getElementById("ai-cli-path").value = aiConfig.cliPath || "claude";
-        document.getElementById("ai-provider").dispatchEvent(new Event("change"));
-      } else {
-        document.getElementById("ai-system").value = AI_SYSTEM_PROMPT;
-      }
-    });
-
     // Load chat sessions
     aiLoadSessions();
+  });
+
+  initBlock("ai-pentest-config", () => {
+    // Execution mode buttons
+    document.querySelectorAll('.ai-exec-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.ai-exec-mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
+    // Persona dropdown
+    document.getElementById('ai-persona')?.addEventListener('change', updatePersonaPreview);
+
+    // Safety toggles
+    document.getElementById('ai-safety-brute')?.addEventListener('change', updateSafetyStatus);
+    document.getElementById('ai-safety-destructive')?.addEventListener('change', updateSafetyStatus);
+
+    // Engagement presets
+    document.getElementById('ai-preset-prod')?.addEventListener('click', () => applyEngagementPreset('production'));
+    document.getElementById('ai-preset-preprod')?.addEventListener('click', () => applyEngagementPreset('preproduction'));
+    document.getElementById('ai-preset-lab')?.addEventListener('click', () => applyEngagementPreset('lab'));
+
+    // Model presets
+    document.getElementById('ai-model-preset-default')?.addEventListener('click', () => applyModelPreset('default'));
+    document.getElementById('ai-model-preset-budget')?.addEventListener('click', () => applyModelPreset('budget'));
+    document.getElementById('ai-model-preset-max')?.addEventListener('click', () => applyModelPreset('max'));
+    document.getElementById('ai-model-preset-local')?.addEventListener('click', () => applyModelPreset('local'));
+
+    // AI Config save button (right column)
+    document.getElementById('ai-cfg-save')?.addEventListener('click', () => {
+      saveSettings();
+      const st = document.getElementById('ai-cfg-status');
+      if (st) { st.textContent = 'Saved'; setTimeout(() => { st.textContent = ''; }, 1500); }
+    });
+
+    // Engagement mode change — re-render vuln table
+    document.getElementById('ai-engagement-mode')?.addEventListener('change', () => {
+      settings.engagementMode = document.getElementById('ai-engagement-mode').value;
+      renderVulnClassTable();
+    });
   });
 
   // Boot
