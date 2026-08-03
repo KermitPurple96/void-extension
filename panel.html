@@ -223,6 +223,7 @@
           <button id="ed-forward" class="btn btn-sm btn-success">Forward →</button>
           <button id="ed-to-rep"  class="btn btn-sm btn-ghost">→ Repeater</button>
           <button id="ed-to-intr" class="btn btn-sm btn-ghost">→ Intruder</button>
+          <button id="ed-to-ai"   class="btn btn-sm btn-ghost">→ AI Chat</button>
           <button id="ed-to-poc"  class="btn btn-sm btn-ghost">→ PoC</button>
           <button id="ed-to-notes" class="btn btn-sm btn-ghost">→ Notes</button>
           <button id="ed-open"    class="btn btn-sm btn-ghost">↗ Open</button>
@@ -436,6 +437,7 @@
           <button id="rep-target-toggle" class="btn btn-xs btn-ghost rep-target-btn">✎ Target</button>
           <button id="rep-send" class="btn btn-send">Send</button>
           <button id="rep-to-intr" class="btn btn-xs btn-ghost">→ Intruder</button>
+          <button id="rep-to-ai" class="btn btn-xs btn-ghost">→ AI Chat</button>
           <button id="rep-to-poc" class="btn btn-xs btn-ghost">→ PoC</button>
           <button id="rep-to-notes" class="btn btn-xs btn-ghost">→ Notes</button>
           <button id="rep-open" class="btn btn-xs btn-ghost">↗</button>
@@ -501,6 +503,7 @@
           <button id="rep2-target-toggle" class="btn btn-xs btn-ghost rep-target-btn">✎ Target</button>
           <button id="rep2-send" class="btn btn-send">Send</button>
           <button id="rep2-to-intr" class="btn btn-xs btn-ghost">→ Intruder</button>
+          <button id="rep2-to-ai" class="btn btn-xs btn-ghost">→ AI Chat</button>
           <button id="rep2-to-poc" class="btn btn-xs btn-ghost">→ PoC</button>
           <button id="rep2-to-notes" class="btn btn-xs btn-ghost">→ Notes</button>
           <button id="rep2-open" class="btn btn-xs btn-ghost">↗</button>
@@ -560,6 +563,7 @@
           <input  id="intr-path" class="path-inp flex1" type="text" placeholder="/api/endpoint" spellcheck="false" autocomplete="off">
           <select id="intr-httpver" class="httpver-sel"><option>HTTP/1.1</option><option>HTTP/2</option><option>HTTP/1.0</option></select>
           <button id="intr-to-rep" class="btn btn-xs btn-ghost" title="Send this request to Repeater (§ markers are stripped)">→ Repeater</button>
+          <button id="intr-to-ai" class="btn btn-xs btn-ghost" title="Send to AI Chat for analysis">→ AI Chat</button>
         </div>
         <input id="intr-url" type="hidden">
         <div class="pane-label">REQUEST — mark positions with <code>§value§</code></div>
@@ -1998,81 +2002,147 @@
   <!-- ═══════════════════════════ AI CHAT ═══════════════════════════════════ -->
   <div id="tab-aichat" class="tab-panel hidden" role="tabpanel">
     <div class="ai-chat-layout">
-      <!-- Sidebar: sessions + projects -->
+      <!-- LEFT: chat sessions + project selector at bottom -->
       <div class="ai-sessions-bar">
         <button id="ai-new-chat" class="btn btn-sm btn-accent ai-new-chat-btn">+ New Chat</button>
         <div id="ai-sessions-list" class="ai-sessions-list"></div>
-
-        <!-- Pentest Projects section -->
-        <div class="ai-projects-section">
-          <div class="ai-projects-header">
-            <span class="ai-projects-title">AI Pentest Projects</span>
-            <button id="ai-new-project" class="btn btn-xs btn-ghost" title="New Project">+</button>
-          </div>
-          <div id="ai-project-list" class="ai-project-list"></div>
+        <div class="ai-project-selector">
+          <select id="ai-project-sel" class="filter-sel" style="width:100%;font-size:12px" title="Active Project">
+            <option value="">No project</option>
+          </select>
+          <button id="ai-new-project" class="btn btn-xs btn-ghost" title="New Project">+</button>
         </div>
       </div>
 
-      <!-- Chat area with context bar -->
+      <!-- MAIN: subtabs area -->
       <div class="ai-chat-area">
-        <!-- Project context bar (hidden when no project active) -->
-        <div id="ai-context-bar" class="ai-context-bar hidden">
-          <div class="ai-ctx-info">
-            <span id="ai-ctx-name" class="ai-ctx-name"></span>
-            <span id="ai-ctx-scope" class="ai-ctx-scope"></span>
-            <span id="ai-ctx-findings" class="ai-ctx-findings"></span>
+        <div class="ai-main-tabs">
+          <button class="ai-main-tab active" data-aitab2="chat">Chat</button>
+          <button class="ai-main-tab" data-aitab2="config">Config</button>
+          <button class="ai-main-tab" data-aitab2="memory">Memory</button>
+          <button class="ai-main-tab" data-aitab2="findings">Findings</button>
+        </div>
+
+        <!-- Chat subtab -->
+        <div class="ai-main-pane ai-chat-pane" data-aitab2="chat">
+          <div id="ai-auto-bar" class="ai-auto-bar hidden">
+            <div class="ai-auto-info">
+              <span class="ai-auto-status" id="ai-auto-status">Autonomous</span>
+              <span class="ai-auto-step" id="ai-auto-step"></span>
+              <span class="ai-auto-count" id="ai-auto-count"></span>
+            </div>
+            <div class="ai-auto-controls">
+              <button id="ai-auto-pause" class="btn btn-xs btn-ghost">Pause</button>
+              <button id="ai-auto-cancel" class="btn btn-xs btn-danger-ghost">Stop</button>
+            </div>
           </div>
-          <div class="ai-ctx-actions">
-            <button id="ai-ctx-scope-btn" class="btn btn-xs btn-ghost" title="View Scope">Scope</button>
-            <button id="ai-ctx-findings-btn" class="btn btn-xs btn-ghost" title="View Findings">Findings</button>
-            <button id="ai-ctx-deactivate" class="btn btn-xs btn-ghost" title="Deactivate Project">&times;</button>
+          <div id="ai-messages" class="ai-messages"></div>
+          <div id="ai-slash-panel" class="ai-slash-panel hidden">
+            <div class="ai-slash-header">
+              <span class="ai-slash-title">Commands</span>
+              <span id="ai-slash-count" class="ai-slash-count"></span>
+            </div>
+            <div id="ai-slash-list" class="ai-slash-list"></div>
+          </div>
+          <div class="ai-input-bar">
+            <div class="ai-input-toolbar">
+              <div class="ai-agent-switch">
+                <select id="ai-chat-agent-sel" class="filter-sel ai-chat-agent-sel" title="Select AI Agent"></select>
+              </div>
+              <div class="ai-mode-switch">
+                <button class="ai-mode-btn active" data-aimode="interactive" title="Interactive: AI waits for input">Interactive</button>
+                <button class="ai-mode-btn" data-aimode="autonomous" title="Autonomous: AI chains tool calls">Autonomous</button>
+              </div>
+            </div>
+            <div class="ai-input-row">
+              <textarea id="ai-input" class="raw-ta ai-input-ta" rows="2" placeholder="Ask the AI to analyze traffic, test for vulns, encode payloads..." spellcheck="false" aria-label="Chat message"></textarea>
+              <button id="ai-send" class="btn btn-accent ai-send-btn">Send</button>
+            </div>
           </div>
         </div>
 
-        <!-- Autonomous mode progress -->
-        <div id="ai-auto-bar" class="ai-auto-bar hidden">
-          <div class="ai-auto-info">
-            <span class="ai-auto-status" id="ai-auto-status">Autonomous</span>
-            <span class="ai-auto-step" id="ai-auto-step"></span>
-            <span class="ai-auto-count" id="ai-auto-count"></span>
-          </div>
-          <div class="ai-auto-controls">
-            <button id="ai-auto-pause" class="btn btn-xs btn-ghost">Pause</button>
-            <button id="ai-auto-cancel" class="btn btn-xs btn-danger-ghost">Stop</button>
+        <!-- Config subtab -->
+        <div class="ai-main-pane hidden" data-aitab2="config">
+          <div class="ai-pane-scroll">
+            <div id="ai-rp-no-project" class="ai-rp-empty">Select a project to see configuration</div>
+            <div id="ai-rp-config" class="ai-rp-config hidden">
+              <div class="ai-rp-section">
+                <div class="ai-rp-label">SCOPE</div>
+                <div id="ai-rp-scope-in" class="ai-rp-list"></div>
+                <div class="ai-rp-sublabel">OUT OF SCOPE</div>
+                <div id="ai-rp-scope-out" class="ai-rp-list"></div>
+              </div>
+              <div class="ai-rp-section">
+                <div class="ai-rp-label">ENVIRONMENT</div>
+                <div class="ai-rp-row">
+                  <span id="ai-rp-env" class="ai-rp-value"></span>
+                  <span id="ai-rp-mode" class="ai-rp-value"></span>
+                </div>
+              </div>
+              <div class="ai-rp-section">
+                <div class="ai-rp-label">AGENT</div>
+                <span id="ai-rp-agent" class="ai-rp-value"></span>
+              </div>
+              <div class="ai-rp-section">
+                <div class="ai-rp-label">WORKFLOW</div>
+                <span id="ai-rp-workflow" class="ai-rp-value"></span>
+              </div>
+              <div class="ai-rp-section">
+                <div class="ai-rp-label">SAFETY</div>
+                <div class="ai-rp-row">
+                  <span id="ai-rp-brute" class="ai-rp-badge"></span>
+                  <span id="ai-rp-destructive" class="ai-rp-badge"></span>
+                </div>
+              </div>
+              <div class="ai-rp-section">
+                <div class="ai-rp-label">CREDENTIALS</div>
+                <div id="ai-rp-creds" class="ai-rp-value mono"></div>
+              </div>
+              <div class="ai-rp-section">
+                <div class="ai-rp-label">SESSION</div>
+                <div class="ai-rp-session-note">AI requests are captured in the active session's History. Save/load sessions in the Project tab.</div>
+              </div>
+              <button id="ai-rp-edit-btn" class="btn btn-xs btn-ghost" style="margin-top:4px">Edit Project</button>
+            </div>
           </div>
         </div>
 
-        <div id="ai-messages" class="ai-messages"></div>
-        <!-- Slash command autocomplete -->
-        <div id="ai-slash-panel" class="ai-slash-panel hidden">
-          <div class="ai-slash-header">
-            <span class="ai-slash-title">Commands</span>
-            <span id="ai-slash-count" class="ai-slash-count"></span>
-          </div>
-          <div id="ai-slash-list" class="ai-slash-list"></div>
-        </div>
-        <div class="ai-input-bar">
-          <!-- Quick toolbar -->
-          <div class="ai-input-toolbar">
-            <div class="ai-agent-switch">
-              <button class="ai-agent-btn" data-agent="analyst" title="Switch to Analyst">
-                <span class="material-symbols-outlined">chat</span> Analyst
-              </button>
-              <button class="ai-agent-btn active" data-agent="pentester" title="Switch to Pentester">
-                <span class="material-symbols-outlined">security</span> Pentester
-              </button>
-              <button class="ai-agent-btn" data-agent="orchestrator" title="Switch to Orchestrator">
-                <span class="material-symbols-outlined">account_tree</span> Orchestrator
-              </button>
-            </div>
-            <div class="ai-mode-switch">
-              <button class="ai-mode-btn active" data-aimode="interactive" title="Interactive: AI waits for input">Interactive</button>
-              <button class="ai-mode-btn" data-aimode="autonomous" title="Autonomous: AI chains tool calls">Autonomous</button>
+        <!-- Memory subtab -->
+        <div class="ai-main-pane hidden" data-aitab2="memory">
+          <div class="ai-pane-scroll">
+            <div id="ai-rp-no-memory" class="ai-rp-empty">No workflow running</div>
+            <div id="ai-rp-memory" class="ai-rp-memory hidden">
+              <div class="ai-rp-section">
+                <div class="ai-rp-label">WORKFLOW STEP</div>
+                <div id="ai-mem-step" class="ai-rp-value"></div>
+              </div>
+              <div class="ai-rp-section">
+                <div class="ai-rp-label">ACCUMULATED NOTES</div>
+                <pre id="ai-mem-notes" class="ai-mem-block"></pre>
+              </div>
+              <div class="ai-rp-section">
+                <div class="ai-rp-label">CAPTURED CONTEXT</div>
+                <div id="ai-mem-context" class="ai-rp-value mono"></div>
+              </div>
+              <div class="ai-rp-section">
+                <div class="ai-rp-label">REQUESTS (<span id="ai-mem-req-count">0</span>)</div>
+                <div id="ai-mem-requests" class="ai-mem-block"></div>
+              </div>
             </div>
           </div>
-          <textarea id="ai-input" class="raw-ta ai-input-ta" rows="2" placeholder="Ask the AI to analyze traffic, test for vulns, encode payloads..." spellcheck="false" aria-label="Chat message"></textarea>
-          <button id="ai-send" class="btn btn-accent">Send</button>
         </div>
+
+        <!-- Findings subtab -->
+        <div class="ai-main-pane hidden" data-aitab2="findings">
+          <div class="ai-pane-scroll">
+            <div id="ai-rp-findings-list" class="ai-rp-findings-list"></div>
+            <div class="ai-rp-findings-actions">
+              <button id="ai-rp-export-md" class="btn btn-xs btn-ghost">Export MD</button>
+              <button id="ai-rp-export-json" class="btn btn-xs btn-ghost">Export JSON</button>
+            </div>
+          </div>
+        </div>
+      </div><!-- end ai-chat-area -->
 
       <!-- Findings slide-in panel -->
       <div id="ai-findings-panel" class="ai-slide-panel hidden">
@@ -2142,19 +2212,30 @@
         <span class="ai-wizard-dot" data-step="1">2</span>
         <span class="ai-wizard-dot" data-step="2">3</span>
         <span class="ai-wizard-dot" data-step="3">4</span>
-        <span class="ai-wizard-dot" data-step="4">5</span>
       </div>
 
       <!-- Step 0: Project Details -->
       <div class="ai-wizard-step" data-step="0">
         <div class="ai-wizard-step-title">Project Details</div>
-        <div class="settings-row">
+        <div class="wiz-session-notice">
+          <div class="wiz-notice-icon">&#9432;</div>
+          <div class="wiz-notice-text">
+            <strong>Session &amp; Project are separate.</strong>
+            Sessions (Project tab) store your manual work — History, Repeater, Intruder, etc. AI Projects only control the AI Chat.
+            Before starting, <strong>create or load a dedicated session</strong> for this target so the AI's requests and traffic don't mix with other work.
+          </div>
+        </div>
+        <div class="settings-row" style="margin-top:10px">
           <label class="settings-label-sm">Project Name *</label>
           <input id="wiz-name" type="text" class="settings-inp" placeholder="e.g. DVWA Assessment" spellcheck="false" style="flex:1">
         </div>
         <div class="settings-row">
           <label class="settings-label-sm">Description</label>
           <input id="wiz-desc" type="text" class="settings-inp" placeholder="Brief description..." spellcheck="false" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Active Session</label>
+          <span id="wiz-session-name" class="wiz-session-badge">No session loaded</span>
         </div>
       </div>
 
@@ -2215,20 +2296,8 @@
         </div>
       </div>
 
-      <!-- Step 3: Workflow -->
+      <!-- Step 3: Configuration -->
       <div class="ai-wizard-step hidden" data-step="3">
-        <div class="ai-wizard-step-title">Workflow</div>
-        <div class="settings-section-desc">Select a testing workflow. The AI will follow this methodology.</div>
-        <div class="settings-row">
-          <label class="settings-label-sm">Workflow</label>
-          <select id="wiz-workflow" class="filter-sel" style="flex:1"></select>
-        </div>
-        <div id="wiz-workflow-desc" class="settings-section-desc" style="margin-top:8px"></div>
-        <div id="wiz-workflow-steps" class="ai-wizard-wf-steps"></div>
-      </div>
-
-      <!-- Step 4: Config -->
-      <div class="ai-wizard-step hidden" data-step="4">
         <div class="ai-wizard-step-title">Configuration</div>
         <div class="settings-section-desc">Override global defaults for this project. Leave as-is to inherit.</div>
         <div class="settings-row" style="gap:16px">
@@ -2250,11 +2319,31 @@
             </select>
           </div>
         </div>
+        <div class="settings-row" style="gap:16px;margin-top:8px">
+          <div style="flex:1">
+            <label class="settings-label-sm">Default Agent</label>
+            <select id="wiz-agent" class="filter-sel" style="width:100%;margin-top:4px"></select>
+          </div>
+          <div style="flex:1">
+            <label class="settings-label-sm">Workflow</label>
+            <select id="wiz-workflow" class="filter-sel" style="width:100%;margin-top:4px"></select>
+          </div>
+        </div>
         <div class="settings-row" style="margin-top:12px">
           <label class="settings-label"><input type="checkbox" id="wiz-bruteforce"><span class="toggle-track"></span> Allow bruteforce / fuzzing</label>
         </div>
         <div class="settings-row">
           <label class="settings-label"><input type="checkbox" id="wiz-destructive"><span class="toggle-track"></span> Allow destructive testing</label>
+        </div>
+        <div class="settings-row" style="margin-top:12px;gap:16px">
+          <div style="flex:1">
+            <label class="settings-label-sm">OOB Server</label>
+            <input id="wiz-oob-server" type="text" class="settings-inp" placeholder="http://callback-catcher:9999" spellcheck="false" style="width:100%;margin-top:4px">
+          </div>
+          <div style="flex:1">
+            <label class="settings-label-sm">OOB Token</label>
+            <input id="wiz-oob-token" type="password" class="settings-inp" placeholder="optional" spellcheck="false" style="width:100%;margin-top:4px">
+          </div>
         </div>
       </div>
 
@@ -2264,6 +2353,23 @@
         <div style="flex:1"></div>
         <button id="ai-wizard-next" class="btn btn-sm btn-accent">Next</button>
         <button id="ai-wizard-create" class="btn btn-sm btn-accent hidden">Create Project</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Generic Item Editor Modal ═══════════════════════════════════════ -->
+  <div id="item-editor-overlay" class="ai-wizard-overlay hidden">
+    <div class="ai-wizard-modal" style="width:640px">
+      <div class="ai-wizard-header">
+        <span id="item-editor-title" class="ai-wizard-title">Edit</span>
+        <button id="item-editor-close" class="ai-wizard-close">&times;</button>
+      </div>
+      <div id="item-editor-body" class="item-editor-body"></div>
+      <div class="ai-wizard-nav">
+        <button id="item-editor-delete" class="btn btn-sm btn-danger-ghost hidden">Delete</button>
+        <div style="flex:1"></div>
+        <button id="item-editor-cancel" class="btn btn-sm btn-ghost">Cancel</button>
+        <button id="item-editor-save" class="btn btn-sm btn-accent">Save</button>
       </div>
     </div>
   </div>
@@ -2708,7 +2814,7 @@
       <!-- AI Settings subtab bar -->
       <div class="ai-settings-tabs">
         <button class="ai-settings-tab active" data-aitab="models">Models</button>
-        <button class="ai-settings-tab" data-aitab="persona">Persona</button>
+        <button class="ai-settings-tab" data-aitab="agents">Agents</button>
         <button class="ai-settings-tab" data-aitab="engagement">Engagement</button>
         <button class="ai-settings-tab" data-aitab="vulns">Vulns</button>
         <button class="ai-settings-tab" data-aitab="skills">Skills</button>
@@ -2835,14 +2941,14 @@
 
         </div><!-- end models pane -->
 
-        <!-- ═══ TAB: Persona ══════════════════════════════════ -->
-        <div class="ai-settings-pane hidden" data-aitab="persona">
+        <!-- ═══ TAB: Agents ═══════════════════════════════════ -->
+        <div class="ai-settings-pane hidden" data-aitab="agents">
           <div class="settings-section">
-            <div class="settings-section-title">Agent Persona</div>
-            <div class="settings-section-desc">Select the AI personality and system prompt used in chat.</div>
+            <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between">AI Agents <button id="ai-agent-new" class="btn btn-xs btn-accent">+ New</button></div>
+            <div class="settings-section-desc">Select the AI agent and system prompt used in chat. Create custom agents below.</div>
             <div class="settings-row">
-              <label class="settings-label-sm">Persona</label>
-              <select id="ai-persona" class="filter-sel">
+              <label class="settings-label-sm">Agent</label>
+              <select id="ai-persona" class="filter-sel" style="flex:1">
                 <option value="pentester">AI Pentester</option>
                 <option value="analyst">Analyst</option>
                 <option value="orchestrator">Orchestrator</option>
@@ -2856,6 +2962,7 @@
                 <option value="redteam">Red Team</option>
                 <option value="custom">Custom</option>
               </select>
+              <button id="ai-agent-edit" class="btn btn-xs btn-ghost" title="Edit selected agent">Edit</button>
             </div>
             <div id="ai-persona-desc" class="settings-section-desc" style="margin-top:6px"></div>
             <div id="ai-persona-preview" class="ai-persona-preview"></div>
@@ -2950,8 +3057,8 @@
         <!-- ═══ TAB: Skills ══════════════════════════════════ -->
         <div class="ai-settings-pane hidden" data-aitab="skills">
           <div class="settings-section">
-            <div class="settings-section-title">Skills Library</div>
-            <div class="settings-section-desc">Pentesting methodologies injected into the AI system prompt via slash commands (/xss, /sqli, etc.)</div>
+            <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between">Skills Library <button id="ai-skill-new" class="btn btn-xs btn-accent">+ New</button></div>
+            <div class="settings-section-desc">Pentesting methodologies injected into the AI system prompt via slash commands. Create custom skills below.</div>
             <div class="settings-row" style="margin-bottom:8px">
               <input id="ai-skills-search" type="text" class="settings-inp" placeholder="Search skills..." spellcheck="false" style="flex:1">
               <select id="ai-skills-cat-filter" class="filter-sel" style="min-width:120px">
@@ -2971,16 +3078,22 @@
         <!-- ═══ TAB: Workflows ════════════════════════════════ -->
         <div class="ai-settings-pane hidden" data-aitab="workflows">
           <div class="settings-section">
-            <div class="settings-section-title">Workflows</div>
-            <div class="settings-section-desc">Pre-defined testing sequences. Select one when creating a pentest project, or trigger via /workflow command.</div>
-            <div id="ai-wf-list" class="ai-wf-list"></div>
-            <div id="ai-wf-detail" class="ai-wf-detail hidden">
-              <div class="ai-wf-detail-header">
-                <span id="ai-wf-detail-name" class="ai-wf-detail-name"></span>
-                <span id="ai-wf-detail-desc" class="ai-wf-detail-desc"></span>
+            <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between">Workflows <button id="ai-wf-new" class="btn btn-xs btn-accent">+ New</button></div>
+            <div class="settings-section-desc">Pre-defined testing sequences. Create custom workflows with drag-and-drop steps.</div>
+            <div class="ai-wf-split">
+              <div id="ai-wf-list" class="ai-wf-list"></div>
+              <div id="ai-wf-detail" class="ai-wf-detail hidden">
+                <div class="ai-wf-detail-header" style="display:flex;align-items:baseline;justify-content:space-between">
+                  <div>
+                    <span id="ai-wf-detail-name" class="ai-wf-detail-name"></span>
+                    <span id="ai-wf-detail-desc" class="ai-wf-detail-desc"></span>
+                  </div>
+                  <button id="ai-wf-edit" class="btn btn-xs btn-ghost">Edit</button>
+                </div>
+                <div class="pane-label" style="margin-top:10px">STEPS</div>
+                <div id="ai-wf-steps" class="ai-wf-steps"></div>
               </div>
-              <div class="pane-label" style="margin-top:10px">STEPS</div>
-              <div id="ai-wf-steps" class="ai-wf-steps"></div>
+              <div id="ai-wf-empty" class="ai-wf-empty">Select a workflow to view steps</div>
             </div>
           </div>
         </div><!-- end workflows pane -->
@@ -2988,21 +3101,27 @@
         <!-- ═══ TAB: Prompts ══════════════════════════════════ -->
         <div class="ai-settings-pane hidden" data-aitab="prompts">
           <div class="settings-section">
-            <div class="settings-section-title">Prompt Templates</div>
-            <div class="settings-section-desc">Reusable prompts with tag placeholders. Includes hybrid judge/refute templates for vulnerability verification.</div>
-            <div id="ai-prompts-list" class="ai-prompts-list"></div>
-            <div id="ai-prompt-detail" class="ai-prompt-detail hidden">
-              <div class="ai-prompt-detail-header">
-                <span id="ai-prompt-detail-name" class="ai-prompt-detail-name"></span>
-                <span id="ai-prompt-detail-cat" class="ai-prompt-detail-cat"></span>
+            <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between">Prompt Templates <button id="ai-prompt-new" class="btn btn-xs btn-accent">+ New</button></div>
+            <div class="settings-section-desc">Reusable prompts with tag placeholders. Create custom templates below.</div>
+            <div class="ai-prompts-split">
+              <div id="ai-prompts-list" class="ai-prompts-list"></div>
+              <div id="ai-prompt-detail" class="ai-prompt-detail hidden">
+                <div class="ai-prompt-detail-header" style="display:flex;align-items:baseline;justify-content:space-between">
+                  <div style="display:flex;align-items:baseline;gap:8px">
+                    <span id="ai-prompt-detail-name" class="ai-prompt-detail-name"></span>
+                    <span id="ai-prompt-detail-cat" class="ai-prompt-detail-cat"></span>
+                  </div>
+                  <button id="ai-prompt-edit" class="btn btn-xs btn-ghost">Edit</button>
+                </div>
+                <div class="pane-label" style="margin-top:8px">TEMPLATE</div>
+                <pre id="ai-prompt-detail-body" class="ai-prompt-detail-body"></pre>
+                <div class="pane-label" style="margin-top:8px">TAGS</div>
+                <div id="ai-prompt-detail-tags" class="ai-prompt-detail-tags"></div>
+                <div class="settings-row" style="margin-top:10px">
+                  <button id="ai-prompt-send" class="btn btn-sm btn-accent">Send to Chat</button>
+                </div>
               </div>
-              <div class="pane-label" style="margin-top:8px">TEMPLATE</div>
-              <pre id="ai-prompt-detail-body" class="ai-prompt-detail-body"></pre>
-              <div class="pane-label" style="margin-top:8px">TAGS</div>
-              <div id="ai-prompt-detail-tags" class="ai-prompt-detail-tags"></div>
-              <div class="settings-row" style="margin-top:10px">
-                <button id="ai-prompt-send" class="btn btn-sm btn-accent">Send to Chat</button>
-              </div>
+              <div id="ai-prompt-empty" class="ai-prompt-empty">Select a prompt to preview</div>
             </div>
           </div>
         </div><!-- end prompts pane -->

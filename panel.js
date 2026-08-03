@@ -457,15 +457,17 @@ function renderInterceptList() {
     } else {
       const btnRep  = txt("button", "btn btn-xs btn-ghost",   "→ Rep");
       const btnIntr = txt("button", "btn btn-xs btn-ghost",   "→ Intr");
+      const btnAi   = txt("button", "btn btn-xs btn-ghost",   "→ AI");
       const btnOpen = txt("button", "btn btn-xs btn-ghost",   "↗"); btnOpen.title = "Open in new tab";
       const btnFwd  = txt("button", "btn btn-xs btn-success", "Forward →");
       const btnDrop = txt("button", "btn btn-xs btn-danger",  "Drop");
       btnRep.addEventListener("click",  e => { e.stopPropagation(); sendToRepeater(req); });
       btnIntr.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder(req); });
+      btnAi.addEventListener("click",   e => { e.stopPropagation(); sendToAIChat(req); });
       btnOpen.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: req.url }); });
       btnFwd.addEventListener("click",  e => { e.stopPropagation(); doForward(req.requestId, null); });
       btnDrop.addEventListener("click", e => { e.stopPropagation(); doDrop(req.requestId); });
-      ap(acts, btnRep, btnIntr, btnOpen, btnFwd, btnDrop);
+      ap(acts, btnRep, btnIntr, btnAi, btnOpen, btnFwd, btnDrop);
       row.addEventListener("click", () => openEditor(req));
     }
 
@@ -1374,6 +1376,36 @@ function histDetailToRepeater() {
   });
 }
 
+// ── Send to AI Chat ──────────────────────────────────────────────────────────
+function sendToAIChat(req) {
+  const method = req.method || "GET";
+  const url    = req.url    || "";
+  const hdrs   = req.rawHeaders || headersToRaw(req.headers || {});
+  const body   = req.body   || "";
+  // Build context block
+  let ctx = method + " " + url;
+  if (hdrs) ctx += "\n" + hdrs;
+  if (body) ctx += "\n\n" + body;
+  // Store as pending context — will be injected when user sends their next message
+  aiPendingRequestCtx = ctx;
+  // Switch to AI Chat tab
+  showTab("aichat");
+  // Pre-fill input with hint
+  const inp = document.getElementById("ai-input");
+  if (inp) {
+    inp.placeholder = "Request attached. Type your question (e.g. 'analyze this for vulns') and press Send...";
+    inp.focus();
+  }
+  // Flash indicator
+  const bdg = document.getElementById("bdg-aichat");
+  if (bdg) {
+    bdg.textContent = "REQ";
+    bdg.className = "bdg has-data";
+    clearTimeout(bdg._timer);
+    bdg._timer = setTimeout(() => { bdg.className = "bdg hidden"; }, 4000);
+  }
+}
+
 // ── Send to Repeater ──────────────────────────────────────────────────────────
 function sendToRepeater(req) {
   const method  = req.method || "GET";
@@ -2118,12 +2150,14 @@ function renderEndpoints() {
       });
     });
     const intrBtn = txt("button", "btn btn-xs btn-ghost", "→ Intr");
+    const aiBtn   = txt("button", "btn btn-xs btn-ghost", "→ AI");
     const openBtn = txt("button", "btn btn-xs btn-ghost", "↗"); openBtn.title = "Open in new tab";
     repBtn.addEventListener("click", e => { e.stopPropagation(); sendToRepeater(ep); });
     intrBtn.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder(ep); });
+    aiBtn.addEventListener("click",   e => { e.stopPropagation(); sendToAIChat(ep); });
     openBtn.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: ep.url }); });
 
-    ap(acts, cpyBtn, repBtn, intrBtn, openBtn);
+    ap(acts, cpyBtn, repBtn, intrBtn, aiBtn, openBtn);
     row.appendChild(acts);
     row.addEventListener("click", () => openEpDetail(ep));
     list.appendChild(row);
@@ -2957,12 +2991,14 @@ function tgtRenderTable(entries) {
     actTd.className = "tgt-act-cell";
     const repBtn = txt("button", "btn btn-xs btn-ghost", "→ Rep");
     const intrBtn = txt("button", "btn btn-xs btn-ghost", "→ Intr");
+    const aiBtn   = txt("button", "btn btn-xs btn-ghost", "→ AI");
     const openBtn = txt("button", "btn btn-xs btn-ghost", "↗");
     openBtn.title = "Open in new tab";
     repBtn.addEventListener("click", e => { e.stopPropagation(); sendToRepeater({ method: entry.method, url: entry.url, headers: entry.headers || {}, body: entry.body || "" }); });
     intrBtn.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder({ method: entry.method, url: entry.url, headers: entry.headers || {}, body: entry.body || "" }); });
+    aiBtn.addEventListener("click",   e => { e.stopPropagation(); sendToAIChat({ method: entry.method, url: entry.url, headers: entry.headers || {}, body: entry.body || "" }); });
     openBtn.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: entry.url }); });
-    ap(actTd, repBtn, intrBtn, openBtn);
+    ap(actTd, repBtn, intrBtn, aiBtn, openBtn);
     tr.appendChild(actTd);
     tr.className = "tgt-clickable";
     tr._entry = entry;
@@ -4218,21 +4254,37 @@ let aiWfSelectedId = null;
 function renderWorkflowsBrowser() {
   const list = document.getElementById('ai-wf-list');
   const detail = document.getElementById('ai-wf-detail');
+  const emptyEl = document.getElementById('ai-wf-empty');
   if (!list || !window.VOID_WORKFLOWS) return;
 
   list.replaceChildren();
   for (const wf of window.VOID_WORKFLOWS) {
     const card = document.createElement('div');
     card.className = 'ai-wf-card' + (wf.id === aiWfSelectedId ? ' active' : '');
-    card.innerHTML = '<div class="ai-wf-card-name">' + esc(wf.name) + '</div>' +
-      '<div class="ai-wf-card-desc">' + esc(wf.description) + '</div>' +
-      '<div class="ai-wf-card-meta">' + esc(wf.category) + ' · ' + wf.steps.length + ' steps</div>';
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'ai-wf-card-name';
+    nameDiv.textContent = wf.name;
+    const descDiv = document.createElement('div');
+    descDiv.className = 'ai-wf-card-desc';
+    descDiv.textContent = wf.description;
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'ai-wf-card-meta';
+    metaDiv.textContent = wf.category + ' \u00B7 ' + wf.steps.length + ' steps';
+    card.appendChild(nameDiv);
+    card.appendChild(descDiv);
+    card.appendChild(metaDiv);
     card.addEventListener('click', () => {
       aiWfSelectedId = wf.id;
       renderWorkflowsBrowser();
       renderWorkflowDetail(wf);
     });
+    addEditBtnToWfCard(wf, card);
     list.appendChild(card);
+  }
+  // Show empty placeholder if nothing selected
+  if (!aiWfSelectedId && emptyEl) {
+    emptyEl.classList.remove('hidden');
+    if (detail) detail.classList.add('hidden');
   }
 }
 
@@ -4241,9 +4293,11 @@ function renderWorkflowDetail(wf) {
   const nameEl = document.getElementById('ai-wf-detail-name');
   const descEl = document.getElementById('ai-wf-detail-desc');
   const stepsEl = document.getElementById('ai-wf-steps');
+  const emptyEl = document.getElementById('ai-wf-empty');
   if (!detail) return;
 
   detail.classList.remove('hidden');
+  if (emptyEl) emptyEl.classList.add('hidden');
   if (nameEl) nameEl.textContent = wf.name;
   if (descEl) descEl.textContent = wf.description;
   if (stepsEl) {
@@ -4251,11 +4305,88 @@ function renderWorkflowDetail(wf) {
     wf.steps.forEach((s, i) => {
       const row = document.createElement('div');
       row.className = 'ai-wf-step-row';
-      row.innerHTML = '<span class="ai-wf-step-idx">' + (i + 1) + '</span>' +
-        '<span class="ai-wf-step-name">' + esc(s.name) + '</span>' +
-        '<span class="ai-wf-step-type">' + esc(s.type) + '</span>' +
-        (s.dependsOn?.length ? '<span class="ai-wf-step-deps">after: ' + s.dependsOn.map(d => esc(d)).join(', ') + '</span>' : '');
+      // Step index circle
+      const idx = document.createElement('span');
+      idx.className = 'ai-wf-step-idx';
+      idx.textContent = i + 1;
+      row.appendChild(idx);
+      // Step name
+      const name = document.createElement('span');
+      name.className = 'ai-wf-step-name';
+      name.textContent = s.name;
+      row.appendChild(name);
+      // Type badge
+      if (s.type === 'CONDITION') {
+        const typeBadge = document.createElement('span');
+        typeBadge.className = 'ai-wf-step-type ai-wf-step-type-condition';
+        typeBadge.textContent = 'CONDITION';
+        row.appendChild(typeBadge);
+      } else if (s.type === 'FINISH') {
+        const typeBadge = document.createElement('span');
+        typeBadge.className = 'ai-wf-step-type ai-wf-step-type-finish';
+        typeBadge.textContent = 'FINISH';
+        row.appendChild(typeBadge);
+      } else {
+        // Show agent name if set
+        if (s.agent) {
+          const agBadge = document.createElement('span');
+          agBadge.className = 'ai-wf-step-type ai-wf-step-type-agent';
+          const ag = window.VOID_AGENTS?.find(a => a.id === s.agent);
+          agBadge.textContent = ag ? ag.title : s.agent;
+          row.appendChild(agBadge);
+        }
+        // Show skills as badges
+        const skills = s.skills || (s.skill ? [s.skill] : []);
+        for (const sk of skills) {
+          const skBadge = document.createElement('span');
+          skBadge.className = 'ai-wf-step-type ai-wf-step-type-skill';
+          skBadge.textContent = sk;
+          row.appendChild(skBadge);
+        }
+      }
+      // Dependencies
+      if (s.dependsOn?.length) {
+        const deps = document.createElement('span');
+        deps.className = 'ai-wf-step-deps';
+        deps.textContent = '\u2192 ' + s.dependsOn.join(', ');
+        row.appendChild(deps);
+      }
       stepsEl.appendChild(row);
+      // Conditional branching indicators
+      if (s.type === 'CONDITION') {
+        const branchesDiv = document.createElement('div');
+        branchesDiv.className = 'ai-wf-condition-branches';
+        // New multi-branch format
+        if (s.branches && s.branches.length > 0) {
+          s.branches.forEach((b, bi) => {
+            const label = document.createElement('span');
+            label.className = 'ai-wf-branch ai-wf-branch-if';
+            label.textContent = (bi === 0 ? 'if ' : 'else if ') + (b.when || '?') + ' \u2192 ' + (b.goto || '?');
+            branchesDiv.appendChild(label);
+          });
+          if (s.elseGoto) {
+            const elseLabel = document.createElement('span');
+            elseLabel.className = 'ai-wf-branch ai-wf-branch-else';
+            elseLabel.textContent = 'else \u2192 ' + s.elseGoto;
+            branchesDiv.appendChild(elseLabel);
+          }
+        } else {
+          // Legacy onTrue/onFalse format
+          if (s.onTrue) {
+            const trueLabel = document.createElement('span');
+            trueLabel.className = 'ai-wf-branch ai-wf-branch-true';
+            trueLabel.textContent = '\u2714 ' + s.onTrue;
+            branchesDiv.appendChild(trueLabel);
+          }
+          if (s.onFalse) {
+            const falseLabel = document.createElement('span');
+            falseLabel.className = 'ai-wf-branch ai-wf-branch-false';
+            falseLabel.textContent = '\u2718 ' + s.onFalse;
+            branchesDiv.appendChild(falseLabel);
+          }
+        }
+        stepsEl.appendChild(branchesDiv);
+      }
     });
   }
 }
@@ -4266,20 +4397,33 @@ let aiPromptSelectedId = null;
 
 function renderPromptsBrowser() {
   const list = document.getElementById('ai-prompts-list');
+  const detail = document.getElementById('ai-prompt-detail');
+  const emptyEl = document.getElementById('ai-prompt-empty');
   if (!list || !window.VOID_PROMPTS) return;
 
   list.replaceChildren();
   for (const p of window.VOID_PROMPTS) {
     const item = document.createElement('div');
     item.className = 'ai-prompt-item' + (p.id === aiPromptSelectedId ? ' active' : '');
-    item.innerHTML = '<span class="ai-prompt-item-name">' + esc(p.name) + '</span>' +
-      '<span class="ai-prompt-item-cat">' + esc(p.category) + '</span>';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'ai-prompt-item-name';
+    nameSpan.textContent = p.name;
+    const catSpan = document.createElement('span');
+    catSpan.className = 'ai-prompt-item-cat ai-prompt-cat-' + (p.category || '').replace(/[^a-z]/g, '');
+    catSpan.textContent = p.category;
+    item.appendChild(nameSpan);
+    item.appendChild(catSpan);
     item.addEventListener('click', () => {
       aiPromptSelectedId = p.id;
       renderPromptsBrowser();
       renderPromptDetail(p);
     });
+    addEditBtnToPromptItem(p, item);
     list.appendChild(item);
+  }
+  if (!aiPromptSelectedId && emptyEl) {
+    emptyEl.classList.remove('hidden');
+    if (detail) detail.classList.add('hidden');
   }
 }
 
@@ -4289,9 +4433,11 @@ function renderPromptDetail(p) {
   const catEl = document.getElementById('ai-prompt-detail-cat');
   const bodyEl = document.getElementById('ai-prompt-detail-body');
   const tagsEl = document.getElementById('ai-prompt-detail-tags');
+  const emptyEl = document.getElementById('ai-prompt-empty');
   if (!detail) return;
 
   detail.classList.remove('hidden');
+  if (emptyEl) emptyEl.classList.add('hidden');
   if (nameEl) nameEl.textContent = p.name;
   if (catEl) catEl.textContent = p.category;
   if (bodyEl) bodyEl.textContent = p.template;
@@ -4304,6 +4450,952 @@ function renderPromptDetail(p) {
       tagsEl.appendChild(span);
     }
   }
+}
+
+// ── Item Editor CRUD (Agents, Skills, Workflows, Prompts) ────────────────────
+
+let customAgents = [];
+let customSkills = {};
+let customWorkflows = [];
+let customPrompts = [];
+
+function loadCustomItems() {
+  if (typeof chrome !== 'undefined' && chrome.storage) {
+    chrome.storage.local.get(['voidCustomAgents', 'voidCustomSkills', 'voidCustomWorkflows', 'voidCustomPrompts'], r => {
+      customAgents = r.voidCustomAgents || [];
+      customSkills = r.voidCustomSkills || {};
+      customWorkflows = r.voidCustomWorkflows || [];
+      customPrompts = r.voidCustomPrompts || [];
+      mergeCustomItems();
+    });
+  }
+}
+
+function saveCustomItems() {
+  if (typeof chrome !== 'undefined' && chrome.storage) {
+    chrome.storage.local.set({
+      voidCustomAgents: customAgents,
+      voidCustomSkills: customSkills,
+      voidCustomWorkflows: customWorkflows,
+      voidCustomPrompts: customPrompts,
+    });
+  }
+  mergeCustomItems();
+}
+
+function mergeCustomItems() {
+  // Merge agents: built-in + custom (custom can override by id)
+  const builtInAgents = window._VOID_AGENTS_BUILTIN || window.VOID_AGENTS || [];
+  if (!window._VOID_AGENTS_BUILTIN) window._VOID_AGENTS_BUILTIN = [...builtInAgents];
+  const merged = [...window._VOID_AGENTS_BUILTIN];
+  for (const ca of customAgents) {
+    const idx = merged.findIndex(a => a.id === ca.id);
+    if (idx >= 0) merged[idx] = ca;
+    else merged.push(ca);
+  }
+  window.VOID_AGENTS = merged;
+
+  // Merge workflows
+  const builtInWf = window._VOID_WORKFLOWS_BUILTIN || window.VOID_WORKFLOWS || [];
+  if (!window._VOID_WORKFLOWS_BUILTIN) window._VOID_WORKFLOWS_BUILTIN = [...builtInWf];
+  const mergedWf = [...window._VOID_WORKFLOWS_BUILTIN];
+  for (const cw of customWorkflows) {
+    const idx = mergedWf.findIndex(w => w.id === cw.id);
+    if (idx >= 0) mergedWf[idx] = cw;
+    else mergedWf.push(cw);
+  }
+  window.VOID_WORKFLOWS = mergedWf;
+
+  // Merge prompts
+  const builtInPr = window._VOID_PROMPTS_BUILTIN || window.VOID_PROMPTS || [];
+  if (!window._VOID_PROMPTS_BUILTIN) window._VOID_PROMPTS_BUILTIN = [...builtInPr];
+  const mergedPr = [...window._VOID_PROMPTS_BUILTIN];
+  for (const cp of customPrompts) {
+    const idx = mergedPr.findIndex(p => p.id === cp.id);
+    if (idx >= 0) mergedPr[idx] = cp;
+    else mergedPr.push(cp);
+  }
+  window.VOID_PROMPTS = mergedPr;
+
+  // Merge skills
+  const builtInSk = window._VOID_SKILLS_BUILTIN || window.VOID_SKILLS || {};
+  if (!window._VOID_SKILLS_BUILTIN) window._VOID_SKILLS_BUILTIN = { ...builtInSk };
+  window.VOID_SKILLS = { ...window._VOID_SKILLS_BUILTIN, ...customSkills };
+}
+
+// -- Generic editor open/close
+let editorType = null;
+let editorItem = null;
+let editorIsNew = false;
+
+function editorOpen(type, item) {
+  editorType = type;
+  editorItem = item ? JSON.parse(JSON.stringify(item)) : null;
+  editorIsNew = !item;
+  const overlay = document.getElementById('item-editor-overlay');
+  const titleEl = document.getElementById('item-editor-title');
+  const body = document.getElementById('item-editor-body');
+  const delBtn = document.getElementById('item-editor-delete');
+  overlay.classList.remove('hidden');
+  delBtn.classList.toggle('hidden', editorIsNew || !editorItem?._custom);
+  body.replaceChildren();
+
+  if (type === 'agent') {
+    titleEl.textContent = editorIsNew ? 'New Agent' : 'Edit Agent';
+    if (!editorItem) editorItem = { id: '', title: '', description: '', context: '', icon: 'smart_toy', systemPrompt: '', _custom: true };
+    editorBuildAgentForm(body, editorItem);
+  } else if (type === 'workflow') {
+    titleEl.textContent = editorIsNew ? 'New Workflow' : 'Edit Workflow';
+    if (!editorItem) editorItem = { id: '', name: '', description: '', category: 'engagement', steps: [], _custom: true };
+    editorBuildWorkflowForm(body, editorItem);
+  } else if (type === 'prompt') {
+    titleEl.textContent = editorIsNew ? 'New Prompt' : 'Edit Prompt';
+    if (!editorItem) editorItem = { id: '', name: '', category: 'detection', template: '', tags: [], _custom: true };
+    editorBuildPromptForm(body, editorItem);
+  } else if (type === 'skill') {
+    titleEl.textContent = editorIsNew ? 'New Skill' : 'Edit Skill';
+    if (!editorItem) editorItem = { slug: '', name: '', description: '', category: '', body: '', _custom: true };
+    editorBuildSkillForm(body, editorItem);
+  }
+}
+
+function editorClose() {
+  document.getElementById('item-editor-overlay').classList.add('hidden');
+  editorType = null;
+  editorItem = null;
+}
+
+function editorSave() {
+  if (editorType === 'agent') editorSaveAgent();
+  else if (editorType === 'workflow') editorSaveWorkflow();
+  else if (editorType === 'prompt') editorSavePrompt();
+  else if (editorType === 'skill') editorSaveSkill();
+  editorClose();
+}
+
+function editorDelete() {
+  if (!editorItem) return;
+  if (editorType === 'agent') {
+    customAgents = customAgents.filter(a => a.id !== editorItem.id);
+  } else if (editorType === 'workflow') {
+    customWorkflows = customWorkflows.filter(w => w.id !== editorItem.id);
+  } else if (editorType === 'prompt') {
+    customPrompts = customPrompts.filter(p => p.id !== editorItem.id);
+  } else if (editorType === 'skill') {
+    delete customSkills[editorItem.slug];
+  }
+  saveCustomItems();
+  editorRefreshView();
+  editorClose();
+}
+
+function editorRefreshView() {
+  if (editorType === 'agent' || !editorType) {
+    // Refresh persona dropdown
+    const sel = document.getElementById('ai-persona');
+    if (sel) {
+      sel.replaceChildren();
+      for (const a of window.VOID_AGENTS) {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.title + (a._custom ? ' *' : '');
+        sel.appendChild(opt);
+      }
+      const customOpt = document.createElement('option');
+      customOpt.value = 'custom';
+      customOpt.textContent = 'Custom';
+      sel.appendChild(customOpt);
+    }
+    // Refresh chat agent dropdown
+    const chatSel = document.getElementById('ai-chat-agent-sel');
+    if (chatSel) {
+      chatSel.replaceChildren();
+      for (const a of window.VOID_AGENTS) {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.title;
+        chatSel.appendChild(opt);
+      }
+    }
+  }
+  if (editorType === 'workflow' || !editorType) renderWorkflowsBrowser();
+  if (editorType === 'prompt' || !editorType) renderPromptsBrowser();
+  if (editorType === 'skill' || !editorType) renderSkillsBrowser();
+}
+
+// -- Agent form
+function editorBuildAgentForm(body, item) {
+  body.replaceChildren();
+  const fields = [
+    { label: 'ID (slug)', id: 'ed-agent-id', val: item.id, ph: 'my-agent', disabled: !editorIsNew },
+    { label: 'Title', id: 'ed-agent-title', val: item.title, ph: 'My Agent' },
+    { label: 'Description', id: 'ed-agent-desc', val: item.description, ph: 'What this agent does...' },
+    { label: 'Icon (Material Symbol)', id: 'ed-agent-icon', val: item.icon || 'smart_toy', ph: 'smart_toy' },
+  ];
+  for (const f of fields) {
+    const row = document.createElement('div');
+    row.className = 'settings-row';
+    const label = document.createElement('label');
+    label.className = 'settings-label-sm';
+    label.textContent = f.label;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'settings-inp';
+    inp.id = f.id;
+    inp.value = f.val || '';
+    inp.placeholder = f.ph || '';
+    inp.spellcheck = false;
+    inp.style.flex = '1';
+    if (f.disabled) inp.disabled = true;
+    row.appendChild(label);
+    row.appendChild(inp);
+    body.appendChild(row);
+  }
+  const promptLabel = document.createElement('div');
+  promptLabel.className = 'pane-label';
+  promptLabel.textContent = 'SYSTEM PROMPT';
+  body.appendChild(promptLabel);
+  const ta = document.createElement('textarea');
+  ta.className = 'editor-ta editor-ta-lg';
+  ta.id = 'ed-agent-prompt';
+  ta.value = item.systemPrompt || '';
+  ta.placeholder = 'You are a security testing agent...';
+  ta.spellcheck = false;
+  body.appendChild(ta);
+}
+
+function editorSaveAgent() {
+  const id = document.getElementById('ed-agent-id').value.trim();
+  const title = document.getElementById('ed-agent-title').value.trim();
+  if (!id || !title) return;
+  const agent = {
+    id,
+    title,
+    description: document.getElementById('ed-agent-desc').value.trim(),
+    context: document.getElementById('ed-agent-desc').value.trim(),
+    icon: document.getElementById('ed-agent-icon').value.trim() || 'smart_toy',
+    systemPrompt: document.getElementById('ed-agent-prompt').value,
+    _custom: true,
+  };
+  const idx = customAgents.findIndex(a => a.id === id);
+  if (idx >= 0) customAgents[idx] = agent;
+  else customAgents.push(agent);
+  saveCustomItems();
+  editorRefreshView();
+}
+
+// -- Workflow form
+function editorBuildWorkflowForm(body, item) {
+  body.replaceChildren();
+  const fields = [
+    { label: 'ID (slug)', id: 'ed-wf-id', val: item.id, ph: 'my-workflow', disabled: !editorIsNew },
+    { label: 'Name', id: 'ed-wf-name', val: item.name, ph: 'My Workflow' },
+    { label: 'Description', id: 'ed-wf-desc', val: item.description, ph: 'What this workflow does...' },
+  ];
+  for (const f of fields) {
+    const row = document.createElement('div');
+    row.className = 'settings-row';
+    const label = document.createElement('label');
+    label.className = 'settings-label-sm';
+    label.textContent = f.label;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'settings-inp';
+    inp.id = f.id;
+    inp.value = f.val || '';
+    inp.placeholder = f.ph || '';
+    inp.spellcheck = false;
+    inp.style.flex = '1';
+    if (f.disabled) inp.disabled = true;
+    row.appendChild(label);
+    row.appendChild(inp);
+    body.appendChild(row);
+  }
+  // Category
+  const catRow = document.createElement('div');
+  catRow.className = 'settings-row';
+  const catLabel = document.createElement('label');
+  catLabel.className = 'settings-label-sm';
+  catLabel.textContent = 'Category';
+  const catSel = document.createElement('select');
+  catSel.className = 'filter-sel';
+  catSel.id = 'ed-wf-cat';
+  for (const c of ['engagement', 'composite']) {
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = c;
+    if (c === item.category) opt.selected = true;
+    catSel.appendChild(opt);
+  }
+  catRow.appendChild(catLabel);
+  catRow.appendChild(catSel);
+  body.appendChild(catRow);
+
+  // Steps
+  const stepsLabel = document.createElement('div');
+  stepsLabel.className = 'pane-label';
+  stepsLabel.textContent = 'STEPS';
+  body.appendChild(stepsLabel);
+  const stepsContainer = document.createElement('div');
+  stepsContainer.className = 'item-editor-steps';
+  stepsContainer.id = 'ed-wf-steps';
+  body.appendChild(stepsContainer);
+  editorWfSteps = [...(item.steps || [])];
+  editorRenderWfSteps();
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'btn btn-xs btn-ghost';
+  addBtn.textContent = '+ Add Step';
+  addBtn.style.marginTop = '6px';
+  addBtn.addEventListener('click', () => {
+    const nextNum = editorWfSteps.length + 1;
+    editorWfSteps.push({ id: 'step-' + nextNum, name: 'Step ' + nextNum, type: 'STEP', skills: [], agent: '', prompt: '', instructions: '', dependsOn: [] });
+    editorRenderWfSteps();
+  });
+  body.appendChild(addBtn);
+}
+
+let editorWfSteps = [];
+let editorDragIdx = -1;
+
+function editorRenderWfSteps() {
+  const container = document.getElementById('ed-wf-steps');
+  if (!container) return;
+  container.replaceChildren();
+  editorWfSteps.forEach((s, i) => {
+    // ── Main row ──
+    const wrapper = document.createElement('div');
+    wrapper.className = 'wf-step-wrapper';
+    wrapper.dataset.idx = i;
+
+    const row = document.createElement('div');
+    row.className = 'item-editor-step';
+    row.draggable = true;
+
+    // Drag handle
+    const handle = document.createElement('span');
+    handle.className = 'step-handle';
+    handle.textContent = '\u2630';
+    row.appendChild(handle);
+
+    // Step number
+    const num = document.createElement('span');
+    num.className = 'step-num';
+    num.textContent = (i + 1);
+    row.appendChild(num);
+
+    // Name
+    const nameInp = document.createElement('input');
+    nameInp.className = 'step-name-inp';
+    nameInp.value = s.name || '';
+    nameInp.placeholder = 'Step name';
+    nameInp.addEventListener('input', () => {
+      s.name = nameInp.value;
+      // Auto-generate id from name if id is still a default
+      if (!s.id || s.id.startsWith('step-')) {
+        s.id = nameInp.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || ('step-' + (i + 1));
+      }
+    });
+    row.appendChild(nameInp);
+
+    // Type selector (STEP or CONDITION)
+    const typeSel = document.createElement('select');
+    typeSel.className = 'step-type-sel';
+    for (const t of ['STEP', 'CONDITION', 'FINISH']) {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      if (t === s.type) opt.selected = true;
+      typeSel.appendChild(opt);
+    }
+    typeSel.addEventListener('change', () => {
+      s.type = typeSel.value;
+      if (s.type === 'STEP' && !s.skills) s.skills = [];
+      editorRenderWfSteps();
+    });
+    row.appendChild(typeSel);
+
+    // Delete button
+    const del = document.createElement('span');
+    del.className = 'step-del';
+    del.textContent = '\u00D7';
+    del.addEventListener('click', () => {
+      editorWfSteps.splice(i, 1);
+      editorRenderWfSteps();
+    });
+    row.appendChild(del);
+
+    // ── Drag events ──
+    row.addEventListener('dragstart', e => {
+      editorDragIdx = i;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      editorDragIdx = -1;
+      container.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      wrapper.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', () => {
+      wrapper.classList.remove('drag-over');
+    });
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      wrapper.classList.remove('drag-over');
+      if (editorDragIdx < 0 || editorDragIdx === i) return;
+      const moved = editorWfSteps.splice(editorDragIdx, 1)[0];
+      editorWfSteps.splice(i, 0, moved);
+      editorRenderWfSteps();
+    });
+
+    wrapper.appendChild(row);
+
+    // ── Step config panel (agent, skills, prompt, instructions) ──
+    if (s.type === 'STEP') {
+      if (!s.skills) s.skills = [];
+      const cfgBox = document.createElement('div');
+      cfgBox.className = 'step-config-box';
+
+      // Row 1: Agent + Prompt
+      const row1 = document.createElement('div');
+      row1.className = 'step-cfg-row';
+
+      // Agent
+      const agLabel = document.createElement('span');
+      agLabel.className = 'step-cfg-label';
+      agLabel.textContent = 'Agent';
+      row1.appendChild(agLabel);
+      const agentSel = document.createElement('select');
+      agentSel.className = 'filter-sel';
+      const agDef = document.createElement('option');
+      agDef.value = '';
+      agDef.textContent = '— default —';
+      agentSel.appendChild(agDef);
+      if (window.VOID_AGENTS) {
+        for (const a of window.VOID_AGENTS) {
+          const opt = document.createElement('option');
+          opt.value = a.id;
+          opt.textContent = a.title;
+          if (a.id === s.agent) opt.selected = true;
+          agentSel.appendChild(opt);
+        }
+      }
+      agentSel.addEventListener('change', () => { s.agent = agentSel.value || undefined; });
+      row1.appendChild(agentSel);
+
+      // Prompt
+      const prLabel = document.createElement('span');
+      prLabel.className = 'step-cfg-label';
+      prLabel.textContent = 'Prompt';
+      row1.appendChild(prLabel);
+      const promptSel = document.createElement('select');
+      promptSel.className = 'filter-sel';
+      const prDef = document.createElement('option');
+      prDef.value = '';
+      prDef.textContent = '— none —';
+      promptSel.appendChild(prDef);
+      if (window.VOID_PROMPTS) {
+        for (const p of window.VOID_PROMPTS) {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = p.name;
+          if (p.id === s.prompt) opt.selected = true;
+          promptSel.appendChild(opt);
+        }
+      }
+      promptSel.addEventListener('change', () => { s.prompt = promptSel.value || undefined; });
+      row1.appendChild(promptSel);
+      cfgBox.appendChild(row1);
+
+      // Row 2: Skills (multi-select as chips + dropdown)
+      const row2 = document.createElement('div');
+      row2.className = 'step-cfg-row';
+      const skLabel = document.createElement('span');
+      skLabel.className = 'step-cfg-label';
+      skLabel.textContent = 'Skills';
+      row2.appendChild(skLabel);
+      const skChips = document.createElement('span');
+      skChips.className = 'step-deps-chips';
+      for (const sk of s.skills) {
+        const chip = document.createElement('span');
+        chip.className = 'step-dep-chip';
+        chip.textContent = sk + ' ';
+        const chipDel = document.createElement('span');
+        chipDel.className = 'tag-del';
+        chipDel.textContent = '\u00D7';
+        chipDel.addEventListener('click', () => {
+          s.skills = s.skills.filter(x => x !== sk);
+          editorRenderWfSteps();
+        });
+        chip.appendChild(chipDel);
+        skChips.appendChild(chip);
+      }
+      row2.appendChild(skChips);
+      if (window.VOID_SKILLS) {
+        const available = Object.keys(window.VOID_SKILLS).sort().filter(k => !s.skills.includes(k));
+        if (available.length > 0) {
+          const skAdd = document.createElement('select');
+          skAdd.className = 'filter-sel step-dep-add-sel';
+          const skDef = document.createElement('option');
+          skDef.value = '';
+          skDef.textContent = '+ add...';
+          skAdd.appendChild(skDef);
+          for (const slug of available) {
+            const opt = document.createElement('option');
+            opt.value = slug;
+            opt.textContent = slug;
+            skAdd.appendChild(opt);
+          }
+          skAdd.addEventListener('change', () => {
+            if (skAdd.value && !s.skills.includes(skAdd.value)) {
+              s.skills.push(skAdd.value);
+              editorRenderWfSteps();
+            }
+          });
+          row2.appendChild(skAdd);
+        }
+      }
+      cfgBox.appendChild(row2);
+
+      // Row 3: Instructions (free text)
+      const row3 = document.createElement('div');
+      row3.className = 'step-cfg-row';
+      const insLabel = document.createElement('span');
+      insLabel.className = 'step-cfg-label';
+      insLabel.textContent = 'Notes';
+      row3.appendChild(insLabel);
+      const insInp = document.createElement('textarea');
+      insInp.className = 'step-instructions-ta';
+      insInp.value = s.instructions || '';
+      insInp.placeholder = 'Free-text instructions, context, or notes for this step...';
+      insInp.rows = 2;
+      insInp.spellcheck = false;
+      insInp.addEventListener('input', () => { s.instructions = insInp.value; });
+      row3.appendChild(insInp);
+      cfgBox.appendChild(row3);
+
+      wrapper.appendChild(cfgBox);
+    }
+
+    // ── Conditional fields (shown only for CONDITION type) ──
+    if (s.type === 'CONDITION') {
+      if (!s.branches) s.branches = [];
+      const condBox = document.createElement('div');
+      condBox.className = 'step-condition-box';
+
+      // Free-text condition description
+      const descRow = document.createElement('div');
+      descRow.className = 'step-cond-row';
+      const descLabel = document.createElement('span');
+      descLabel.className = 'step-cond-label';
+      descLabel.textContent = 'Evaluate';
+      const descInp = document.createElement('input');
+      descInp.type = 'text';
+      descInp.className = 'settings-inp';
+      descInp.value = s.condition || '';
+      descInp.placeholder = 'What should the AI check? e.g. "Does the target have a login page?"';
+      descInp.style.flex = '1';
+      descInp.spellcheck = false;
+      descInp.addEventListener('input', () => { s.condition = descInp.value; });
+      descRow.appendChild(descLabel);
+      descRow.appendChild(descInp);
+      condBox.appendChild(descRow);
+
+      // if/else if branches
+      const branchesContainer = document.createElement('div');
+      branchesContainer.className = 'step-branches';
+      s.branches.forEach((b, bi) => {
+        const bRow = document.createElement('div');
+        bRow.className = 'step-cond-row';
+        const keyword = document.createElement('span');
+        keyword.className = 'step-cond-keyword';
+        keyword.textContent = bi === 0 ? 'if' : 'else if';
+        bRow.appendChild(keyword);
+
+        const whenInp = document.createElement('input');
+        whenInp.type = 'text';
+        whenInp.className = 'settings-inp';
+        whenInp.value = b.when || '';
+        whenInp.placeholder = 'condition...';
+        whenInp.style.flex = '1';
+        whenInp.spellcheck = false;
+        whenInp.addEventListener('input', () => { b.when = whenInp.value; });
+        bRow.appendChild(whenInp);
+
+        const arrow = document.createElement('span');
+        arrow.className = 'step-cond-arrow';
+        arrow.textContent = '\u2192';
+        bRow.appendChild(arrow);
+
+        const gotoSel = editorBuildStepRefSelect(b.goto, i);
+        gotoSel.addEventListener('change', () => { b.goto = gotoSel.value; });
+        bRow.appendChild(gotoSel);
+
+        const delBranch = document.createElement('span');
+        delBranch.className = 'step-del';
+        delBranch.textContent = '\u00D7';
+        delBranch.addEventListener('click', () => {
+          s.branches.splice(bi, 1);
+          editorRenderWfSteps();
+        });
+        bRow.appendChild(delBranch);
+        branchesContainer.appendChild(bRow);
+      });
+      condBox.appendChild(branchesContainer);
+
+      // else branch
+      const elseRow = document.createElement('div');
+      elseRow.className = 'step-cond-row';
+      const elseKw = document.createElement('span');
+      elseKw.className = 'step-cond-keyword step-cond-else';
+      elseKw.textContent = 'else';
+      elseRow.appendChild(elseKw);
+      const elseSpacer = document.createElement('span');
+      elseSpacer.style.flex = '1';
+      elseRow.appendChild(elseSpacer);
+      const elseArrow = document.createElement('span');
+      elseArrow.className = 'step-cond-arrow';
+      elseArrow.textContent = '\u2192';
+      elseRow.appendChild(elseArrow);
+      const elseSel = editorBuildStepRefSelect(s.elseGoto, i);
+      elseSel.addEventListener('change', () => { s.elseGoto = elseSel.value; });
+      elseRow.appendChild(elseSel);
+      condBox.appendChild(elseRow);
+
+      // Add branch button
+      const addBranchBtn = document.createElement('button');
+      addBranchBtn.className = 'btn btn-xs btn-ghost';
+      addBranchBtn.textContent = '+ Add branch';
+      addBranchBtn.style.marginTop = '4px';
+      addBranchBtn.addEventListener('click', () => {
+        s.branches.push({ when: '', goto: '' });
+        editorRenderWfSteps();
+      });
+      condBox.appendChild(addBranchBtn);
+
+      wrapper.appendChild(condBox);
+    }
+
+    // ── DependsOn (dropdown + chips) ──
+    const depsRow = document.createElement('div');
+    depsRow.className = 'step-deps-row';
+    const depsLabel = document.createElement('span');
+    depsLabel.className = 'step-deps-label';
+    depsLabel.textContent = 'after:';
+    depsRow.appendChild(depsLabel);
+
+    // Show current deps as removable chips
+    const depsChips = document.createElement('span');
+    depsChips.className = 'step-deps-chips';
+    if (s.dependsOn && s.dependsOn.length > 0) {
+      for (const depId of s.dependsOn) {
+        const depStep = editorWfSteps.find(x => x.id === depId);
+        const chip = document.createElement('span');
+        chip.className = 'step-dep-chip';
+        chip.textContent = (depStep ? depStep.name : depId) + ' ';
+        const chipDel = document.createElement('span');
+        chipDel.className = 'tag-del';
+        chipDel.textContent = '\u00D7';
+        chipDel.addEventListener('click', () => {
+          s.dependsOn = s.dependsOn.filter(d => d !== depId);
+          editorRenderWfSteps();
+        });
+        chip.appendChild(chipDel);
+        depsChips.appendChild(chip);
+      }
+    }
+    depsRow.appendChild(depsChips);
+
+    // Dropdown to add a dependency
+    const otherSteps = editorWfSteps.filter((_, j) => j !== i);
+    const available = otherSteps.filter(o => !(s.dependsOn || []).includes(o.id));
+    if (available.length > 0) {
+      const addDepSel = document.createElement('select');
+      addDepSel.className = 'filter-sel step-dep-add-sel';
+      const defOpt = document.createElement('option');
+      defOpt.value = '';
+      defOpt.textContent = '+ add...';
+      addDepSel.appendChild(defOpt);
+      for (const o of available) {
+        const opt = document.createElement('option');
+        opt.value = o.id;
+        opt.textContent = o.name || o.id;
+        addDepSel.appendChild(opt);
+      }
+      addDepSel.addEventListener('change', () => {
+        if (!addDepSel.value) return;
+        if (!s.dependsOn) s.dependsOn = [];
+        if (!s.dependsOn.includes(addDepSel.value)) {
+          s.dependsOn.push(addDepSel.value);
+          editorRenderWfSteps();
+        }
+      });
+      depsRow.appendChild(addDepSel);
+    }
+    wrapper.appendChild(depsRow);
+
+    container.appendChild(wrapper);
+  });
+}
+
+function editorBuildStepRefSelect(currentVal, excludeIdx) {
+  const sel = document.createElement('select');
+  sel.className = 'filter-sel step-goto-sel';
+  const noneOpt = document.createElement('option');
+  noneOpt.value = '';
+  noneOpt.textContent = '-- step --';
+  sel.appendChild(noneOpt);
+  editorWfSteps.forEach((s, j) => {
+    if (j === excludeIdx) return;
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name || s.id;
+    if (s.id === currentVal) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  return sel;
+}
+
+function editorSaveWorkflow() {
+  const id = document.getElementById('ed-wf-id').value.trim();
+  const name = document.getElementById('ed-wf-name').value.trim();
+  if (!id || !name) return;
+  // Read step IDs from names
+  editorWfSteps.forEach((s, i) => {
+    if (!s.id) s.id = 'step-' + (i + 1);
+    if (!s.name) s.name = 'Step ' + (i + 1);
+  });
+  const wf = {
+    id,
+    name,
+    description: document.getElementById('ed-wf-desc').value.trim(),
+    category: document.getElementById('ed-wf-cat').value,
+    steps: editorWfSteps,
+    _custom: true,
+  };
+  const idx = customWorkflows.findIndex(w => w.id === id);
+  if (idx >= 0) customWorkflows[idx] = wf;
+  else customWorkflows.push(wf);
+  saveCustomItems();
+  editorRefreshView();
+}
+
+// -- Prompt form
+function editorBuildPromptForm(body, item) {
+  body.replaceChildren();
+  const fields = [
+    { label: 'ID (slug)', id: 'ed-pr-id', val: item.id, ph: 'my-prompt', disabled: !editorIsNew },
+    { label: 'Name', id: 'ed-pr-name', val: item.name, ph: 'My Prompt' },
+  ];
+  for (const f of fields) {
+    const row = document.createElement('div');
+    row.className = 'settings-row';
+    const label = document.createElement('label');
+    label.className = 'settings-label-sm';
+    label.textContent = f.label;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'settings-inp';
+    inp.id = f.id;
+    inp.value = f.val || '';
+    inp.placeholder = f.ph || '';
+    inp.spellcheck = false;
+    inp.style.flex = '1';
+    if (f.disabled) inp.disabled = true;
+    row.appendChild(label);
+    row.appendChild(inp);
+    body.appendChild(row);
+  }
+  // Category
+  const catRow = document.createElement('div');
+  catRow.className = 'settings-row';
+  const catLabel = document.createElement('label');
+  catLabel.className = 'settings-label-sm';
+  catLabel.textContent = 'Category';
+  const catSel = document.createElement('select');
+  catSel.className = 'filter-sel';
+  catSel.id = 'ed-pr-cat';
+  for (const c of ['recon', 'detection', 'analysis', 'exploitation', 'reporting', 'hybrid']) {
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = c;
+    if (c === item.category) opt.selected = true;
+    catSel.appendChild(opt);
+  }
+  catRow.appendChild(catLabel);
+  catRow.appendChild(catSel);
+  body.appendChild(catRow);
+
+  // Template
+  const tmplLabel = document.createElement('div');
+  tmplLabel.className = 'pane-label';
+  tmplLabel.textContent = 'TEMPLATE';
+  body.appendChild(tmplLabel);
+  const ta = document.createElement('textarea');
+  ta.className = 'editor-ta editor-ta-lg';
+  ta.id = 'ed-pr-template';
+  ta.value = item.template || '';
+  ta.placeholder = 'Use {{tag_name}} for placeholders that will be filled at send time...';
+  ta.spellcheck = false;
+  body.appendChild(ta);
+
+  // Tags
+  const tagsLabel = document.createElement('div');
+  tagsLabel.className = 'pane-label';
+  tagsLabel.textContent = 'TAGS';
+  body.appendChild(tagsLabel);
+  editorPromptTags = [...(item.tags || [])];
+  const tagsContainer = document.createElement('div');
+  tagsContainer.className = 'item-editor-tags';
+  tagsContainer.id = 'ed-pr-tags';
+  body.appendChild(tagsContainer);
+  const tagRow = document.createElement('div');
+  tagRow.className = 'settings-row';
+  tagRow.style.marginTop = '4px';
+  const tagInp = document.createElement('input');
+  tagInp.type = 'text';
+  tagInp.className = 'settings-inp';
+  tagInp.placeholder = 'tag_name';
+  tagInp.style.flex = '1';
+  tagInp.spellcheck = false;
+  const tagAddBtn = document.createElement('button');
+  tagAddBtn.className = 'btn btn-xs btn-ghost';
+  tagAddBtn.textContent = '+ Add Tag';
+  tagAddBtn.addEventListener('click', () => {
+    const v = tagInp.value.trim().replace(/[^a-z0-9_]/gi, '_');
+    if (v && !editorPromptTags.includes(v)) {
+      editorPromptTags.push(v);
+      editorRenderPromptTags();
+    }
+    tagInp.value = '';
+  });
+  tagRow.appendChild(tagInp);
+  tagRow.appendChild(tagAddBtn);
+  body.appendChild(tagRow);
+  editorRenderPromptTags();
+}
+
+let editorPromptTags = [];
+
+function editorRenderPromptTags() {
+  const container = document.getElementById('ed-pr-tags');
+  if (!container) return;
+  container.replaceChildren();
+  editorPromptTags.forEach((tag, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip';
+    chip.textContent = '{{' + tag + '}} ';
+    const del = document.createElement('span');
+    del.className = 'tag-del';
+    del.textContent = '\u00D7';
+    del.addEventListener('click', () => {
+      editorPromptTags.splice(i, 1);
+      editorRenderPromptTags();
+    });
+    chip.appendChild(del);
+    container.appendChild(chip);
+  });
+}
+
+function editorSavePrompt() {
+  const id = document.getElementById('ed-pr-id').value.trim();
+  const name = document.getElementById('ed-pr-name').value.trim();
+  if (!id || !name) return;
+  const prompt = {
+    id,
+    name,
+    category: document.getElementById('ed-pr-cat').value,
+    template: document.getElementById('ed-pr-template').value,
+    tags: editorPromptTags,
+    _custom: true,
+  };
+  const idx = customPrompts.findIndex(p => p.id === id);
+  if (idx >= 0) customPrompts[idx] = prompt;
+  else customPrompts.push(prompt);
+  saveCustomItems();
+  editorRefreshView();
+}
+
+// -- Skill form
+function editorBuildSkillForm(body, item) {
+  body.replaceChildren();
+  const fields = [
+    { label: 'Slug', id: 'ed-sk-slug', val: item.slug, ph: 'my-skill', disabled: !editorIsNew },
+    { label: 'Name', id: 'ed-sk-name', val: item.name, ph: 'My Skill' },
+    { label: 'Description', id: 'ed-sk-desc', val: item.description, ph: 'One-line description' },
+    { label: 'Category', id: 'ed-sk-cat', val: item.category, ph: 'injection' },
+  ];
+  for (const f of fields) {
+    const row = document.createElement('div');
+    row.className = 'settings-row';
+    const label = document.createElement('label');
+    label.className = 'settings-label-sm';
+    label.textContent = f.label;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'settings-inp';
+    inp.id = f.id;
+    inp.value = f.val || '';
+    inp.placeholder = f.ph || '';
+    inp.spellcheck = false;
+    inp.style.flex = '1';
+    if (f.disabled) inp.disabled = true;
+    row.appendChild(label);
+    row.appendChild(inp);
+    body.appendChild(row);
+  }
+  const bodyLabel = document.createElement('div');
+  bodyLabel.className = 'pane-label';
+  bodyLabel.textContent = 'METHODOLOGY (MARKDOWN)';
+  body.appendChild(bodyLabel);
+  const ta = document.createElement('textarea');
+  ta.className = 'editor-ta editor-ta-lg';
+  ta.id = 'ed-sk-body';
+  ta.value = item.body || '';
+  ta.placeholder = '# My Skill\n\n## Steps\n1. First step...\n2. Second step...';
+  ta.spellcheck = false;
+  body.appendChild(ta);
+}
+
+function editorSaveSkill() {
+  const slug = document.getElementById('ed-sk-slug').value.trim();
+  const name = document.getElementById('ed-sk-name').value.trim();
+  if (!slug || !name) return;
+  customSkills[slug] = {
+    slug,
+    name,
+    description: document.getElementById('ed-sk-desc').value.trim(),
+    category: document.getElementById('ed-sk-cat').value.trim(),
+    body: document.getElementById('ed-sk-body').value,
+    _custom: true,
+  };
+  saveCustomItems();
+  editorRefreshView();
+}
+
+// -- Add edit buttons to browser views
+
+function addEditBtnToWfCard(wf, card) {
+  if (!wf._custom) return;
+  const badge = document.createElement('span');
+  badge.className = 'item-editor-custom-badge';
+  badge.textContent = 'custom';
+  card.querySelector('.ai-wf-card-name')?.appendChild(badge);
+  card.addEventListener('dblclick', e => { e.stopPropagation(); editorOpen('workflow', wf); });
+}
+
+function addEditBtnToPromptItem(p, item) {
+  if (!p._custom) return;
+  const badge = document.createElement('span');
+  badge.className = 'item-editor-custom-badge';
+  badge.textContent = 'custom';
+  item.querySelector('.ai-prompt-item-name')?.appendChild(badge);
+  item.addEventListener('dblclick', e => { e.stopPropagation(); editorOpen('prompt', p); });
 }
 
 async function probeModelCapability() {
@@ -4639,7 +5731,8 @@ function loadSettingsUI() {
   setVal('ai-oob-token', settings.engagementOobToken || '');
   updatePersonaPreview();
   // Update quick-switch buttons
-  document.querySelectorAll('.ai-agent-btn').forEach(b => b.classList.toggle('active', b.dataset.agent === (settings.aiPersona || 'pentester')));
+  const chatAgentSel = document.getElementById('ai-chat-agent-sel');
+  if (chatAgentSel) chatAgentSel.value = settings.aiPersona || 'pentester';
   updateSafetyStatus();
   renderVulnClassTable();
   renderMRRules();
@@ -8838,6 +9931,7 @@ let aiNextSessionId = 1;
 let aiInputHistory = [];
 let aiInputHistIdx = -1;
 let aiInputDraft = "";
+let aiPendingRequestCtx = null;
 
 // Tool executor — runs tools locally in panel.js where all extension state lives
 async function aiExecTool(name, args) {
@@ -9289,6 +10383,7 @@ function pentestCreateProject(data) {
     config: {
       environment: data.environment || 'unknown',
       mode: data.mode || 'ask',
+      agent: data.agent || 'pentester',
       vulnModes: {},
       allowBruteforce: data.allowBruteforce || false,
       allowDestructive: data.allowDestructive || false,
@@ -9296,7 +10391,7 @@ function pentestCreateProject(data) {
       oobToken: data.oobToken || '',
     },
     workflow: {
-      selectedId: data.workflowId || 'full-pentest',
+      selectedId: data.workflowId || '',
     },
     findings: [],
     notes: '',
@@ -9339,57 +10434,185 @@ function pentestAddFinding(projectId, finding) {
 // ── Project list & context bar rendering ────────────────────────────────────
 
 function pentestRenderProjectList() {
-  const container = document.getElementById('ai-project-list');
-  if (!container) return;
-  container.replaceChildren();
-  for (const proj of pentestProjects) {
-    const item = document.createElement('div');
-    item.className = 'ai-project-item' + (proj.id === pentestActiveProjectId ? ' active' : '');
-    const findingCount = (proj.findings || []).length;
-    item.innerHTML = '<span class="ai-proj-name"></span>' +
-      (findingCount > 0 ? '<span class="ai-proj-findings">' + findingCount + 'f</span>' : '') +
-      '<span class="ai-proj-del" title="Delete project">&times;</span>';
-    item.querySelector('.ai-proj-name').textContent = proj.name;
-    item.addEventListener('click', () => pentestActivateProject(proj.id));
-    item.querySelector('.ai-proj-del').addEventListener('click', e => {
-      e.stopPropagation();
-      if (confirm('Delete project "' + proj.name + '"?')) pentestDeleteProject(proj.id);
-    });
-    container.appendChild(item);
+  // Populate project selector dropdown
+  const sel = document.getElementById('ai-project-sel');
+  if (sel) {
+    sel.replaceChildren();
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = 'No project';
+    sel.appendChild(noneOpt);
+    for (const proj of pentestProjects) {
+      const opt = document.createElement('option');
+      opt.value = proj.id;
+      opt.textContent = proj.name + ((proj.findings || []).length > 0 ? ' (' + proj.findings.length + 'f)' : '');
+      sel.appendChild(opt);
+    }
+    sel.value = pentestActiveProjectId || '';
   }
+  // Render right panel config
+  pentestRenderRightPanel();
 }
 
 function pentestRenderContextBar() {
-  const bar = document.getElementById('ai-context-bar');
-  if (!bar) return;
+  // Context bar was replaced by the right panel subtabs — delegate
+  pentestRenderRightPanel();
+}
+
+// ── Right Panel (Config + Memory + Findings) ────────────────────────────────
+
+let workflowMemory = {
+  currentStep: null,
+  notes: '',
+  context: '',
+  requests: [],
+  findings: [],
+};
+
+function pentestRenderRightPanel() {
   const proj = pentestGetActive();
+  const noProj = document.getElementById('ai-rp-no-project');
+  const cfgDiv = document.getElementById('ai-rp-config');
   if (!proj) {
-    bar.classList.add('hidden');
+    if (noProj) noProj.classList.remove('hidden');
+    if (cfgDiv) cfgDiv.classList.add('hidden');
     return;
   }
-  bar.classList.remove('hidden');
-  const nameEl = document.getElementById('ai-ctx-name');
-  const scopeEl = document.getElementById('ai-ctx-scope');
-  const findingsEl = document.getElementById('ai-ctx-findings');
-  if (nameEl) nameEl.textContent = proj.name;
-  if (scopeEl) {
-    const inCount = (proj.scope?.inScope || []).length;
-    const outCount = (proj.scope?.outScope || []).length;
-    scopeEl.textContent = inCount + ' in-scope' + (outCount > 0 ? ', ' + outCount + ' excluded' : '');
+  if (noProj) noProj.classList.add('hidden');
+  if (cfgDiv) cfgDiv.classList.remove('hidden');
+
+  // Scope
+  const scopeIn = document.getElementById('ai-rp-scope-in');
+  if (scopeIn) {
+    scopeIn.replaceChildren();
+    for (const s of (proj.scope?.inScope || [])) {
+      const el = document.createElement('div');
+      el.className = 'ai-rp-list-item';
+      el.textContent = s.target || s;
+      scopeIn.appendChild(el);
+    }
+    if (!proj.scope?.inScope?.length) { const e = document.createElement('div'); e.className = 'ai-rp-list-item'; e.textContent = '(none)'; e.style.opacity = '0.4'; scopeIn.appendChild(e); }
   }
-  if (findingsEl) {
-    const findings = proj.findings || [];
-    if (findings.length === 0) {
-      findingsEl.textContent = 'No findings';
+  const scopeOut = document.getElementById('ai-rp-scope-out');
+  if (scopeOut) {
+    scopeOut.replaceChildren();
+    for (const s of (proj.scope?.outScope || [])) {
+      const el = document.createElement('div');
+      el.className = 'ai-rp-list-item';
+      el.textContent = s.target || s;
+      scopeOut.appendChild(el);
+    }
+  }
+
+  // Environment + Mode
+  const envEl = document.getElementById('ai-rp-env');
+  if (envEl) envEl.textContent = proj.config?.environment || 'unknown';
+  const modeEl = document.getElementById('ai-rp-mode');
+  if (modeEl) modeEl.textContent = proj.config?.mode || 'ask';
+
+  // Agent
+  const agentEl = document.getElementById('ai-rp-agent');
+  if (agentEl) {
+    const ag = window.VOID_AGENTS?.find(a => a.id === proj.config?.agent);
+    agentEl.textContent = ag ? ag.title : (proj.config?.agent || 'Default');
+  }
+
+  // Workflow
+  const wfEl = document.getElementById('ai-rp-workflow');
+  if (wfEl) {
+    const wf = window.VOID_WORKFLOWS?.find(w => w.id === proj.workflow?.selectedId);
+    wfEl.textContent = wf ? wf.name : 'None';
+  }
+
+  // Safety
+  const bruteEl = document.getElementById('ai-rp-brute');
+  if (bruteEl) {
+    bruteEl.textContent = proj.config?.allowBruteforce ? 'Bruteforce ON' : 'Bruteforce OFF';
+    bruteEl.className = 'ai-rp-badge ' + (proj.config?.allowBruteforce ? 'on' : 'off');
+  }
+  const destEl = document.getElementById('ai-rp-destructive');
+  if (destEl) {
+    destEl.textContent = proj.config?.allowDestructive ? 'Destructive ON' : 'Destructive OFF';
+    destEl.className = 'ai-rp-badge ' + (proj.config?.allowDestructive ? 'on' : 'off');
+  }
+
+  // Credentials
+  const credsEl = document.getElementById('ai-rp-creds');
+  if (credsEl) {
+    const c = proj.credentials || {};
+    if (c.username) credsEl.textContent = c.authType + ': ' + c.username;
+    else credsEl.textContent = 'None configured';
+  }
+
+  // Render findings in right panel
+  pentestRenderRightFindings();
+  pentestRenderMemoryPanel();
+}
+
+function pentestRenderRightFindings() {
+  const proj = pentestGetActive();
+  const list = document.getElementById('ai-rp-findings-list');
+  if (!list) return;
+  list.replaceChildren();
+  const findings = proj?.findings || [];
+  if (!findings.length) {
+    const empty = document.createElement('div');
+    empty.className = 'ai-rp-empty';
+    empty.textContent = 'No findings yet';
+    list.appendChild(empty);
+    return;
+  }
+  const sevColors = { critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#22c55e', info: '#3b82f6' };
+  for (const f of findings) {
+    const card = document.createElement('div');
+    card.className = 'ai-rp-finding';
+    const title = document.createElement('span');
+    title.className = 'ai-rp-finding-title';
+    title.textContent = f.title || f.type || 'Finding';
+    card.appendChild(title);
+    if (f.severity) {
+      const sev = document.createElement('span');
+      sev.className = 'ai-rp-finding-sev';
+      sev.textContent = f.severity.toUpperCase();
+      sev.style.background = 'color-mix(in srgb, transparent 85%, ' + (sevColors[f.severity] || '#888') + ' 15%)';
+      sev.style.color = sevColors[f.severity] || '#888';
+      card.appendChild(sev);
+    }
+    if (f.url) {
+      const url = document.createElement('div');
+      url.style.cssText = 'font-size:10px;font-family:var(--mono);opacity:0.6;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      url.textContent = f.url;
+      card.appendChild(url);
+    }
+    list.appendChild(card);
+  }
+}
+
+function pentestRenderMemoryPanel() {
+  const noMem = document.getElementById('ai-rp-no-memory');
+  const memDiv = document.getElementById('ai-rp-memory');
+  if (!workflowMemory.currentStep) {
+    if (noMem) noMem.classList.remove('hidden');
+    if (memDiv) memDiv.classList.add('hidden');
+    return;
+  }
+  if (noMem) noMem.classList.add('hidden');
+  if (memDiv) memDiv.classList.remove('hidden');
+
+  const stepEl = document.getElementById('ai-mem-step');
+  if (stepEl) stepEl.textContent = workflowMemory.currentStep;
+  const notesEl = document.getElementById('ai-mem-notes');
+  if (notesEl) notesEl.textContent = workflowMemory.notes || '(empty)';
+  const ctxEl = document.getElementById('ai-mem-context');
+  if (ctxEl) ctxEl.textContent = workflowMemory.context ? (workflowMemory.context.length + ' chars accumulated') : 'None';
+  const reqCountEl = document.getElementById('ai-mem-req-count');
+  if (reqCountEl) reqCountEl.textContent = workflowMemory.requests.length;
+  const reqEl = document.getElementById('ai-mem-requests');
+  if (reqEl) {
+    if (workflowMemory.requests.length === 0) {
+      reqEl.textContent = '(none captured)';
     } else {
-      const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-      for (const f of findings) counts[f.severity || 'info']++;
-      const parts = [];
-      if (counts.critical) parts.push('<span class="sev-c">' + counts.critical + 'C</span>');
-      if (counts.high) parts.push('<span class="sev-h">' + counts.high + 'H</span>');
-      if (counts.medium) parts.push('<span class="sev-m">' + counts.medium + 'M</span>');
-      if (counts.low) parts.push('<span class="sev-l">' + counts.low + 'L</span>');
-      findingsEl.innerHTML = parts.join(' ') || findings.length + ' findings';
+      reqEl.textContent = workflowMemory.requests.slice(-10).map(r => r.method + ' ' + r.url).join('\n');
     }
   }
 }
@@ -9524,32 +10747,83 @@ function toggleSlidePanel(panelId) {
 let wizStep = 0;
 let wizInScope = [];
 let wizOutScope = [];
+let wizEditId = null;
 
-function wizOpen() {
+function wizOpen(editProject) {
   wizStep = 0;
   wizInScope = [];
   wizOutScope = [];
-  document.getElementById('wiz-name').value = '';
-  document.getElementById('wiz-desc').value = '';
-  document.getElementById('wiz-username').value = '';
-  document.getElementById('wiz-password').value = '';
-  document.getElementById('wiz-login-url').value = '';
-  document.getElementById('wiz-api-token').value = '';
-  document.getElementById('wiz-extra-headers').value = '';
-  document.getElementById('wiz-auth-type').value = 'FORM';
-  document.getElementById('wiz-env').value = settings.engagementEnv || 'unknown';
-  document.getElementById('wiz-mode').value = settings.engagementMode || 'ask';
+  wizEditId = null;
+  const p = editProject || {};
+  document.getElementById('wiz-name').value = p.name || '';
+  document.getElementById('wiz-desc').value = p.description || '';
+  document.getElementById('wiz-username').value = p.credentials?.username || '';
+  document.getElementById('wiz-password').value = p.credentials?.password || '';
+  document.getElementById('wiz-login-url').value = p.credentials?.loginUrl || '';
+  document.getElementById('wiz-api-token').value = p.credentials?.apiToken || '';
+  document.getElementById('wiz-extra-headers').value = p.credentials?.extraHeaders || '';
+  document.getElementById('wiz-auth-type').value = p.credentials?.authType || 'FORM';
+  document.getElementById('wiz-env').value = p.config?.environment || settings.engagementEnv || 'unknown';
+  document.getElementById('wiz-mode').value = p.config?.mode || settings.engagementMode || 'ask';
   const bruteChk = document.getElementById('wiz-bruteforce');
-  if (bruteChk) bruteChk.checked = !!settings.engagementBruteforce;
+  if (bruteChk) bruteChk.checked = p.config ? !!p.config.allowBruteforce : !!settings.engagementBruteforce;
   const destChk = document.getElementById('wiz-destructive');
-  if (destChk) destChk.checked = !!settings.engagementDestructive;
+  if (destChk) destChk.checked = p.config ? !!p.config.allowDestructive : !!settings.engagementDestructive;
+  const wizOobServer = document.getElementById('wiz-oob-server');
+  if (wizOobServer) wizOobServer.value = p.config?.oobServer || settings.engagementOobServer || '';
+  const wizOobToken = document.getElementById('wiz-oob-token');
+  if (wizOobToken) wizOobToken.value = p.config?.oobToken || settings.engagementOobToken || '';
+  // Populate agent dropdown
+  const agSel = document.getElementById('wiz-agent');
+  if (agSel && window.VOID_AGENTS) {
+    agSel.replaceChildren();
+    for (const a of window.VOID_AGENTS) {
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = a.title;
+      agSel.appendChild(opt);
+    }
+    agSel.value = p.config?.agent || settings.aiPersona || 'pentester';
+  }
   // Populate workflow dropdown
   const wfSel = document.getElementById('wiz-workflow');
   if (wfSel && window.VOID_WORKFLOWS) {
-    wfSel.innerHTML = window.VOID_WORKFLOWS.map(w =>
-      '<option value="' + esc(w.id) + '">' + esc(w.name) + '</option>'
-    ).join('');
-    wizUpdateWorkflowPreview();
+    wfSel.replaceChildren();
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = '— None —';
+    wfSel.appendChild(noneOpt);
+    for (const w of window.VOID_WORKFLOWS) {
+      const opt = document.createElement('option');
+      opt.value = w.id;
+      opt.textContent = w.name;
+      wfSel.appendChild(opt);
+    }
+    wfSel.value = p.workflow?.selectedId || '';
+  }
+  // Pre-fill scope if editing
+  if (p.scope) {
+    wizInScope = (p.scope.inScope || []).map(s => s.target || s);
+    wizOutScope = (p.scope.outScope || []).map(s => typeof s === 'string' ? { target: s, reason: '' } : s);
+  }
+  if (editProject) wizEditId = editProject.id;
+  // Update title
+  const titleEl = document.querySelector('.ai-wizard-title');
+  if (titleEl) titleEl.textContent = editProject ? 'Edit Project' : 'New AI Pentest Project';
+  const createBtn = document.getElementById('ai-wizard-create');
+  if (createBtn) createBtn.textContent = editProject ? 'Save Changes' : 'Create Project';
+  // Show active session info
+  const sessionBadge = document.getElementById('wiz-session-name');
+  if (sessionBadge) {
+    const sessionSel = document.getElementById('session-configs');
+    const sessionName = sessionSel?.selectedOptions?.[0]?.textContent;
+    if (sessionSel?.value) {
+      sessionBadge.textContent = sessionName || 'Session loaded';
+      sessionBadge.className = 'wiz-session-badge active';
+    } else {
+      sessionBadge.textContent = 'No session loaded — create one in Project tab first';
+      sessionBadge.className = 'wiz-session-badge';
+    }
   }
   wizUpdateUI();
   document.getElementById('ai-wizard-overlay').classList.remove('hidden');
@@ -9564,7 +10838,7 @@ function wizNext() {
     const name = document.getElementById('wiz-name').value.trim();
     if (!name) { document.getElementById('wiz-name').focus(); return; }
   }
-  if (wizStep < 4) { wizStep++; wizUpdateUI(); }
+  if (wizStep < 3) { wizStep++; wizUpdateUI(); }
 }
 
 function wizBack() {
@@ -9584,8 +10858,8 @@ function wizUpdateUI() {
   });
   // Show/hide nav buttons
   document.getElementById('ai-wizard-back').classList.toggle('hidden', wizStep === 0);
-  document.getElementById('ai-wizard-next').classList.toggle('hidden', wizStep === 4);
-  document.getElementById('ai-wizard-create').classList.toggle('hidden', wizStep !== 4);
+  document.getElementById('ai-wizard-next').classList.toggle('hidden', wizStep === 3);
+  document.getElementById('ai-wizard-create').classList.toggle('hidden', wizStep !== 3);
   // Render scope lists
   wizRenderScopeList();
 }
@@ -9638,24 +10912,34 @@ function wizAddOutScope() {
   input.focus();
 }
 
-function wizUpdateWorkflowPreview() {
-  const sel = document.getElementById('wiz-workflow');
-  const descEl = document.getElementById('wiz-workflow-desc');
-  const stepsEl = document.getElementById('wiz-workflow-steps');
-  if (!sel || !window.VOID_WORKFLOWS) return;
-  const wf = window.VOID_WORKFLOWS.find(w => w.id === sel.value);
-  if (descEl) descEl.textContent = wf ? wf.description : '';
-  if (stepsEl && wf) {
-    stepsEl.innerHTML = (wf.steps || []).map(s =>
-      '<div class="ai-wizard-wf-step"><span class="ai-wizard-wf-step-name">' + esc(s.name) + '</span><span class="ai-wizard-wf-step-type">' + esc(s.type) + '</span></div>'
-    ).join('');
-  }
+function pentestUpdateProject(id, data) {
+  const proj = pentestProjects.find(p => p.id === id);
+  if (!proj) return;
+  proj.name = data.name;
+  proj.description = data.description;
+  proj.scope = { inScope: data.inScope || [], outScope: data.outScope || [] };
+  proj.credentials = {
+    username: data.username || '', password: data.password || '',
+    loginUrl: data.loginUrl || '', authType: data.authType || 'FORM',
+    apiToken: data.apiToken || '', extraHeaders: data.extraHeaders || '',
+  };
+  proj.config = {
+    environment: data.environment || 'unknown', mode: data.mode || 'ask',
+    agent: data.agent || 'pentester', vulnModes: proj.config?.vulnModes || {},
+    allowBruteforce: data.allowBruteforce || false,
+    allowDestructive: data.allowDestructive || false,
+    oobServer: data.oobServer || '', oobToken: data.oobToken || '',
+  };
+  proj.workflow = { selectedId: data.workflowId || '' };
+  pentestSaveProjects();
+  pentestRenderProjectList();
+  pentestRenderContextBar();
 }
 
 function wizCreate() {
   const name = document.getElementById('wiz-name').value.trim();
   if (!name) return;
-  pentestCreateProject({
+  const data = {
     name,
     description: document.getElementById('wiz-desc').value.trim(),
     inScope: wizInScope.map(s => ({ target: s })),
@@ -9666,12 +10950,20 @@ function wizCreate() {
     authType: document.getElementById('wiz-auth-type').value,
     apiToken: document.getElementById('wiz-api-token').value,
     extraHeaders: document.getElementById('wiz-extra-headers').value,
-    workflowId: document.getElementById('wiz-workflow').value,
+    workflowId: document.getElementById('wiz-workflow')?.value || '',
+    agent: document.getElementById('wiz-agent')?.value || 'pentester',
     environment: document.getElementById('wiz-env').value,
     mode: document.getElementById('wiz-mode').value,
     allowBruteforce: document.getElementById('wiz-bruteforce')?.checked || false,
     allowDestructive: document.getElementById('wiz-destructive')?.checked || false,
-  });
+    oobServer: document.getElementById('wiz-oob-server')?.value || '',
+    oobToken: document.getElementById('wiz-oob-token')?.value || '',
+  };
+  if (wizEditId) {
+    pentestUpdateProject(wizEditId, data);
+  } else {
+    pentestCreateProject(data);
+  }
   wizClose();
 }
 
@@ -10331,8 +11623,17 @@ async function aiSendMessage() {
   aiInputHistIdx = -1;
   aiInputDraft = "";
 
+  // Inject pending request context if present (from "→ AI Chat" buttons)
+  let userContent = text;
+  if (aiPendingRequestCtx) {
+    userContent = text + "\n\n```http\n" + aiPendingRequestCtx + "\n```";
+    aiPendingRequestCtx = null;
+    // Reset placeholder
+    input.placeholder = "Ask the AI to analyze traffic, test for vulns, encode payloads...";
+  }
+
   aiAddMessage("user", text);
-  aiLlmMessages.push({ role: "user", content: text });
+  aiLlmMessages.push({ role: "user", content: userContent });
   aiAddMessage("thinking", "Connecting\u2026");
 
   // Read config from Settings — use primary model config
@@ -10743,6 +12044,16 @@ document.addEventListener("DOMContentLoaded", () => {
     intrSendToIntruder({ ...editingReq, method: document.getElementById("ed-method").value, url: document.getElementById("ed-url").value, headers: rawToHeaders(document.getElementById("ed-headers").value), body: document.getElementById("ed-body").value });
     closeEditor();
   });
+  document.getElementById("ed-to-ai").addEventListener("click", () => {
+    if (!editingReq) return;
+    sendToAIChat({
+      method:     document.getElementById("ed-method").value,
+      url:        document.getElementById("ed-url").value,
+      rawHeaders: document.getElementById("ed-headers").value,
+      body:       document.getElementById("ed-body").value,
+    });
+    closeEditor();
+  });
   document.getElementById("ed-to-poc").addEventListener("click", () => { if (editingReq) pocLoadEntry(editingReq); });
   document.getElementById("ed-to-notes").addEventListener("click", () => { if (editingReq) notesFromEntry(editingReq); });
   document.getElementById("ed-open").addEventListener("click", () => { if (editingReq) chrome.tabs.create({ url: editingReq.url }); });
@@ -11051,6 +12362,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!tab) return null;
     return { method: tab.method, url: tab.url, headers: rawToHeaders(tab.headers || ""), body: tab.body || "", respBody: tab.response?.body || "", respHeaders: tab.response?.headers || {}, status: tab.response?.status };
   }
+  document.getElementById("rep-to-ai").addEventListener("click", () => {
+    saveRepTabState();
+    const tab = repTabs.find(t => t.id === repActiveTab);
+    if (tab) sendToAIChat({ method: tab.method, url: tab.url, rawHeaders: tab.headers, body: tab.body });
+  });
   document.getElementById("rep-to-poc").addEventListener("click", () => { const e = repCurrentEntry(); if (e) pocLoadEntry(e); });
   document.getElementById("rep-to-notes").addEventListener("click", () => { const e = repCurrentEntry(); if (e) notesFromEntry(e); });
   document.getElementById("rep-open").addEventListener("click", () => { const tab = repTabs.find(t => t.id === repActiveTab); if (tab?.url) chrome.tabs.create({ url: tab.url }); });
@@ -11093,6 +12409,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // Right Repeater action buttons
   document.getElementById("rep2-to-intr").addEventListener("click", () => {
     intrSendToIntruder({ method: document.getElementById("rep2-method").value, url: document.getElementById("rep2-url").value, rawHeaders: document.getElementById("rep2-headers").value, body: document.getElementById("rep2-body-ta").value });
+  });
+  document.getElementById("rep2-to-ai").addEventListener("click", () => {
+    sendToAIChat({ method: document.getElementById("rep2-method").value, url: document.getElementById("rep2-url").value, rawHeaders: document.getElementById("rep2-headers").value, body: document.getElementById("rep2-body-ta").value });
   });
   document.getElementById("rep2-to-poc").addEventListener("click", () => {
     const url = document.getElementById("rep2-url").value;
@@ -11137,6 +12456,14 @@ document.addEventListener("DOMContentLoaded", () => {
       rawHeaders: parsed.headers,
       body:       parsed.body,
     });
+  });
+  document.getElementById("intr-to-ai").addEventListener("click", () => {
+    const parsed = intrParseRaw(
+      intrStripPositions(document.getElementById("intr-request").value),
+      document.getElementById("intr-method").value,
+      document.getElementById("intr-url").value.trim()
+    );
+    sendToAIChat({ method: parsed.method, url: parsed.url, rawHeaders: parsed.headers, body: parsed.body });
   });
   document.getElementById("intr-reflect-only").addEventListener("change", e => {
     intrReflectOnly = e.target.checked;
@@ -12086,16 +13413,23 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.getElementById("ai-new-chat").addEventListener("click", () => aiNewSession());
 
-    // Quick agent switch
-    document.querySelectorAll('.ai-agent-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const agentId = btn.dataset.agent;
-        settings.aiPersona = agentId;
+    // Quick agent switch (dropdown)
+    const agentSel = document.getElementById('ai-chat-agent-sel');
+    if (agentSel && window.VOID_AGENTS) {
+      agentSel.replaceChildren();
+      for (const a of window.VOID_AGENTS) {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.title;
+        agentSel.appendChild(opt);
+      }
+      agentSel.value = settings.aiPersona || 'pentester';
+      agentSel.addEventListener('change', () => {
+        settings.aiPersona = agentSel.value;
         saveSettings();
         updatePersonaPreview();
-        document.querySelectorAll('.ai-agent-btn').forEach(b => b.classList.toggle('active', b.dataset.agent === agentId));
       });
-    });
+    }
 
     // Autonomous/Interactive mode toggle
     document.querySelectorAll('.ai-mode-btn').forEach(btn => {
@@ -12126,6 +13460,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // New project button
     document.getElementById('ai-new-project')?.addEventListener('click', wizOpen);
+
+    // Project selector dropdown
+    document.getElementById('ai-project-sel')?.addEventListener('change', e => {
+      const val = e.target.value;
+      if (val) pentestActivateProject(val);
+      else pentestDeactivateProject();
+      pentestRenderProjectList();
+      pentestRenderContextBar();
+    });
+
+    // AI Chat subtab switching
+    document.querySelectorAll('.ai-main-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.ai-main-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset.aitab2;
+        document.querySelectorAll('.ai-main-pane').forEach(p => p.classList.toggle('hidden', p.dataset.aitab2 !== target));
+      });
+    });
+
+    // Edit project from config pane
+    document.getElementById('ai-rp-edit-btn')?.addEventListener('click', () => {
+      const proj = pentestGetActive();
+      if (proj) wizOpen(proj);
+    });
 
     // Context bar buttons
     document.getElementById('ai-ctx-deactivate')?.addEventListener('click', pentestDeactivateProject);
@@ -12273,6 +13632,34 @@ document.addEventListener("DOMContentLoaded", () => {
     bg({ type: "UPDATE_SETTINGS", settings });
   });
   loadAll();
+  loadCustomItems();
+
+  // ── Item Editor CRUD wiring ──────────────────────────────────────────────
+  document.getElementById('item-editor-close')?.addEventListener('click', editorClose);
+  document.getElementById('item-editor-cancel')?.addEventListener('click', editorClose);
+  document.getElementById('item-editor-save')?.addEventListener('click', editorSave);
+  document.getElementById('item-editor-delete')?.addEventListener('click', () => {
+    if (confirm('Delete this custom item?')) editorDelete();
+  });
+  document.getElementById('ai-agent-new')?.addEventListener('click', () => editorOpen('agent'));
+  document.getElementById('ai-agent-edit')?.addEventListener('click', () => {
+    const sel = document.getElementById('ai-persona');
+    if (!sel) return;
+    const agent = window.VOID_AGENTS.find(a => a.id === sel.value);
+    if (agent) editorOpen('agent', agent);
+  });
+  document.getElementById('ai-wf-new')?.addEventListener('click', () => editorOpen('workflow'));
+  document.getElementById('ai-prompt-new')?.addEventListener('click', () => editorOpen('prompt'));
+  document.getElementById('ai-skill-new')?.addEventListener('click', () => editorOpen('skill'));
+  document.getElementById('ai-wf-edit')?.addEventListener('click', () => {
+    const wf = window.VOID_WORKFLOWS.find(w => w.id === aiWfSelectedId);
+    if (wf) editorOpen('workflow', wf);
+  });
+  document.getElementById('ai-prompt-edit')?.addEventListener('click', () => {
+    const p = window.VOID_PROMPTS.find(pr => pr.id === aiPromptSelectedId);
+    if (p) editorOpen('prompt', p);
+  });
 
   // startPoll is called by showTab("intercept") — don't start it unconditionally
+
 });
