@@ -5260,9 +5260,12 @@ function renderWorkflowsBrowser() {
   for (const wf of window.VOID_WORKFLOWS) {
     const card = document.createElement('div');
     card.className = 'ai-wf-card' + (wf.id === aiWfSelectedId ? ' active' : '');
-    card.innerHTML = '<div class="ai-wf-card-name">' + esc(wf.name) + '</div>' +
+    const marker = ucIsCustom('workflows', wf.id) ? ' · custom'
+      : ucIsModified('workflows', wf.id) ? ' · edited' : '';
+    card.innerHTML = '<div class="ai-wf-card-name">' + esc(wf.name) +
+      '<span class="ai-wf-level ai-wf-level-' + esc(wf.level || 'atomic') + '">' + esc(wf.level || 'atomic') + '</span></div>' +
       '<div class="ai-wf-card-desc">' + esc(wf.description) + '</div>' +
-      '<div class="ai-wf-card-meta">' + esc(wf.category) + ' · ' + wf.steps.length + ' steps</div>';
+      '<div class="ai-wf-card-meta">' + esc(wf.category || '') + ' · ' + (wf.steps || []).length + ' steps' + marker + '</div>';
     card.addEventListener('click', () => {
       aiWfSelectedId = wf.id;
       renderWorkflowsBrowser();
@@ -5284,16 +5287,71 @@ function renderWorkflowDetail(wf) {
   if (descEl) descEl.textContent = wf.description;
   if (stepsEl) {
     stepsEl.replaceChildren();
-    wf.steps.forEach((s, i) => {
-      const row = document.createElement('div');
-      row.className = 'ai-wf-step-row';
-      row.innerHTML = '<span class="ai-wf-step-idx">' + (i + 1) + '</span>' +
-        '<span class="ai-wf-step-name">' + esc(s.name) + '</span>' +
-        '<span class="ai-wf-step-type">' + esc(s.type) + '</span>' +
-        (s.dependsOn?.length ? '<span class="ai-wf-step-deps">after: ' + s.dependsOn.map(d => esc(d)).join(', ') + '</span>' : '');
-      stepsEl.appendChild(row);
-    });
+    (wf.steps || []).forEach((s, i) => stepsEl.appendChild(renderWorkflowStep(s, i)));
   }
+}
+
+// A step is the substance of a workflow — goal, decision tree and validation —
+// not just a name and a type, so the detail pane renders all of it.
+function renderWorkflowStep(s, i) {
+  const wrap = el('div', 'ai-wf-step');
+
+  const row = el('div', 'ai-wf-step-row');
+  row.innerHTML = '<span class="ai-wf-step-idx">' + (i + 1) + '</span>' +
+    '<span class="ai-wf-step-name">' + esc(s.name) + '</span>' +
+    '<span class="ai-wf-step-type">' + esc(s.type) + '</span>' +
+    (s.intrusive ? '<span class="ai-wf-step-intrusive" title="Sends attack traffic">intrusive</span>' : '') +
+    (s.dependsOn?.length ? '<span class="ai-wf-step-deps">after: ' + s.dependsOn.map(d => esc(d)).join(', ') + '</span>' : '');
+  wrap.appendChild(row);
+
+  if (s.goal) wrap.appendChild(txt('div', 'ai-wf-step-goal', s.goal));
+
+  // Phases pull in other workflows; show what they cover without making the user
+  // go and resolve each reference.
+  if (s.includes?.length) {
+    const inc = el('div', 'ai-wf-step-includes');
+    for (const c of s.includes) {
+      const item = el('div', 'ai-wf-include');
+      item.appendChild(txt('span', 'ai-wf-include-name', c.name));
+      if (c.goal) item.appendChild(txt('span', 'ai-wf-include-goal', c.goal));
+      inc.appendChild(item);
+    }
+    wrap.appendChild(inc);
+  }
+  if (s.extraChecks?.length) {
+    wrap.appendChild(txt('div', 'ai-wf-step-checks', 'extra checks: ' + s.extraChecks.join(', ')));
+  }
+
+  if (s.decisionTree?.length) {
+    const tree = el('div', 'ai-wf-dtree');
+    tree.appendChild(txt('div', 'pane-label', 'DECISION TREE'));
+    s.decisionTree.forEach((d, di) => {
+      const node = el('div', 'ai-wf-dnode');
+      node.appendChild(txt('span', 'ai-wf-dnode-idx', String(di + 1)));
+      const body = el('div', 'ai-wf-dnode-body');
+      body.appendChild(txt('div', 'ai-wf-dnode-action', d.action));
+      if (d.approach) body.appendChild(txt('div', 'ai-wf-dnode-approach', d.approach));
+      if (d.ifPositive) body.appendChild(txt('div', 'ai-wf-dnode-pos', '✓ ' + d.ifPositive));
+      if (d.ifNegative) body.appendChild(txt('div', 'ai-wf-dnode-neg', '✗ ' + d.ifNegative));
+      if (d.stopWhen) body.appendChild(txt('div', 'ai-wf-dnode-stop', 'stop when: ' + d.stopWhen));
+      node.appendChild(body);
+      tree.appendChild(node);
+    });
+    wrap.appendChild(tree);
+  }
+
+  if (s.toolGuidance?.aiShould) {
+    wrap.appendChild(txt('div', 'ai-wf-step-guidance', s.toolGuidance.aiShould));
+  }
+  const v = s.validation || {};
+  if (v.contextCheck || v.impactAssessment || v.mustReproduce) {
+    const val = el('div', 'ai-wf-step-validation');
+    if (v.mustReproduce) val.appendChild(txt('span', 'ai-wf-badge', 'must reproduce'));
+    if (v.contextCheck) val.appendChild(txt('div', '', 'Context: ' + v.contextCheck));
+    if (v.impactAssessment) val.appendChild(txt('div', '', 'Impact: ' + v.impactAssessment));
+    wrap.appendChild(val);
+  }
+  return wrap;
 }
 
 // ── Prompts Browser ─────────────────────────────────────────────────────────

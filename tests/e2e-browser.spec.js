@@ -69,7 +69,7 @@ test.describe('Void Extension AI Pentest', () => {
   test('21+ tabs', async () => { expect(await page.locator('[data-tab]').count()).toBeGreaterThanOrEqual(20); });
   test('VOID_AGENTS=11', async () => { expect(await page.evaluate(() => window.VOID_AGENTS?.length)).toBe(11); });
   test('VOID_SKILLS=32', async () => { expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS||{}).length)).toBe(32); });
-  test('VOID_WORKFLOWS=6', async () => { expect(await page.evaluate(() => window.VOID_WORKFLOWS?.length)).toBe(6); });
+  test('VOID_WORKFLOWS=23', async () => { expect(await page.evaluate(() => window.VOID_WORKFLOWS?.length)).toBe(23); });
   test('VOID_PROMPTS=8', async () => { expect(await page.evaluate(() => window.VOID_PROMPTS?.length)).toBe(8); });
   test('VOID_PAYLOADS=10', async () => { expect(await page.evaluate(() => Object.keys(window.VOID_PAYLOADS||{}).length)).toBe(10); });
   test('VOID_VULN_CLASSES=25', async () => { expect(await page.evaluate(() => window.VOID_VULN_CLASSES?.length)).toBe(25); });
@@ -550,7 +550,7 @@ test.describe('Void Extension AI Pentest', () => {
       workflows: ucBuiltin.workflows.length,
       prompts: ucBuiltin.prompts.length,
     }));
-    expect(snap).toEqual({ agents: 11, skills: 32, workflows: 6, prompts: 8 });
+    expect(snap).toEqual({ agents: 11, skills: 32, workflows: 23, prompts: 8 });
   });
 
   test('UC: creating a prompt adds it to the live registry', async () => {
@@ -679,8 +679,39 @@ test.describe('Void Extension AI Pentest', () => {
     expect(await page.evaluate(() => window.VOID_PROMPTS.some(p => p.id === 'e2e-custom'))).toBe(false);
     expect(await page.evaluate(() => window.VOID_PROMPTS.length)).toBe(8);
     expect(await page.evaluate(() => window.VOID_AGENTS.length)).toBe(11);
-    expect(await page.evaluate(() => window.VOID_WORKFLOWS.length)).toBe(6);
+    expect(await page.evaluate(() => window.VOID_WORKFLOWS.length)).toBe(23);
     expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS).length)).toBe(32);
+  });
+
+  test('Workflows: detail renders goals and decision trees', async () => {
+    // The detail pane lives inside the Workflows subtab, so activate it first —
+    // otherwise the pane is hidden by its ancestor and nothing is visible.
+    await page.evaluate(() => showTab('settings'));
+    await page.locator('.ai-settings-tab[data-aitab="workflows"]').click();
+    await page.evaluate(() => {
+      const wf = window.VOID_WORKFLOWS.find(w => w.id === 'sqli-form');
+      aiWfSelectedId = wf.id;
+      renderWorkflowDetail(wf);
+    });
+    await expect(page.locator('#ai-wf-detail')).toBeVisible();
+    // The point of the port is that a step shows its decision tree, not just a name.
+    expect(await page.locator('.ai-wf-dnode').count()).toBeGreaterThan(3);
+    await expect(page.locator('.ai-wf-step-goal').first()).toBeVisible();
+    await expect(page.locator('#ai-wf-steps')).toContainText('single quote');
+    await expect(page.locator('.ai-wf-step-intrusive').first()).toBeVisible();
+    await expect(page.locator('#ai-wf-steps')).toContainText('must reproduce');
+  });
+
+  test('Workflows: an engagement renders phases with the workflows they cover', async () => {
+    await page.evaluate(() => {
+      const wf = window.VOID_WORKFLOWS.find(w => w.id === 'full-pentest');
+      renderWorkflowDetail(wf);
+    });
+    expect(await page.locator('.ai-wf-step').count()).toBe(6);
+    await expect(page.locator('#ai-wf-steps')).toContainText('Reconnaissance');
+    // Phases inline the goals of the workflows they pull in.
+    expect(await page.locator('.ai-wf-include').count()).toBeGreaterThan(3);
+    await expect(page.locator('.ai-wf-step-checks').first()).toContainText('csrf');
   });
 
   // ═══ Console health ═══

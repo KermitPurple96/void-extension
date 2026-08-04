@@ -2900,6 +2900,31 @@ html.theme-hacker {
 .ai-context-bar .btn-xs { padding: 3px 8px; font-size: 11px; }
 
 /* ── Project creation wizard ────────────────────────────── */
+/* Workflow steps — Agent-zero shaped detail */
+.ai-wf-step { border-left: 2px solid var(--border); padding-left: 10px; margin-bottom: 14px; }
+.ai-wf-step-goal { font-size: 12px; margin: 4px 0 6px; opacity: 0.85; }
+.ai-wf-step-intrusive { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: rgba(229,85,85,0.15); color: var(--red, #e55); }
+.ai-wf-level { font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; border: 1px solid var(--border); opacity: 0.8; }
+.ai-wf-level-engagement { border-color: var(--accent); color: var(--accent); }
+.ai-wf-level-composite { border-color: var(--green, #3fb950); color: var(--green, #3fb950); }
+.ai-wf-step-includes { display: flex; flex-direction: column; gap: 3px; margin: 4px 0; }
+.ai-wf-include { font-size: 11px; padding: 3px 6px; background: var(--bg2); border-radius: 3px; }
+.ai-wf-include-name { font-weight: 600; margin-right: 6px; }
+.ai-wf-include-goal { opacity: 0.6; }
+.ai-wf-step-checks { font-size: 11px; opacity: 0.7; margin: 4px 0; font-family: var(--mono); }
+.ai-wf-dtree { margin: 6px 0; }
+.ai-wf-dnode { display: flex; gap: 6px; margin-bottom: 6px; font-size: 11px; }
+.ai-wf-dnode-idx { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--border); display: flex; align-items: center; justify-content: center; font-size: 9px; }
+.ai-wf-dnode-body { flex: 1; min-width: 0; }
+.ai-wf-dnode-action { font-weight: 600; }
+.ai-wf-dnode-approach { opacity: 0.6; font-style: italic; }
+.ai-wf-dnode-pos { color: var(--green, #3fb950); }
+.ai-wf-dnode-neg { color: var(--red, #e55); opacity: 0.85; }
+.ai-wf-dnode-stop { opacity: 0.7; font-family: var(--mono); }
+.ai-wf-step-guidance { font-size: 11px; opacity: 0.75; margin: 4px 0; padding-left: 6px; border-left: 2px solid var(--border); }
+.ai-wf-step-validation { font-size: 11px; opacity: 0.75; margin-top: 4px; }
+.ai-wf-badge { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: var(--bg2); margin-right: 6px; }
+
 /* User content editor (persona / skill / workflow / prompt) */
 .uc-toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .uc-editor-modal { width: 780px; }
