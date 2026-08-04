@@ -195,6 +195,55 @@ const t = (name, ok) => { ok ? pass++ : (fail++, console.log("  FAIL: " + name))
     !diskJson.includes("pw123") && !diskJson.includes("tok-abc") &&
     !diskJson.includes("battery staple") && !diskJson.includes("brand new passphrase"));
 
+  // ── 9b. Key stretching: new vaults at 600k, stored values clamped ──
+  t("new vaults stored at 600k", store.voidVault.iterations === 600000);
+  const clamp = S.vaultClampIterations;
+  t("clamp: below the floor is raised", clamp(1) === 100000);
+  t("clamp: above the ceiling is capped", clamp(1e10) === 5000000);
+  t("clamp: a sane value passes through", clamp(250000) === 250000);
+  t("clamp: undefined falls back to the default", clamp(undefined) === 600000);
+  t("clamp: NaN falls back to the default", clamp("not a number") === 600000);
+  t("clamp: null does not become 0", clamp(null) === 100000);
+
+  // A vault created by an older build (250k) must still open — unlock derives at
+  // the count stored with the vault, not at whatever the current constant is.
+  const store3 = {};
+  const sb3 = vm.createContext({
+    crypto: require("crypto").webcrypto, TextEncoder, TextDecoder,
+    btoa: sandbox.btoa, atob: sandbox.atob, console,
+    chrome: { storage: { local: {
+      get: (keys, cb) => { const k = Array.isArray(keys) ? keys : [keys];
+        cb(Object.fromEntries(k.filter(x => x in store3).map(x => [x, store3[x]]))); },
+      set: (obj, cb) => { Object.assign(store3, JSON.parse(JSON.stringify(obj))); cb && cb(); },
+    } } },
+    settings: {}, pentestProjects: [],
+  });
+  vm.runInContext(vaultSrc + EPILOGUE, sb3);
+  sb3.__v.markLoaded();
+  await sb3.vaultCreate("an older vault passphrase");
+  sb3.settings.aiPrimaryKey = "key-from-the-old-build";
+  await sb3.vaultSealSettings(sb3.settings);
+
+  // Rewrite the metadata the way a 250k-era build would have left it, re-deriving
+  // the verifier at that count so it is genuinely an old vault, not a corrupt one.
+  const oldIter = 250000;
+  const oldKey = await sb3.vaultDeriveKey("an older vault passphrase", sb3.b64dec(sb3.__v.meta.salt), oldIter);
+  const oldVerifier = await sb3.vaultEncrypt("void-vault-v1", oldKey);
+  const oldSecret = await sb3.vaultEncrypt("key-from-the-old-build", oldKey);
+  sb3.__v.meta.iterations = oldIter;
+  sb3.__v.meta.verifier = oldVerifier;
+  sb3.settings.__secrets = { aiPrimaryKey: oldSecret };
+  sb3.vaultLock();
+
+  t("a 250k-era vault still unlocks", (await sb3.vaultUnlock("an older vault passphrase")) === true);
+  t("its secrets still decrypt", sb3.settings.aiPrimaryKey === "key-from-the-old-build");
+  t("wrong passphrase still rejected at the old count", (await (async () => {
+    sb3.vaultLock();
+    const r = await sb3.vaultUnlock("the wrong one");
+    await sb3.vaultUnlock("an older vault passphrase");
+    return r;
+  })()) === false);
+
   // ── 10. Legacy plaintext is not destroyed by an unrelated save ──
   // Fresh sandbox: simulate an upgrade from a build that stored keys in the clear.
   const store2 = {};

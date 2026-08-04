@@ -7,7 +7,7 @@ Phases 1-6 COMPLETE: 8 data files (651KB skills, 519 payloads, 11 agents, 6 work
 
 All three open code-review items are fixed (secret vault, dead code, wizard null-safety),
 then a 4-agent code review over that work found and fixed 2 CRITICAL + 4 HIGH on top.
-Tests: 539 Node (`npm test`) + 66 Playwright (`npm run test:browser`), all passing.
+Tests: 556 Node (`npm test`) + 66 Playwright (`npm run test:browser`), all passing.
 
 ## Next
 1. **Test in real browser** — load extension, set a vault passphrase, create a pentest project, run AI chat against DVWA with deepseek-v4-pro via Ollama Cloud
@@ -30,7 +30,10 @@ Tests: 539 Node (`npm test`) + 66 Playwright (`npm run test:browser`), all passi
 ## Secret vault
 API keys (`aiPrimaryKey`, `aiJudgeKey`, `aiUtilityKey`, `engagementOobToken`, `authPass`) and project
 credentials (`password`, `apiToken`) are AES-GCM encrypted before reaching `chrome.storage.local`.
-- Key = PBKDF2-SHA256, 250k iterations, 16-byte random salt; **memory only**, so the vault re-locks when the panel closes.
+- Key = PBKDF2-SHA256, 600k iterations (OWASP, ~220ms), 16-byte random salt; **memory only**, so the
+  vault re-locks when the panel closes. Unlock derives at the count stored WITH the vault, so vaults
+  made by older builds (250k) still open; the bar tells them to use Change to upgrade.
+  `vaultClampIterations` bounds anything read from storage to [100k, 5M].
 - Vault bar lives in Settings → AI Pentest Config → Models. Set passphrase / Unlock / Lock / Change.
 - Secret inputs read empty while locked — that means encrypted, not unset.
 - Settings exports and saved profiles are redacted: they never carry secrets, plaintext or ciphertext.

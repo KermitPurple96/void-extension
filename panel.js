@@ -121,7 +121,6 @@ function stopAllTimers() {
   clearInterval(bgSyncTimer);    bgSyncTimer = null;
   clearInterval(logSyncTimer);   logSyncTimer = null;
   clearInterval(wsTimer);        wsTimer = null;
-  clearInterval(respPollTimer);  respPollTimer = null;
   clearInterval(probePollTimer); probePollTimer = null;
   clearInterval(oobPollTimer);   oobPollTimer = null;
   if (scanRunning) { scanRunning = false; }
@@ -3929,7 +3928,14 @@ async function cryptoHash(algo, input) {
 // A passphrase-derived AES-GCM key (PBKDF2-SHA256) encrypts them at persist time.
 // The key lives in memory only, so closing the panel re-locks the vault.
 
-const VAULT_ITERATIONS = 250000;
+// OWASP's current PBKDF2-SHA256 recommendation. Measured at ~220ms in this
+// environment, so the unlock cost stays well under a second.
+const VAULT_ITERATIONS = 600000;
+// Bounds for the count read back from storage. Existing vaults keep unlocking at
+// whatever they were created with (only new vaults get VAULT_ITERATIONS), but a
+// corrupted value must not be able to hang deriveKey or weaken the derivation.
+const VAULT_ITERATIONS_MIN = 100000;
+const VAULT_ITERATIONS_MAX = 5000000;
 const VAULT_VERIFIER = "void-vault-v1";
 const SECRET_SETTING_KEYS = ["aiPrimaryKey", "aiJudgeKey", "aiUtilityKey", "engagementOobToken", "authPass"];
 const SECRET_PROJECT_KEYS = ["password", "apiToken"];
@@ -3952,10 +3958,18 @@ function vaultExists() { return !!(vaultMeta && vaultMeta.salt && vaultMeta.veri
 function b64enc(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))); }
 function b64dec(str) { return Uint8Array.from(atob(str), c => c.charCodeAt(0)); }
 
+// Clamped, never trusted raw: iterations come back from storage, and a corrupted
+// value would either weaken the derivation or hang the panel inside deriveKey.
+function vaultClampIterations(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return VAULT_ITERATIONS;
+  return Math.min(VAULT_ITERATIONS_MAX, Math.max(VAULT_ITERATIONS_MIN, Math.floor(v)));
+}
+
 async function vaultDeriveKey(passphrase, salt, iterations) {
   const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+    { name: "PBKDF2", salt, iterations: vaultClampIterations(iterations), hash: "SHA-256" },
     base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
   );
 }
@@ -4035,7 +4049,8 @@ async function vaultCreate(passphrase) {
 // Returns true only when the passphrase reproduces the stored verifier.
 async function vaultUnlock(passphrase) {
   if (!vaultExists()) return false;
-  const key = await vaultDeriveKey(passphrase, b64dec(vaultMeta.salt), vaultMeta.iterations || VAULT_ITERATIONS);
+  // Unlock at whatever count this vault was created with — vaultDeriveKey clamps it.
+  const key = await vaultDeriveKey(passphrase, b64dec(vaultMeta.salt), vaultMeta.iterations);
   try {
     if (await vaultDecrypt(vaultMeta.verifier, key) !== VAULT_VERIFIER) return false;
   } catch {
@@ -4282,6 +4297,10 @@ function vaultRenderStatus() {
       st.textContent = `${vaultUndecryptable.size} stored secret(s) could not be decrypted — kept as-is, re-enter them`;
     } else if (vaultHasLegacyPlaintext() && !exists) {
       st.textContent = "Plaintext secrets found on disk — set a passphrase to encrypt them";
+    } else if (unlocked && vaultClampIterations(vaultMeta?.iterations) < VAULT_ITERATIONS) {
+      // Created by an older build at a lower PBKDF2 count. Only a re-key can raise
+      // it, since the salt and every blob are tied to the original derivation.
+      st.textContent = "Vault unlocked — created with weaker key stretching, use Change to upgrade";
     } else {
       st.textContent = !exists ? "No passphrase set — API keys will not be saved"
         : unlocked ? "Vault unlocked — secrets are encrypted on disk"
@@ -7432,13 +7451,10 @@ function simpleHash(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (
 
 let interceptedResponses = [];
 let editingResp = null;
-let respPollTimer = null;
 
-// Response polling is now handled by doPollTick (via interceptResponses flag),
-// eliminating the dual-writer race condition. These are kept as no-ops for
-// call-site compatibility.
-function startRespPoll() {}
-function stopRespPoll() { clearInterval(respPollTimer); respPollTimer = null; }
+// Response polling is handled by doPollTick via the interceptResponses flag. The
+// old start/stop helpers here were empty no-ops kept "for call-site
+// compatibility" with call sites that no longer existed, so they are gone.
 
 function openRespEditor(resp) {
   editingResp = resp;
