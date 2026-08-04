@@ -64,7 +64,12 @@ window.VOID_WORKFLOWS = [
             "name": "tech-stack-fingerprint",
             "goal": "Determine the full technology stack of the target including web server, backend language, framework, database indicators, and CDN/WAF presence. This information drives payload selection for all subsequent tests."
           }
-        ]
+        ],
+        "skills": [
+          "basic-recon",
+          "tech-fingerprint"
+        ],
+        "prompt": "predict-endpoints"
       },
       {
         "id": "authentication",
@@ -95,6 +100,11 @@ window.VOID_WORKFLOWS = [
             "name": "test-authentication",
             "goal": ""
           }
+        ],
+        "skills": [
+          "auth",
+          "jwt",
+          "oauth"
         ]
       },
       {
@@ -126,6 +136,11 @@ window.VOID_WORKFLOWS = [
             "name": "test-api-security",
             "goal": ""
           }
+        ],
+        "skills": [
+          "api",
+          "idor",
+          "graphql"
         ]
       },
       {
@@ -162,6 +177,12 @@ window.VOID_WORKFLOWS = [
             "name": "cmdi-detect",
             "goal": "Identify command injection vulnerabilities in parameters that may be passed to shell commands on the server. Use both in-band and out-of-band detection techniques to confirm execution without relying solely on visible response changes."
           }
+        ],
+        "skills": [
+          "sqli",
+          "nosql",
+          "cmd-injection",
+          "ssti"
         ]
       },
       {
@@ -187,7 +208,15 @@ window.VOID_WORKFLOWS = [
           "contextCheck": "",
           "impactAssessment": ""
         },
-        "includes": []
+        "includes": [],
+        "prompt": "generate-report"
+      }
+    ],
+    "initialInstructions": "This is an API-focused security assessment targeting REST and GraphQL endpoints.",
+    "triggers": [
+      {
+        "keyword": "api",
+        "description": "API security assessment"
       }
     ]
   },
@@ -231,7 +260,40 @@ window.VOID_WORKFLOWS = [
             "name": "tech-stack-fingerprint",
             "goal": "Determine the full technology stack of the target including web server, backend language, framework, database indicators, and CDN/WAF presence. This information drives payload selection for all subsequent tests."
           }
-        ]
+        ],
+        "skills": [
+          "basic-recon",
+          "tech-fingerprint",
+          "subdomain-enum"
+        ],
+        "prompt": "recon-target"
+      },
+      {
+        "id": "threat-modeling",
+        "name": "Threat Modeling",
+        "type": "PHASE",
+        "agent": "analyst",
+        "skill": "",
+        "dependsOn": [
+          "reconnaissance"
+        ],
+        "goal": "Produce a lightweight threat model to prioritize testing phases based on the discovered attack surface, stack, and auth mechanisms",
+        "intrusive": false,
+        "skills": [],
+        "prompt": "threat-model",
+        "decisionTree": [],
+        "toolGuidance": {
+          "aiShould": "",
+          "useToolWhen": {}
+        },
+        "techniqueRefs": [],
+        "extraChecks": [],
+        "validation": {
+          "mustReproduce": false,
+          "contextCheck": "",
+          "impactAssessment": ""
+        },
+        "includes": []
       },
       {
         "id": "authentication-testing",
@@ -240,7 +302,7 @@ window.VOID_WORKFLOWS = [
         "agent": "authhunter",
         "skill": "",
         "dependsOn": [
-          "reconnaissance"
+          "threat-modeling"
         ],
         "goal": "Test login mechanisms for weaknesses",
         "intrusive": false,
@@ -262,6 +324,13 @@ window.VOID_WORKFLOWS = [
             "name": "test-authentication",
             "goal": ""
           }
+        ],
+        "skills": [
+          "auth",
+          "session-management",
+          "jwt",
+          "oauth",
+          "csrf"
         ]
       },
       {
@@ -293,6 +362,17 @@ window.VOID_WORKFLOWS = [
             "name": "test-injection",
             "goal": ""
           }
+        ],
+        "skills": [
+          "sqli",
+          "xss",
+          "ssti",
+          "cmd-injection",
+          "lfi-rfi",
+          "xxe",
+          "nosql",
+          "crlf-injection",
+          "http-parameter-pollution"
         ]
       },
       {
@@ -324,6 +404,11 @@ window.VOID_WORKFLOWS = [
             "name": "test-access-control",
             "goal": ""
           }
+        ],
+        "skills": [
+          "idor",
+          "api",
+          "cors"
         ]
       },
       {
@@ -355,6 +440,44 @@ window.VOID_WORKFLOWS = [
           "contextCheck": "",
           "impactAssessment": ""
         },
+        "includes": [],
+        "skills": [
+          "information-disclosure",
+          "cloud-storage",
+          "host-header",
+          "clickjacking",
+          "dom-vulnerabilities"
+        ],
+        "prompt": "security-headers"
+      },
+      {
+        "id": "chain-analysis",
+        "name": "Chain Analysis",
+        "type": "PHASE",
+        "agent": "bughunter",
+        "skill": "",
+        "dependsOn": [
+          "configuration-and-hardening"
+        ],
+        "goal": "Build attack paths by chaining confirmed findings — demonstrate combined impact exceeding individual severity",
+        "intrusive": false,
+        "skills": [
+          "logic-flaws",
+          "poc"
+        ],
+        "prompt": "chain-findings",
+        "decisionTree": [],
+        "toolGuidance": {
+          "aiShould": "",
+          "useToolWhen": {}
+        },
+        "techniqueRefs": [],
+        "extraChecks": [],
+        "validation": {
+          "mustReproduce": false,
+          "contextCheck": "",
+          "impactAssessment": ""
+        },
         "includes": []
       },
       {
@@ -364,7 +487,7 @@ window.VOID_WORKFLOWS = [
         "agent": "auditor",
         "skill": "",
         "dependsOn": [
-          "configuration-and-hardening"
+          "chain-analysis"
         ],
         "goal": "Validate all findings, generate report with evidence",
         "intrusive": false,
@@ -380,7 +503,15 @@ window.VOID_WORKFLOWS = [
           "contextCheck": "",
           "impactAssessment": ""
         },
-        "includes": []
+        "includes": [],
+        "prompt": "generate-report"
+      }
+    ],
+    "initialInstructions": "This is a full-scope authorised web application penetration test. Follow each phase in order. Record all findings with add_pentest_finding. If a phase produces no findings after exhausting its budget, record that explicitly and move on.",
+    "triggers": [
+      {
+        "keyword": "full",
+        "description": "Complete penetration test"
       }
     ]
   },
@@ -419,7 +550,11 @@ window.VOID_WORKFLOWS = [
             "name": "endpoint-discovery",
             "goal": "Build a complete map of the application's attack surface by crawling the site, discovering hidden paths via wordlist brute-force, and extracting endpoints from JavaScript files and API responses. The output feeds all subsequent injection and access-control tests."
           }
-        ]
+        ],
+        "skills": [
+          "basic-recon"
+        ],
+        "prompt": "recon-target"
       },
       {
         "id": "top-checks",
@@ -465,7 +600,23 @@ window.VOID_WORKFLOWS = [
             "name": "forced-browsing",
             "goal": "Identify access control failures where protected pages, admin panels, API endpoints, or sensitive files are accessible by directly navigating to their URLs without proper authentication or authorization checks."
           }
-        ]
+        ],
+        "skills": [
+          "xss",
+          "sqli",
+          "auth",
+          "idor",
+          "cors",
+          "information-disclosure"
+        ],
+        "prompt": "security-headers"
+      }
+    ],
+    "initialInstructions": "This is a rapid top-10 security check. Prioritize breadth over depth — test each class once, record findings, move on.",
+    "triggers": [
+      {
+        "keyword": "quick",
+        "description": "Fast top-10 check"
       }
     ]
   },
@@ -542,7 +693,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm that the accessed resource belongs to a different user, not a shared resource",
           "impactAssessment": "Determine what sensitive data is exposed: PII, financial records, private messages"
-        }
+        },
+        "skills": [
+          "idor"
+        ]
       },
       {
         "id": "forced-browsing",
@@ -610,7 +764,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the accessed resource requires authorization (i.e., it's not publicly intended)",
           "impactAssessment": "Identify what data or functionality is exposed — admin actions, PII, credentials"
-        }
+        },
+        "skills": [
+          "information-disclosure"
+        ]
       }
     ]
   },
@@ -679,7 +836,11 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the returned object belongs to a different tenant/user, not a shared or public resource",
           "impactAssessment": "Quantify exposed data (PII, financial, other tenants) and whether write access is possible"
-        }
+        },
+        "skills": [
+          "api",
+          "idor"
+        ]
       },
       {
         "id": "mass-assignment",
@@ -739,7 +900,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the injected field is genuinely privileged and not a normal user-editable attribute",
           "impactAssessment": "Show the concrete effect: privilege escalation, financial change, ownership takeover, or verification bypass"
-        }
+        },
+        "skills": [
+          "api"
+        ]
       },
       {
         "id": "rate-limit-check",
@@ -800,7 +964,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the endpoint is security-sensitive and the observed throughput is genuinely unthrottled, not just a high ceiling",
           "impactAssessment": "Tie the gap to an abuse case: OTP/token brute force, account lockout DoS, cost amplification, or enumeration"
-        }
+        },
+        "skills": [
+          "api"
+        ]
       }
     ]
   },
@@ -868,7 +1035,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm authenticated session by accessing a protected resource after login",
           "impactAssessment": "Determine privilege level of the logged-in account (admin vs regular user)"
-        }
+        },
+        "skills": [
+          "auth"
+        ]
       },
       {
         "id": "enumeration",
@@ -936,7 +1106,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Verify enumeration signal is consistent across multiple requests, not intermittent",
           "impactAssessment": "Enumerate at least 3 valid usernames to demonstrate practical exploitability"
-        }
+        },
+        "skills": [
+          "auth"
+        ]
       }
     ]
   },
@@ -1014,7 +1187,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Verify the parameter is actually processed by a DB query, not just reflected",
           "impactAssessment": "Attempt to extract one table name or DB version as proof of exploitability"
-        }
+        },
+        "skills": [
+          "sqli"
+        ]
       },
       {
         "id": "xss-reflected",
@@ -1076,7 +1252,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm origin of reflected output — server-rendered vs JS-injected into DOM",
           "impactAssessment": "Demonstrate session hijack potential by reading document.cookie or document.domain"
-        }
+        },
+        "skills": [
+          "xss"
+        ]
       },
       {
         "id": "xss-stored",
@@ -1138,7 +1317,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the payload persists across sessions and renders to a different user than the submitter",
           "impactAssessment": "Identify the affected audience (public/other-users/admins) and demonstrate cookie or session access"
-        }
+        },
+        "skills": [
+          "xss"
+        ]
       },
       {
         "id": "xss-dom",
@@ -1200,7 +1382,11 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the injection executes via a client-side sink and does not appear in the server-rendered HTML",
           "impactAssessment": "Demonstrate script execution in the target origin (document.domain, cookie, or session access)"
-        }
+        },
+        "skills": [
+          "xss",
+          "dom-vulnerabilities"
+        ]
       },
       {
         "id": "ssti-detect",
@@ -1262,7 +1448,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Verify arithmetic result is from server evaluation, not client-side JavaScript",
           "impactAssessment": "Attempt to read server environment variables or execute a harmless OS command"
-        }
+        },
+        "skills": [
+          "ssti"
+        ]
       },
       {
         "id": "cmdi-detect",
@@ -1323,7 +1512,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Ensure timing delay is consistent and not caused by network jitter",
           "impactAssessment": "Retrieve hostname or OS version as proof of non-destructive command execution"
-        }
+        },
+        "skills": [
+          "cmd-injection"
+        ]
       },
       {
         "id": "lfi-detect",
@@ -1392,7 +1584,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Verify that returned content is actually from a server file, not a cached or static resource",
           "impactAssessment": "Attempt to read a configuration file containing credentials or an API key"
-        }
+        },
+        "skills": [
+          "lfi-rfi"
+        ]
       }
     ]
   },
@@ -1461,7 +1656,11 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the returned object belongs to a different tenant/user, not a shared or public resource",
           "impactAssessment": "Quantify exposed data (PII, financial, other tenants) and whether write access is possible"
-        }
+        },
+        "skills": [
+          "api",
+          "idor"
+        ]
       }
     ]
   },
@@ -1530,7 +1729,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Ensure timing delay is consistent and not caused by network jitter",
           "impactAssessment": "Retrieve hostname or OS version as proof of non-destructive command execution"
-        }
+        },
+        "skills": [
+          "cmd-injection"
+        ]
       }
     ]
   },
@@ -1598,7 +1800,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm authenticated session by accessing a protected resource after login",
           "impactAssessment": "Determine privilege level of the logged-in account (admin vs regular user)"
-        }
+        },
+        "skills": [
+          "auth"
+        ]
       }
     ]
   },
@@ -1667,7 +1872,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": false,
           "contextCheck": "Verify discovered endpoints actually return meaningful responses (not all 404/403)",
           "impactAssessment": "Identify any admin or sensitive endpoints exposed without authentication"
-        }
+        },
+        "skills": [
+          "basic-recon"
+        ]
       }
     ]
   },
@@ -1743,7 +1951,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Verify enumeration signal is consistent across multiple requests, not intermittent",
           "impactAssessment": "Enumerate at least 3 valid usernames to demonstrate practical exploitability"
-        }
+        },
+        "skills": [
+          "auth"
+        ]
       }
     ]
   },
@@ -1819,7 +2030,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the accessed resource requires authorization (i.e., it's not publicly intended)",
           "impactAssessment": "Identify what data or functionality is exposed — admin actions, PII, credentials"
-        }
+        },
+        "skills": [
+          "information-disclosure"
+        ]
       }
     ]
   },
@@ -1896,7 +2110,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm that the accessed resource belongs to a different user, not a shared resource",
           "impactAssessment": "Determine what sensitive data is exposed: PII, financial records, private messages"
-        }
+        },
+        "skills": [
+          "idor"
+        ]
       }
     ]
   },
@@ -1973,7 +2190,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Verify that returned content is actually from a server file, not a cached or static resource",
           "impactAssessment": "Attempt to read a configuration file containing credentials or an API key"
-        }
+        },
+        "skills": [
+          "lfi-rfi"
+        ]
       }
     ]
   },
@@ -2041,7 +2261,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the injected field is genuinely privileged and not a normal user-editable attribute",
           "impactAssessment": "Show the concrete effect: privilege escalation, financial change, ownership takeover, or verification bypass"
-        }
+        },
+        "skills": [
+          "api"
+        ]
       }
     ]
   },
@@ -2110,7 +2333,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the endpoint is security-sensitive and the observed throughput is genuinely unthrottled, not just a high ceiling",
           "impactAssessment": "Tie the gap to an abuse case: OTP/token brute force, account lockout DoS, cost amplification, or enumeration"
-        }
+        },
+        "skills": [
+          "api"
+        ]
       }
     ]
   },
@@ -2188,7 +2414,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Verify the parameter is actually processed by a DB query, not just reflected",
           "impactAssessment": "Attempt to extract one table name or DB version as proof of exploitability"
-        }
+        },
+        "skills": [
+          "sqli"
+        ]
       }
     ]
   },
@@ -2258,7 +2487,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Verify arithmetic result is from server evaluation, not client-side JavaScript",
           "impactAssessment": "Attempt to read server environment variables or execute a harmless OS command"
-        }
+        },
+        "skills": [
+          "ssti"
+        ]
       }
     ]
   },
@@ -2335,7 +2567,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": false,
           "contextCheck": "Cross-reference at least 2 independent signals before confirming a technology",
           "impactAssessment": "Identify any end-of-life or CVE-affected component versions"
-        }
+        },
+        "skills": [
+          "tech-fingerprint"
+        ]
       }
     ]
   },
@@ -2405,7 +2640,11 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the injection executes via a client-side sink and does not appear in the server-rendered HTML",
           "impactAssessment": "Demonstrate script execution in the target origin (document.domain, cookie, or session access)"
-        }
+        },
+        "skills": [
+          "xss",
+          "dom-vulnerabilities"
+        ]
       }
     ]
   },
@@ -2475,7 +2714,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm origin of reflected output — server-rendered vs JS-injected into DOM",
           "impactAssessment": "Demonstrate session hijack potential by reading document.cookie or document.domain"
-        }
+        },
+        "skills": [
+          "xss"
+        ]
       }
     ]
   },
@@ -2545,7 +2787,10 @@ window.VOID_WORKFLOWS = [
           "mustReproduce": true,
           "contextCheck": "Confirm the payload persists across sessions and renders to a different user than the submitter",
           "impactAssessment": "Identify the affected audience (public/other-users/admins) and demonstrate cookie or session access"
-        }
+        },
+        "skills": [
+          "xss"
+        ]
       }
     ]
   }
