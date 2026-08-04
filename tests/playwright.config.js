@@ -1,6 +1,9 @@
 // Playwright config for void-extension Chrome extension E2E tests
 const { defineConfig } = require('@playwright/test');
 const path = require('path');
+const { chromeExecutable } = require('./chrome-path');
+
+const EXE = chromeExecutable();
 
 module.exports = defineConfig({
   testDir: __dirname,
@@ -14,6 +17,7 @@ module.exports = defineConfig({
     name: 'chromium-extension',
     use: {
       launchOptions: {
+        ...(EXE ? { executablePath: EXE } : {}),
         args: [
           `--disable-extensions-except=${path.resolve(__dirname, '..')}`,
           `--load-extension=${path.resolve(__dirname, '..')}`,

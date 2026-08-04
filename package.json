@@ -9,9 +9,14 @@
   },
   "scripts": {
     "proxy": "node void-proxy-server.js",
-    "sync": "node void-sync-server.js"
+    "sync": "node void-sync-server.js",
+    "test": "node tests/e2e-audit.js && node tests/e2e-ai-pentest.js && node tests/vault-crypto.js",
+    "test:browser": "playwright test --config=tests/playwright.config.js"
   },
   "dependencies": {
     "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
   }
 }

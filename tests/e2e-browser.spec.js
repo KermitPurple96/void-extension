@@ -4,16 +4,37 @@
 // Run: npx playwright test tests/e2e-browser.spec.js --config=tests/playwright.config.js
 const { test, expect, chromium } = require('@playwright/test');
 const path = require('path');
+const { chromeExecutable } = require('./chrome-path');
 
 const EXT_PATH = path.resolve(__dirname, '..');
+const EXE = chromeExecutable();
+
+// panel.html is opened as a plain extension page, where `chrome.devtools` does not
+// exist. Without this stub, panel.js throws on its very first statement
+// (`chrome.devtools.inspectedWindow.tabId`), the whole script aborts, and every
+// top-level `let` stays in TDZ — so only hoisted functions and static DOM are
+// testable. Stubbing it lets the script evaluate fully and DOMContentLoaded run,
+// which is what makes the runtime tests below meaningful.
+const DEVTOOLS_STUB = () => {
+  if (typeof chrome === 'undefined' || chrome.devtools) return;
+  chrome.devtools = {
+    inspectedWindow: {
+      tabId: 1,
+      // Callback form: (result, exceptionInfo)
+      eval: (_expr, cb) => { if (typeof cb === 'function') cb(undefined, { isError: true, value: 'no inspected window in tests' }); },
+    },
+  };
+};
 
 async function launchExt() {
   const ctx = await chromium.launchPersistentContext('', {
     headless: false,
+    ...(EXE ? { executablePath: EXE } : {}),
     args: [`--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-first-run', '--disable-gpu'],
   });
   const sw = ctx.serviceWorkers()[0] || await ctx.waitForEvent('serviceworker');
   const page = await ctx.newPage();
+  await page.addInitScript(DEVTOOLS_STUB);
   await page.goto(`chrome-extension://${sw.url().split('/')[2]}/panel.html`);
   await page.waitForTimeout(3000);
   return { ctx, page };
@@ -132,6 +153,168 @@ test.describe('Void Extension AI Pentest', () => {
       try { return slashBuildItems().length; } catch { return -1; }
     });
     expect(count).toBeGreaterThan(40);
+  });
+
+  // ═══ Secret vault — real crypto against real chrome.storage ═══
+  // Runs as an ordered sequence: set passphrase -> save -> lock -> unlock.
+  const PASSPHRASE = 'correct horse battery staple';
+  const SECRET = 'sk-e2e-primary-key-should-never-hit-disk';
+  const PROXY_PASS = 'e2e-proxy-password';
+
+  // Read everything chrome.storage.local holds, from inside the extension page.
+  const readStorage = () => page.evaluate(() => new Promise(r => chrome.storage.local.get(null, r)));
+
+  test('Vault: bar and modal exist', async () => {
+    expect(await page.locator('#ai-vault-bar').count()).toBe(1);
+    expect(await page.locator('#vault-overlay').count()).toBe(1);
+    expect(await page.locator('#vault-pass').count()).toBe(1);
+    expect(await page.locator('#vault-pass2').count()).toBe(1);
+  });
+
+  test('Vault: starts locked with no vault configured', async () => {
+    const state = await page.evaluate(() => ({ unlocked: vaultUnlocked(), exists: vaultExists() }));
+    expect(state).toEqual({ unlocked: false, exists: false });
+    await expect(page.locator('#ai-vault-status')).toHaveText(/No passphrase set/);
+  });
+
+  test('Vault: setup button opens the modal with a confirm field', async () => {
+    await page.evaluate(() => showTab('settings'));
+    await page.locator('.ai-settings-tab[data-aitab="models"]').click();
+    await page.locator('#ai-vault-setup').click(); // real click — proves wireVaultUI ran
+    await expect(page.locator('#vault-overlay')).toBeVisible();
+    await expect(page.locator('#vault-confirm-row')).toBeVisible();
+    await expect(page.locator('#vault-modal-title')).toHaveText('Set vault passphrase');
+  });
+
+  test('Vault: mismatched passphrases are rejected', async () => {
+    await page.locator('#vault-pass').fill(PASSPHRASE);
+    await page.locator('#vault-pass2').fill('something else');
+    await page.locator('#vault-ok').click();
+    await expect(page.locator('#vault-error')).toHaveText(/do not match/);
+    expect(await page.evaluate(() => vaultExists())).toBe(false);
+  });
+
+  test('Vault: short passphrases are rejected', async () => {
+    await page.locator('#vault-pass').fill('short');
+    await page.locator('#vault-pass2').fill('short');
+    await page.locator('#vault-ok').click();
+    await expect(page.locator('#vault-error')).toHaveText(/at least 8/);
+    expect(await page.evaluate(() => vaultExists())).toBe(false);
+  });
+
+  test('Vault: matching passphrase creates and unlocks the vault', async () => {
+    await page.locator('#vault-pass').fill(PASSPHRASE);
+    await page.locator('#vault-pass2').fill(PASSPHRASE);
+    await page.locator('#vault-ok').click();
+    await expect(page.locator('#vault-overlay')).toBeHidden();
+    expect(await page.evaluate(() => ({ unlocked: vaultUnlocked(), exists: vaultExists() })))
+      .toEqual({ unlocked: true, exists: true });
+    await expect(page.locator('#ai-vault-bar')).toHaveClass(/unlocked/);
+    await expect(page.locator('#ai-vault-lock')).toBeVisible();
+    await expect(page.locator('#ai-vault-setup')).toBeHidden();
+  });
+
+  test('Vault: passphrase is not left in the DOM', async () => {
+    expect(await page.locator('#vault-pass').inputValue()).toBe('');
+    expect(await page.locator('#vault-pass2').inputValue()).toBe('');
+  });
+
+  test('Vault: saved secrets never reach storage in plaintext', async () => {
+    await page.locator('#ai-primary-key').fill(SECRET);
+    await page.locator('#cfg-auth-pass').fill(PROXY_PASS);
+    await page.evaluate(() => saveSettings());
+    await page.waitForTimeout(500); // sealing is async
+
+    const stored = await readStorage();
+    const dump = JSON.stringify(stored);
+    expect(dump).not.toContain(SECRET);
+    expect(dump).not.toContain(PROXY_PASS);
+    expect(dump).not.toContain(PASSPHRASE);
+    expect(stored.voidSettings.aiPrimaryKey).toBe('');
+    expect(stored.voidSettings.authPass).toBe('');
+    expect(stored.voidSettings.__secrets.aiPrimaryKey).toHaveProperty('ct');
+    expect(stored.voidSettings.__secrets.aiPrimaryKey).toHaveProperty('iv');
+    // Vault metadata is a salt + verifier, never the derived key
+    expect(stored.voidVault).toHaveProperty('salt');
+    expect(stored.voidVault).toHaveProperty('verifier');
+    expect(stored.voidVault).not.toHaveProperty('key');
+  });
+
+  test('Vault: project credentials are encrypted too', async () => {
+    await page.evaluate(s => pentestCreateProject({
+      name: 'E2E Vault Project', username: 'admin', password: s.pw, apiToken: s.tok,
+    }), { pw: 'e2e-project-password', tok: 'e2e-project-token' });
+    await page.waitForTimeout(500);
+
+    const stored = await readStorage();
+    const dump = JSON.stringify(stored.voidPentestProjects);
+    expect(dump).not.toContain('e2e-project-password');
+    expect(dump).not.toContain('e2e-project-token');
+    const proj = stored.voidPentestProjects.find(p => p.name === 'E2E Vault Project');
+    expect(proj.credentials.password).toBe('');
+    expect(proj.credentials.username).toBe('admin'); // non-secret field untouched
+    expect(proj.credentials.__secrets.password).toHaveProperty('ct');
+  });
+
+  test('Vault: export and profiles are redacted', async () => {
+    const red = await page.evaluate(() => vaultRedact(settings));
+    expect(JSON.stringify(red)).not.toContain(SECRET);
+    expect(red.aiPrimaryKey).toBeUndefined();
+    expect(red.authPass).toBeUndefined();
+    expect(red.__secrets).toBeUndefined();
+  });
+
+  test('Vault: lock wipes plaintext from memory and the UI', async () => {
+    await page.locator('#ai-vault-lock').click();
+    expect(await page.evaluate(() => vaultUnlocked())).toBe(false);
+    expect(await page.evaluate(() => settings.aiPrimaryKey)).toBe('');
+    expect(await page.evaluate(() => pentestProjects.find(p => p.name === 'E2E Vault Project').credentials.password)).toBe('');
+    expect(await page.locator('#ai-primary-key').inputValue()).toBe('');
+    await expect(page.locator('#ai-primary-key')).toHaveAttribute('placeholder', /locked/);
+    await expect(page.locator('#ai-vault-unlock')).toBeVisible();
+  });
+
+  test('Vault: wrong passphrase is rejected on unlock', async () => {
+    await page.locator('#ai-vault-unlock').click();
+    await page.locator('#vault-pass').fill('definitely not the passphrase');
+    await page.locator('#vault-ok').click();
+    await expect(page.locator('#vault-error')).toHaveText(/Wrong passphrase/);
+    expect(await page.evaluate(() => vaultUnlocked())).toBe(false);
+    expect(await page.evaluate(() => settings.aiPrimaryKey)).toBe('');
+  });
+
+  test('Vault: correct passphrase restores every secret', async () => {
+    await page.locator('#vault-pass').fill(PASSPHRASE);
+    await page.locator('#vault-ok').click();
+    await expect(page.locator('#vault-overlay')).toBeHidden();
+    expect(await page.evaluate(() => vaultUnlocked())).toBe(true);
+    expect(await page.evaluate(() => settings.aiPrimaryKey)).toBe(SECRET);
+    expect(await page.evaluate(() => settings.authPass)).toBe(PROXY_PASS);
+    expect(await page.evaluate(() => pentestProjects.find(p => p.name === 'E2E Vault Project').credentials.password))
+      .toBe('e2e-project-password');
+    // UI repopulated from the decrypted settings
+    expect(await page.locator('#ai-primary-key').inputValue()).toBe(SECRET);
+  });
+
+  test('Vault: re-key invalidates the old passphrase', async () => {
+    await page.locator('#ai-vault-change').click();
+    await expect(page.locator('#vault-modal-title')).toHaveText('Change vault passphrase');
+    await page.locator('#vault-pass').fill('a completely new passphrase');
+    await page.locator('#vault-pass2').fill('a completely new passphrase');
+    await page.locator('#vault-ok').click();
+    await expect(page.locator('#vault-overlay')).toBeHidden();
+    await page.waitForTimeout(500);
+
+    await page.locator('#ai-vault-lock').click();
+    await page.locator('#ai-vault-unlock').click();
+    await page.locator('#vault-pass').fill(PASSPHRASE); // the old one
+    await page.locator('#vault-ok').click();
+    await expect(page.locator('#vault-error')).toHaveText(/Wrong passphrase/);
+
+    await page.locator('#vault-pass').fill('a completely new passphrase');
+    await page.locator('#vault-ok').click();
+    await expect(page.locator('#vault-overlay')).toBeHidden();
+    expect(await page.evaluate(() => settings.aiPrimaryKey)).toBe(SECRET); // survived the re-key
   });
 
   // ═══ Console health ═══
