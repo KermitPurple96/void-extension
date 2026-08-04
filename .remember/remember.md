@@ -5,8 +5,9 @@ I migrated all AI pentesting capabilities from Agent-zero-pentest into void-exte
 
 Phases 1-6 COMPLETE: 8 data files (651KB skills, 519 payloads, 11 agents, 6 workflows, 8 prompts, 25 vuln classes, 16 hybrid checks), Settings split with 7 subtabs (Models/Persona/Engagement/Vulns/Skills/Workflows/Prompts), AI Chat enhanced (projects, wizard, slash commands, agent switch, autonomous mode, slide-in panels), hybrid engine, judge/refute endpoint, 62 AI tools, model probe.
 
-All three open code-review items are now fixed (secret vault, dead code, wizard null-safety).
-Tests: 481 Node (`npm test`) + 51 Playwright (`npm run test:browser`), all passing.
+All three open code-review items are fixed (secret vault, dead code, wizard null-safety),
+then a 4-agent code review over that work found and fixed 2 CRITICAL + 4 HIGH on top.
+Tests: 509 Node (`npm test`) + 53 Playwright (`npm run test:browser`), all passing.
 
 ## Next
 1. **Test in real browser** — load extension, set a vault passphrase, create a pentest project, run AI chat against DVWA with deepseek-v4-pro via Ollama Cloud
@@ -35,5 +36,12 @@ credentials (`password`, `apiToken`) are AES-GCM encrypted before reaching `chro
 - Settings exports and saved profiles are redacted: they never carry secrets, plaintext or ciphertext.
 - **Unlock before using AI features** — a locked panel has no API key, and `authPass` (proxy auth) is empty too.
 - Passphrase loss is unrecoverable by design. Re-keying ("Change") requires an unlocked vault.
-- Legacy plaintext from earlier builds stays usable for the session and the bar prompts to encrypt it; the
-  next save drops it from disk whether or not a vault was created.
+- Legacy plaintext from earlier builds stays usable for the session and is left on disk untouched until
+  the user sets a passphrase — an unrelated save must never destroy it (`vaultLegacySettingKeys`).
+- Re-key is ONE atomic `chrome.storage.local.set` of {voidVault, voidSettings, voidPentestProjects}.
+  Never split it: a new salt paired with old-key ciphertext unlocks cleanly and then decrypts to nothing.
+- All vault writes go through `vaultEnqueueWrite` so overlapping saves can't land out of order.
+- Ciphertext that fails to decrypt is recorded in `vaultUndecryptable` and preserved on the next save,
+  never overwritten with "" — that turns a recoverable problem into permanent loss.
+- Anything that serializes `settings` must redact: session save/export (`buildSessionData`), settings
+  profiles, and settings export. Session/profile RESTORE must carry `__secrets` forward.

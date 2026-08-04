@@ -3938,7 +3938,15 @@ const SECRET_PROJECT_KEYS = ["password", "apiToken"];
 
 let vaultKey = null;   // CryptoKey — memory only, never persisted
 let vaultMeta = null;  // { salt, iterations, verifier } read from chrome.storage
-let vaultLegacyPlaintext = false; // secrets written in plaintext by an earlier build
+// Secrets an earlier build left in plaintext on disk. Tracked per field so an
+// unrelated save can't silently destroy them before the user sets a passphrase.
+const vaultLegacySettingKeys = new Set();      // setting key
+const vaultLegacyProjectKeys = new Set();      // "<projectId>:<credential key>"
+// Ciphertext that failed to decrypt after a successful unlock (corruption, or a
+// stale blob from an interrupted re-key). Preserved rather than overwritten, so a
+// save can't turn a recoverable problem into permanent loss.
+const vaultUndecryptable = new Set();          // same key shapes as above
+function vaultHasLegacyPlaintext() { return vaultLegacySettingKeys.size > 0 || vaultLegacyProjectKeys.size > 0; }
 
 function vaultUnlocked() { return !!vaultKey; }
 function vaultExists() { return !!(vaultMeta && vaultMeta.salt && vaultMeta.verifier); }
@@ -3966,21 +3974,64 @@ async function vaultDecrypt(blob, key = vaultKey) {
   return new TextDecoder().decode(pt);
 }
 
+// Every vault-touching storage write goes through this queue. Sealing is async
+// (AES per secret), so two overlapping saves could otherwise resolve out of order
+// and persist the older snapshot, or interleave with a re-key.
+// Resolved once loadSettings / pentestLoadProjects have populated memory from
+// storage. vaultCreate persists both, so it must not run before they are read.
+let vaultMarkSettingsLoaded, vaultMarkProjectsLoaded;
+const vaultSettingsLoaded = new Promise(r => { vaultMarkSettingsLoaded = r; });
+const vaultProjectsLoaded = new Promise(r => { vaultMarkProjectsLoaded = r; });
+
+let vaultWriteQueue = Promise.resolve();
+function vaultEnqueueWrite(fn) {
+  const run = vaultWriteQueue.then(fn, fn);
+  vaultWriteQueue = run.catch(() => {}); // a failed write must not stall the queue
+  return run;                            // ...but the caller still sees the error
+}
+
 function vaultLoadMeta() {
   return new Promise(resolve => {
     chrome.storage.local.get("voidVault", r => { vaultMeta = r.voidVault || null; resolve(vaultMeta); });
   });
 }
 
-// Create the vault, or re-key it with a new passphrase (existing plaintext in
-// memory is re-encrypted by the callers' subsequent save).
+// Create the vault, or re-key it with a new passphrase.
+//
+// New metadata and newly-encrypted secrets go to disk in a SINGLE
+// chrome.storage.local.set — a multi-key set is atomic, so an interrupted re-key
+// can never leave a new salt paired with ciphertext under the old key (which would
+// unlock cleanly and then decrypt to nothing, losing every secret silently).
+// In-memory key/meta are swapped only once that write lands.
 async function vaultCreate(passphrase) {
+  // This writes voidSettings and voidPentestProjects from memory. Running before
+  // they have been read back would persist the empty defaults over the user's data,
+  // so wait for both loads rather than racing them.
+  await Promise.all([vaultSettingsLoaded, vaultProjectsLoaded]);
+
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const key = await vaultDeriveKey(passphrase, salt, VAULT_ITERATIONS);
-  vaultMeta = { salt: b64enc(salt), iterations: VAULT_ITERATIONS, verifier: await vaultEncrypt(VAULT_VERIFIER, key) };
+  const meta = { salt: b64enc(salt), iterations: VAULT_ITERATIONS, verifier: await vaultEncrypt(VAULT_VERIFIER, key) };
+
+  // Re-encrypt everything currently in memory under the new key before committing.
+  const sealedSettings = await vaultSealSettings(settings, { key, commit: false });
+  const sealedProjects = await vaultSealProjects(pentestProjects, { key, commit: false });
+
+  await new Promise(r => chrome.storage.local.set({
+    voidVault: meta,
+    voidSettings: sealedSettings,
+    voidPentestProjects: sealedProjects,
+  }, r));
+
+  vaultMeta = meta;
   vaultKey = key;
-  vaultLegacyPlaintext = false; // the callers' save now writes ciphertext
-  await new Promise(r => chrome.storage.local.set({ voidVault: vaultMeta }, r));
+  // Plaintext is now encrypted and gone from disk
+  vaultLegacySettingKeys.clear();
+  vaultLegacyProjectKeys.clear();
+  settings.__secrets = sealedSettings.__secrets;
+  pentestProjects.forEach((p, i) => {
+    if (p.credentials) p.credentials.__secrets = sealedProjects[i].credentials.__secrets;
+  });
 }
 
 // Returns true only when the passphrase reproduces the stored verifier.
@@ -4007,45 +4058,82 @@ function vaultLock() {
 }
 
 // Decrypt the ciphertext already held in memory back into the plaintext fields.
+// A blob we cannot decrypt is recorded, not discarded — see vaultUndecryptable.
 async function vaultRevealSecrets() {
   if (!vaultUnlocked()) return;
+  vaultUndecryptable.clear();
   for (const k of SECRET_SETTING_KEYS) {
     const blob = settings.__secrets?.[k];
-    if (blob) { try { settings[k] = await vaultDecrypt(blob); } catch { settings[k] = ""; } }
+    if (!blob) continue;
+    try { settings[k] = await vaultDecrypt(blob); }
+    catch { settings[k] = ""; vaultUndecryptable.add(k); }
   }
   for (const p of pentestProjects) {
     for (const k of SECRET_PROJECT_KEYS) {
       const blob = p.credentials?.__secrets?.[k];
-      if (blob) { try { p.credentials[k] = await vaultDecrypt(blob); } catch { p.credentials[k] = ""; } }
+      if (!blob) continue;
+      try { p.credentials[k] = await vaultDecrypt(blob); }
+      catch { p.credentials[k] = ""; vaultUndecryptable.add(p.id + ":" + k); }
     }
   }
 }
 
 // Swap plaintext secrets for ciphertext before anything reaches chrome.storage.
-// While locked we carry the existing ciphertext forward rather than wiping it.
-async function vaultSealSettings(src) {
+//
+// opts.key    — encrypt under this key instead of vaultKey (used mid-re-key, before
+//               vaultKey has been swapped over).
+// opts.commit — false to skip syncing src.__secrets, for when the caller writes to
+//               storage itself and updates memory only after that write lands.
+async function vaultSealSettings(src, opts = {}) {
+  const key = opts.key || vaultKey;
   const out = { ...src };
-  const enc = vaultUnlocked() ? {} : { ...(src.__secrets || {}) };
-  if (vaultUnlocked()) {
-    for (const k of SECRET_SETTING_KEYS) if (src[k]) enc[k] = await vaultEncrypt(src[k]);
+  let enc;
+  if (key) {
+    enc = {};
+    for (const k of SECRET_SETTING_KEYS) {
+      // Blobs we could not read stay exactly as they are — re-encrypting "" would
+      // destroy recoverable data.
+      if (vaultUndecryptable.has(k) && src.__secrets?.[k]) { enc[k] = src.__secrets[k]; continue; }
+      if (src[k]) enc[k] = await vaultEncrypt(src[k], key);
+    }
+  } else {
+    enc = { ...(src.__secrets || {}) }; // locked: carry existing ciphertext forward
   }
   for (const k of SECRET_SETTING_KEYS) out[k] = "";
+  // No vault configured yet: plaintext an older build already wrote stays on disk
+  // rather than being wiped by an unrelated save. It is no worse than before, and
+  // the vault bar prompts to encrypt it. Newly typed secrets are still never written.
+  if (!key && !vaultExists()) {
+    for (const k of SECRET_SETTING_KEYS) if (vaultLegacySettingKeys.has(k) && src[k]) out[k] = src[k];
+  }
   out.__secrets = enc;
-  src.__secrets = enc; // keep memory in sync so a re-key doesn't leave stale ciphertext
+  if (opts.commit !== false) src.__secrets = enc;
   return out;
 }
 
-async function vaultSealProjects(projects) {
+async function vaultSealProjects(projects, opts = {}) {
+  const key = opts.key || vaultKey;
   const out = [];
   for (const p of projects) {
     const c = { ...(p.credentials || {}) };
-    const enc = vaultUnlocked() ? {} : { ...(c.__secrets || {}) };
-    if (vaultUnlocked()) {
-      for (const k of SECRET_PROJECT_KEYS) if (c[k]) enc[k] = await vaultEncrypt(c[k]);
+    let enc;
+    if (key) {
+      enc = {};
+      for (const k of SECRET_PROJECT_KEYS) {
+        if (vaultUndecryptable.has(p.id + ":" + k) && c.__secrets?.[k]) { enc[k] = c.__secrets[k]; continue; }
+        if (c[k]) enc[k] = await vaultEncrypt(c[k], key);
+      }
+    } else {
+      enc = { ...(c.__secrets || {}) };
     }
     for (const k of SECRET_PROJECT_KEYS) c[k] = "";
+    if (!key && !vaultExists()) {
+      for (const k of SECRET_PROJECT_KEYS) {
+        if (vaultLegacyProjectKeys.has(p.id + ":" + k) && p.credentials?.[k]) c[k] = p.credentials[k];
+      }
+    }
     c.__secrets = enc;
-    if (p.credentials) p.credentials.__secrets = enc;
+    if (opts.commit !== false && p.credentials) p.credentials.__secrets = enc;
     out.push({ ...p, credentials: c });
   }
   return out;
@@ -4061,10 +4149,14 @@ function vaultRedact(src) {
   return out;
 }
 
-// True when the user has typed a secret that the current vault state cannot persist.
-function vaultHasUnsavedSecrets() {
-  return !vaultUnlocked() && SECRET_SETTING_KEYS.some(k => !!settings[k]);
+// Secret fields holding a value that the current vault state cannot persist.
+// Legacy plaintext is excluded — a save keeps it on disk exactly as it found it.
+function vaultDroppedSecretKeys() {
+  if (vaultUnlocked()) return [];
+  return SECRET_SETTING_KEYS.filter(k => settings[k] && !(!vaultExists() && vaultLegacySettingKeys.has(k)));
 }
+
+function vaultHasUnsavedSecrets() { return vaultDroppedSecretKeys().length > 0; }
 
 // ── Vault UI ────────────────────────────────────────────────────────────────
 
@@ -4082,12 +4174,16 @@ function vaultRenderStatus() {
 
   const st = document.getElementById("ai-vault-status");
   if (st) {
-    if (vaultLegacyPlaintext && !exists) {
-      st.textContent = "Plaintext secrets found on disk — set a passphrase to encrypt them";
-    } else if (vaultHasUnsavedSecrets()) {
+    // The "will NOT be saved" warning wins over the legacy notice — it is about
+    // data the user is actively losing right now.
+    if (vaultHasUnsavedSecrets()) {
       st.textContent = exists
         ? "Vault locked — the keys you typed will NOT be saved"
         : "No passphrase set — the keys you typed will NOT be saved";
+    } else if (vaultUndecryptable.size) {
+      st.textContent = `${vaultUndecryptable.size} stored secret(s) could not be decrypted — kept as-is, re-enter them`;
+    } else if (vaultHasLegacyPlaintext() && !exists) {
+      st.textContent = "Plaintext secrets found on disk — set a passphrase to encrypt them";
     } else {
       st.textContent = !exists ? "No passphrase set — API keys will not be saved"
         : unlocked ? "Vault unlocked — secrets are encrypted on disk"
@@ -4117,10 +4213,13 @@ function vaultSetError(msg) {
   e.classList.toggle("hidden", !msg);
 }
 
+let vaultReturnFocusTo = null;
+
 function vaultOpenModal(mode) {
   vaultMode = mode;
   const ov = document.getElementById("vault-overlay");
   if (!ov) return;
+  vaultReturnFocusTo = document.activeElement;
   const creating = mode !== "unlock";
   const title = document.getElementById("vault-modal-title");
   if (title) title.textContent = mode === "unlock" ? "Unlock secret vault"
@@ -4147,34 +4246,45 @@ function vaultCloseModal() {
   if (p1) p1.value = "";
   if (p2) p2.value = "";
   vaultSetError("");
+  vaultReturnFocusTo?.focus?.();
+  vaultReturnFocusTo = null;
 }
 
+let vaultSubmitInFlight = false;
+
 async function vaultSubmitModal() {
+  // Guards the Enter path too — two concurrent vaultCreate calls would race on
+  // vaultKey/vaultMeta and could commit one salt while encrypting under another.
+  if (vaultSubmitInFlight) return;
   const pass = document.getElementById("vault-pass")?.value || "";
   if (!pass) { vaultSetError("Enter a passphrase"); return; }
   const ok = document.getElementById("vault-ok");
   const okLabel = vaultMode === "unlock" ? "Unlock" : "Save";
+  vaultSubmitInFlight = true;
   if (ok) { ok.disabled = true; ok.textContent = "Working…"; }
   try {
     if (vaultMode === "unlock") {
       if (!(await vaultUnlock(pass))) { vaultSetError("Wrong passphrase"); return; }
       loadSettingsUI();
       pentestRenderProjectList();
-      showToast("Vault unlocked");
+      showToast(vaultUndecryptable.size
+        ? `Vault unlocked — ${vaultUndecryptable.size} secret(s) could not be decrypted`
+        : "Vault unlocked");
     } else {
       // Re-keying only works unlocked, otherwise the plaintext to re-encrypt is gone.
       if (vaultMode === "change" && !vaultUnlocked()) { vaultSetError("Unlock the vault first"); return; }
       if (pass.length < 8) { vaultSetError("Use at least 8 characters"); return; }
       if (pass !== (document.getElementById("vault-pass2")?.value || "")) { vaultSetError("Passphrases do not match"); return; }
-      await vaultCreate(pass);
-      saveSettings();        // re-encrypt whatever is in the form right now
-      pentestSaveProjects();
+      // vaultCreate re-encrypts settings and projects and commits them together
+      // with the new metadata in one atomic write.
+      await vaultEnqueueWrite(() => vaultCreate(pass));
       showToast(vaultMode === "change" ? "Passphrase changed" : "Vault created — secrets are now encrypted");
     }
     vaultCloseModal();
   } catch (err) {
     vaultSetError("Vault error: " + (err?.message || err));
   } finally {
+    vaultSubmitInFlight = false;
     if (ok) { ok.disabled = false; ok.textContent = okLabel; }
     vaultRenderStatus();
   }
@@ -4194,13 +4304,19 @@ function wireVaultUI() {
   document.getElementById("vault-ok")?.addEventListener("click", vaultSubmitModal);
   document.getElementById("vault-cancel")?.addEventListener("click", vaultCloseModal);
   document.getElementById("vault-cancel-x")?.addEventListener("click", vaultCloseModal);
-  for (const id of ["vault-pass", "vault-pass2"]) {
-    document.getElementById(id)?.addEventListener("keydown", e => {
-      if (e.key === "Enter") { e.preventDefault(); vaultSubmitModal(); }
-      if (e.key === "Escape") { e.preventDefault(); vaultCloseModal(); }
-    });
-  }
-  vaultRenderStatus();
+
+  const ov = document.getElementById("vault-overlay");
+  // Click-outside to dismiss, matching the project wizard's behaviour.
+  ov?.addEventListener("click", e => { if (e.target === e.currentTarget) vaultCloseModal(); });
+  // Enter/Escape anywhere in the modal, not just while a passphrase field has focus.
+  ov?.addEventListener("keydown", e => {
+    if (e.key === "Escape") { e.preventDefault(); vaultCloseModal(); }
+    if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); vaultSubmitModal(); }
+  });
+
+  // vaultMeta loads in parallel with wiring — render once it is there, or the bar
+  // would offer "Set passphrase" to a user who already has a vault.
+  vaultLoadMeta().then(vaultRenderStatus);
 }
 
 // ═══════════════════════════ SETTINGS ═════════════════════════════════════════
@@ -4229,9 +4345,10 @@ async function loadSettings() {
   // Exception: keys written in plaintext by an earlier build stay usable for this
   // session so nothing breaks — the vault bar prompts the user to encrypt them.
   for (const k of SECRET_SETTING_KEYS) {
-    if (settings[k]) vaultLegacyPlaintext = true;
+    if (settings[k]) vaultLegacySettingKeys.add(k);
     else settings[k] = "";
   }
+  vaultMarkSettingsLoaded();
 }
 
 function getActiveSystemPrompt() {
@@ -4790,7 +4907,11 @@ function saveSettings() {
   if (!settings.engagementVulnModes) settings.engagementVulnModes = {};
 
   // Secrets are encrypted on the way out; the in-memory copy keeps the plaintext.
-  vaultSealSettings(settings).then(sealed => chrome.storage.local.set({ voidSettings: sealed }));
+  // Serialized through vaultWriteQueue so overlapping saves land in call order.
+  const settingsWritten = vaultEnqueueWrite(async () => {
+    const sealed = await vaultSealSettings(settings);
+    await new Promise(r => chrome.storage.local.set({ voidSettings: sealed }, r));
+  });
   vaultRenderStatus();
 
   // Push to background (in-memory only, never persisted there)
@@ -4801,9 +4922,18 @@ function saveSettings() {
     aiProxyWs.send(JSON.stringify({ type: "dns_overrides", enabled: settings.dnsEnabled !== false, mappings: settings.dnsOverrides || "" }));
   }
 
+  // Don't claim success when the vault silently dropped a secret the user typed.
+  const dropped = vaultDroppedSecretKeys();
   const st = document.getElementById("cfg-status");
-  st.textContent = "Saved";
-  setTimeout(() => { st.textContent = ""; }, 1500);
+  if (dropped.length) {
+    st.textContent = vaultExists() ? "Saved — unlock the vault to store API keys"
+                                   : "Saved — set a vault passphrase to store API keys";
+    showToast(`Not saved: ${dropped.join(", ")} — ${vaultExists() ? "unlock" : "set"} the vault passphrase first`);
+  } else {
+    st.textContent = "Saved";
+  }
+  setTimeout(() => { st.textContent = ""; }, dropped.length ? 4000 : 1500);
+  return settingsWritten;
 }
 
 function loadSettingsUI() {
@@ -5657,8 +5787,9 @@ function buildSessionData() {
     endpoints:    state.endpoints || [],
     technologies: state.technologies || [],
     headers:      state.headers || {},
-    // Settings
-    settings,
+    // Settings — redacted: sessions are saved to storage AND exported to a file
+    // the user may share, so no secret may ride along.
+    settings: vaultRedact(settings),
     // Target scope
     scopeInclude: document.getElementById("tgt-scope-include").value,
     scopeExclude: document.getElementById("tgt-scope-exclude").value,
@@ -5853,9 +5984,12 @@ async function applySessionData(data) {
   if (data.technologies) state.technologies = data.technologies;
   if (data.headers) state.headers = data.headers;
 
-  // Restore settings
+  // Restore settings. A session file carries no secrets, so keep the ones held in
+  // this session and — critically — carry __secrets forward, or the save below
+  // would overwrite the vault's ciphertext with an empty object.
   if (data.settings) {
-    settings = { ...DEFAULT_SETTINGS, ...data.settings };
+    const keptSecrets = Object.fromEntries(SECRET_SETTING_KEYS.map(k => [k, settings[k]]));
+    settings = { ...DEFAULT_SETTINGS, ...vaultRedact(data.settings), ...keptSecrets, __secrets: settings.__secrets };
     loadSettingsUI();
     saveSettings();
   }
@@ -9540,10 +9674,11 @@ function pentestLoadProjects() {
       for (const p of pentestProjects) {
         if (!p.credentials) continue;
         for (const k of SECRET_PROJECT_KEYS) {
-          if (p.credentials[k]) vaultLegacyPlaintext = true;
+          if (p.credentials[k]) vaultLegacyProjectKeys.add(p.id + ":" + k);
           else p.credentials[k] = "";
         }
       }
+      vaultMarkProjectsLoaded();
       resolve();
     });
   });
@@ -9551,14 +9686,16 @@ function pentestLoadProjects() {
 
 function pentestSaveProjects() {
   // Credentials are encrypted on the way out; the in-memory copy keeps the plaintext.
-  vaultSealProjects(pentestProjects).then(sealed => {
-    chrome.storage.local.set({
+  const written = vaultEnqueueWrite(async () => {
+    const sealed = await vaultSealProjects(pentestProjects);
+    await new Promise(r => chrome.storage.local.set({
       voidPentestProjects: sealed,
       voidPentestActiveProject: pentestActiveProjectId,
-    });
+    }, r));
   });
   pentestRenderProjectList();
   pentestRenderContextBar();
+  return written;
 }
 
 function pentestGetActive() {
@@ -9874,12 +10011,13 @@ function wizBack() {
 }
 
 function wizUpdateUI() {
-  // Show/hide steps
-  document.querySelectorAll('.ai-wizard-step').forEach(el => {
+  // Scoped to the wizard overlay — a bare `.ai-wizard-step` selector would also
+  // hide any other modal that reused the class.
+  document.querySelectorAll('#ai-wizard-overlay .ai-wizard-step').forEach(el => {
     el.classList.toggle('hidden', parseInt(el.dataset.step) !== wizStep);
   });
   // Update dots
-  document.querySelectorAll('.ai-wizard-dot').forEach(dot => {
+  document.querySelectorAll('#ai-wizard-overlay .ai-wizard-dot').forEach(dot => {
     const s = parseInt(dot.dataset.step);
     dot.classList.toggle('active', s === wizStep);
     dot.classList.toggle('done', s < wizStep);
@@ -11539,7 +11677,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("cfg-save").addEventListener("click", saveSettings);
   document.getElementById("cfg-reset").addEventListener("click", () => {
-    settings = { ...DEFAULT_SETTINGS };
+    // Resetting preferences must not silently empty the vault — keep the secrets
+    // and their ciphertext, since voidVault (and thus the passphrase) survives too.
+    const keptSecrets = Object.fromEntries(SECRET_SETTING_KEYS.map(k => [k, settings[k]]));
+    settings = { ...DEFAULT_SETTINGS, ...keptSecrets, __secrets: settings.__secrets };
     loadSettingsUI();
     saveSettings();
   });
@@ -12400,6 +12541,7 @@ document.addEventListener("DOMContentLoaded", () => {
     pentestLoadProjects().then(() => {
       pentestRenderProjectList();
       pentestRenderContextBar();
+      vaultRenderStatus(); // projects can contribute legacy-plaintext state
     });
 
     // New project button

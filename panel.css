@@ -2911,6 +2911,9 @@ html.theme-hacker {
 .ai-vault-btn { flex: none; align-self: center; padding: 4px 10px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); cursor: pointer; }
 .ai-vault-btn:hover { border-color: var(--accent); color: var(--accent); }
 .vault-modal { width: 420px; }
+/* Deliberately NOT .ai-wizard-step — wizUpdateUI toggles `hidden` on every element
+   with that class, which would permanently hide this modal's body. */
+.vault-modal-body { padding: 16px 20px; }
 .vault-error { margin-top: 10px; font-size: 12px; color: var(--red, #e55); }
 
 .ai-wizard-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; }

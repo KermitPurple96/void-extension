@@ -34,6 +34,21 @@ async function launchExt() {
   });
   const sw = ctx.serviceWorkers()[0] || await ctx.waitForEvent('serviceworker');
   const page = await ctx.newPage();
+
+  // Listeners must be attached BEFORE goto. Attaching them afterwards makes
+  // load-time failures invisible — which is exactly the class of bug DEVTOOLS_STUB
+  // exists to prevent (a top-level throw in panel.js aborting the whole script).
+  // Only environment-only noise is filtered. "No tab with id" is unavoidable here:
+  // DEVTOOLS_STUB reports a synthetic tabId because the harness has no inspected
+  // page, so panel.js's chrome.tabs.get(TAB_ID) cannot resolve. Everything else —
+  // including anything thrown while panel.js evaluates — must fail the suite.
+  const ENV_ONLY = [/No tab with id/, /Extension context/, /Permissions policy/, /favicon/];
+  page.on('console', m => {
+    const t = m.text();
+    if (m.type() === 'error' && !ENV_ONLY.some(re => re.test(t))) errors.push(t.substring(0, 200));
+  });
+  page.on('pageerror', e => errors.push('UNCAUGHT:' + e.message.substring(0, 200)));
+
   await page.addInitScript(DEVTOOLS_STUB);
   await page.goto(`chrome-extension://${sw.url().split('/')[2]}/panel.html`);
   await page.waitForTimeout(3000);
@@ -46,8 +61,6 @@ test.describe('Void Extension AI Pentest', () => {
   let ctx, page;
   test.beforeAll(async () => {
     ({ ctx, page } = await launchExt());
-    page.on('console', m => { if (m.type() === 'error' && !m.text().includes('chrome.devtools') && !m.text().includes('Extension context') && !m.text().includes('Permissions policy') && !m.text().includes('favicon')) errors.push(m.text().substring(0, 200)); });
-    page.on('pageerror', e => errors.push('UNCAUGHT:' + e.message.substring(0, 200)));
   });
   test.afterAll(async () => { await ctx?.close(); });
 
@@ -177,6 +190,18 @@ test.describe('Void Extension AI Pentest', () => {
     await expect(page.locator('#ai-vault-status')).toHaveText(/No passphrase set/);
   });
 
+  test('Vault: modal survives the wizard having been opened', async () => {
+    // Regression: the modal body reused .ai-wizard-step, and wizUpdateUI toggles
+    // `hidden` on every element with that class document-wide. Opening the project
+    // wizard once permanently hid the vault modal's inputs for the rest of the
+    // session — the modal appeared as a header and footer with nothing between.
+    await page.evaluate(() => { wizOpen(); wizClose(); });
+    await page.evaluate(() => vaultOpenModal('create'));
+    await expect(page.locator('#vault-pass')).toBeVisible();
+    await expect(page.locator('#vault-modal-desc')).toBeVisible();
+    await page.evaluate(() => vaultCloseModal());
+  });
+
   test('Vault: setup button opens the modal with a confirm field', async () => {
     await page.evaluate(() => showTab('settings'));
     await page.locator('.ai-settings-tab[data-aitab="models"]').click();
@@ -264,6 +289,30 @@ test.describe('Void Extension AI Pentest', () => {
     expect(red.__secrets).toBeUndefined();
   });
 
+  test('Vault: saving a session does not smuggle secrets into storage', async () => {
+    // buildSessionData() embeds the whole settings object, and a session is both
+    // written to storage and offered as a downloadable file — it bypassed the vault
+    // completely until settings were redacted at the source.
+    const sessionJson = await page.evaluate(() => JSON.stringify(buildSessionData()));
+    expect(sessionJson).not.toContain(SECRET);
+    expect(sessionJson).not.toContain(PROXY_PASS);
+
+    await page.evaluate(() => {
+      document.getElementById('session-name').value = 'E2E Vault Session';
+      return saveSessionToBrowser();
+    });
+    await page.waitForTimeout(500);
+    const stored = await readStorage();
+    expect(Object.keys(stored.voidSessions || {}).length).toBeGreaterThan(0); // it really saved
+
+    // Sweep EVERY key in storage, not just the ones we expect to be involved.
+    const dump = JSON.stringify(await readStorage());
+    expect(dump).not.toContain(SECRET);
+    expect(dump).not.toContain(PROXY_PASS);
+    expect(dump).not.toContain('e2e-project-password');
+    expect(dump).not.toContain('e2e-project-token');
+  });
+
   test('Vault: lock wipes plaintext from memory and the UI', async () => {
     await page.locator('#ai-vault-lock').click();
     expect(await page.evaluate(() => vaultUnlocked())).toBe(false);
@@ -314,7 +363,16 @@ test.describe('Void Extension AI Pentest', () => {
     await page.locator('#vault-pass').fill('a completely new passphrase');
     await page.locator('#vault-ok').click();
     await expect(page.locator('#vault-overlay')).toBeHidden();
-    expect(await page.evaluate(() => settings.aiPrimaryKey)).toBe(SECRET); // survived the re-key
+    // Both halves must survive — re-encrypting settings but not projects passed
+    // every test while silently destroying every stored credential.
+    expect(await page.evaluate(() => settings.aiPrimaryKey)).toBe(SECRET);
+    expect(await page.evaluate(() => settings.authPass)).toBe(PROXY_PASS);
+    expect(await page.evaluate(() => pentestProjects.find(p => p.name === 'E2E Vault Project').credentials.password))
+      .toBe('e2e-project-password');
+    // ...and the new ciphertext is on disk, not just in memory
+    const dump = JSON.stringify(await readStorage());
+    expect(dump).not.toContain(SECRET);
+    expect(dump).not.toContain('e2e-project-password');
   });
 
   // ═══ Console health ═══
