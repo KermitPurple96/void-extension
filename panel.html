@@ -2129,6 +2129,29 @@
     </div>
   </div>
 
+  <!-- ═══ Credential Warning Before Export ══════════════════════════════════ -->
+  <div id="export-scan-overlay" class="ai-wizard-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="export-scan-title">
+    <div class="ai-wizard-modal vault-modal">
+      <div class="ai-wizard-header">
+        <span id="export-scan-title" class="ai-wizard-title">Credentials found in this export</span>
+        <button id="export-scan-x" class="ai-wizard-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="vault-modal-body">
+        <div class="settings-section-desc" style="margin-bottom:10px">
+          Match &amp; Replace rules and auto-injected headers are not encrypted &mdash; the proxy needs them
+          on every request. This file would carry the following live credentials:
+        </div>
+        <ul id="export-scan-list" class="export-scan-list"></ul>
+      </div>
+      <div class="ai-wizard-nav">
+        <button id="export-scan-cancel" class="btn btn-sm btn-ghost">Cancel</button>
+        <div style="flex:1"></div>
+        <button id="export-scan-anyway" class="btn btn-sm btn-ghost">Export anyway</button>
+        <button id="export-scan-redact" class="btn btn-sm btn-accent">Redact &amp; export</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ Secret Vault Passphrase Prompt ════════════════════════════════════ -->
   <div id="vault-overlay" class="ai-wizard-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="vault-modal-title">
     <div class="ai-wizard-modal vault-modal">

@@ -7,7 +7,7 @@ Phases 1-6 COMPLETE: 8 data files (651KB skills, 519 payloads, 11 agents, 6 work
 
 All three open code-review items are fixed (secret vault, dead code, wizard null-safety),
 then a 4-agent code review over that work found and fixed 2 CRITICAL + 4 HIGH on top.
-Tests: 509 Node (`npm test`) + 53 Playwright (`npm run test:browser`), all passing.
+Tests: 539 Node (`npm test`) + 66 Playwright (`npm run test:browser`), all passing.
 
 ## Next
 1. **Test in real browser** — load extension, set a vault passphrase, create a pentest project, run AI chat against DVWA with deepseek-v4-pro via Ollama Cloud
@@ -45,3 +45,7 @@ credentials (`password`, `apiToken`) are AES-GCM encrypted before reaching `chro
   never overwritten with "" — that turns a recoverable problem into permanent loss.
 - Anything that serializes `settings` must redact: session save/export (`buildSessionData`), settings
   profiles, and settings export. Session/profile RESTORE must carry `__secrets` forward.
+- `matchReplace` and `autoHeaders` are deliberately NOT in the vault: background.js applies them on
+  every request, so encrypting them would make the proxy silently stop rewriting while locked. Instead
+  `scanForCredentials` warns before either file-producing export (settings export, session export),
+  offering Redact / Export anyway / Cancel. Storage-only writes intentionally do not scan.

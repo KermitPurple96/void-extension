@@ -375,6 +375,158 @@ test.describe('Void Extension AI Pentest', () => {
     expect(dump).not.toContain('e2e-project-password');
   });
 
+  // ═══ Credential scan before export ═══
+  // M&R rules and auto-headers are deliberately NOT vault-encrypted (background.js
+  // applies them on every request), so the protection is a warning before a file
+  // carrying them leaves the machine.
+  test('Export scan: flags Authorization and Cookie values', async () => {
+    const hits = await page.evaluate(() => scanForCredentials({
+      autoHeaders: 'Authorization: Bearer abcdefghijklmnop\nX-Trace: 1',
+      matchReplace: [{ match: 'a', replace: 'Cookie: PHPSESSID=8f3a9c2b7d1e' }],
+    }));
+    const names = hits.map(h => h.name);
+    expect(names).toContain('Authorization header');
+    expect(names).toContain('Bearer token');
+    expect(names).toContain('Cookie header');
+    expect(hits.some(h => h.field === 'autoHeaders')).toBe(true);
+    expect(hits.some(h => h.field === 'matchReplace')).toBe(true);
+  });
+
+  test('Export scan: flags a JWT anywhere in a rule', async () => {
+    const hits = await page.evaluate(() => scanForCredentials({
+      matchReplace: [{ match: 'x', replace: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NX0.dBjftJeZ4CVP' }],
+    }));
+    expect(hits.map(h => h.name)).toContain('JWT');
+  });
+
+  test('Export scan: stays quiet on ordinary rules', async () => {
+    const hits = await page.evaluate(() => scanForCredentials({
+      autoHeaders: 'X-Requested-With: XMLHttpRequest\nAccept: application/json',
+      matchReplace: [{ match: 'foo', replace: 'bar' }],
+    }));
+    expect(hits).toHaveLength(0);
+  });
+
+  test('Export scan: redaction empties only the scanned fields', async () => {
+    const out = await page.evaluate(() => redactCredentialFields({
+      autoHeaders: 'Authorization: Bearer secret-value-here',
+      matchReplace: [{ match: 'a', replace: 'b' }],
+      timeout: '30000',
+      scopeInclude: 'example.com',
+    }));
+    expect(out.autoHeaders).toBe('');
+    expect(out.matchReplace).toEqual([]);
+    expect(out.timeout).toBe('30000');       // untouched
+    expect(out.scopeInclude).toBe('example.com');
+  });
+
+  test('Export scan: dialog lists the findings and Cancel resolves cancel', async () => {
+    const choice = page.evaluate(() => confirmCredentialExport([
+      { field: 'autoHeaders', name: 'Authorization header' },
+      { field: 'matchReplace', name: 'Session cookie' },
+    ]));
+    await expect(page.locator('#export-scan-overlay')).toBeVisible();
+    await expect(page.locator('#export-scan-list li')).toHaveCount(2);
+    await expect(page.locator('#export-scan-list')).toContainText('Authorization header');
+    await expect(page.locator('#export-scan-list')).toContainText('in matchReplace');
+    await page.locator('#export-scan-cancel').click();
+    expect(await choice).toBe('cancel');
+    await expect(page.locator('#export-scan-overlay')).toBeHidden();
+  });
+
+  test('Export scan: Redact button resolves redact', async () => {
+    const choice = page.evaluate(() => confirmCredentialExport([{ field: 'autoHeaders', name: 'JWT' }]));
+    await expect(page.locator('#export-scan-overlay')).toBeVisible();
+    await page.locator('#export-scan-redact').click();
+    expect(await choice).toBe('redact');
+  });
+
+  // ═══ Intruder grep + payload processing ═══
+  test('Intruder: row builder emits all 8 columns', async () => {
+    const tdCount = await page.evaluate(() => {
+      const html = intrRowCells({ id: 1, payload: 'p', status: 200, elapsed: 5, grepMatch: true, grepExtract: 'hit' }, 'x', '10', 'body');
+      const d = document.createElement('tbody');
+      d.innerHTML = '<tr>' + html + '</tr>';
+      return d.querySelectorAll('td').length;
+    });
+    const thCount = await page.locator('#intr-table thead th').count();
+    expect(tdCount).toBe(thCount); // was 6 vs 8 — preview rendered under "Grep"
+    expect(tdCount).toBe(8);
+  });
+
+  test('Intruder: grep match and extract reach the row', async () => {
+    const html = await page.evaluate(() =>
+      intrRowCells({ id: 3, payload: 'admin', status: 200, elapsed: 12, grepMatch: true, grepExtract: 'token=abc' }, 'ok', '1k', 'preview'));
+    expect(html).toContain('intr-grep-hit');
+    expect(html).toContain('token=abc');
+  });
+
+  test('Intruder: grep regex drives match and extract', async () => {
+    const out = await page.evaluate(() => {
+      document.getElementById('intr-grep-match').value = 'admin panel';
+      document.getElementById('intr-grep-extract').value = 'csrf_token=([a-f0-9]+)';
+      const hit = intrGrepResult('welcome to the admin panel, csrf_token=deadbeef99');
+      const miss = intrGrepResult('403 forbidden');
+      document.getElementById('intr-grep-match').value = '';
+      document.getElementById('intr-grep-extract').value = '';
+      return { hit, miss };
+    });
+    expect(out.hit.grepMatch).toBe(true);
+    expect(out.hit.grepExtract).toBe('deadbeef99'); // capture group, not whole match
+    expect(out.miss.grepMatch).toBe(false);
+  });
+
+  test('Intruder: an invalid grep regex does not throw', async () => {
+    const out = await page.evaluate(() => {
+      document.getElementById('intr-grep-match').value = '([unclosed';
+      const r = intrGrepResult('anything');
+      document.getElementById('intr-grep-match').value = '';
+      return r;
+    });
+    expect(out.grepMatch).toBe(false);
+  });
+
+  test('Intruder: payload processing actually transforms payloads', async () => {
+    const out = await page.evaluate(async () => ({
+      urlenc: await intrProcessPayload('a b&c', 'url-encode', ''),
+      b64: await intrProcessPayload('admin', 'base64-encode', ''),
+      upper: await intrProcessPayload('admin', 'uppercase', ''),
+      prefix: await intrProcessPayload('admin', 'prefix', 'x-'),
+      suffix: await intrProcessPayload('admin', 'suffix', '!'),
+      none: await intrProcessPayload('admin', '', ''),
+    }));
+    expect(out.urlenc).toBe('a%20b%26c');
+    expect(out.b64).toBe('YWRtaW4=');
+    expect(out.upper).toBe('ADMIN');
+    expect(out.prefix).toBe('x-admin');
+    expect(out.suffix).toBe('admin!');
+    expect(out.none).toBe('admin');
+  });
+
+  test('Intruder: SHA-1 and SHA-256 really hash', async () => {
+    // These used to return the payload untouched, silently running a completely
+    // different attack from the one selected.
+    const out = await page.evaluate(async () => ({
+      sha1: await intrProcessPayload('abc', 'sha1', ''),
+      sha256: await intrProcessPayload('abc', 'sha256', ''),
+      md5: await intrProcessPayload('abc', 'md5', ''),
+    }));
+    expect(out.sha1).toBe('a9993e364706816aba3e25717850c26c9cd0d89d');
+    expect(out.sha256).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    expect(out.md5).toBe('900150983cd24fb0d6963f7d28e17f72');
+  });
+
+  test('Intruder: processing is applied when building requests', async () => {
+    const raw = await page.evaluate(async () => {
+      document.getElementById('intr-proc').value = 'base64-encode';
+      const reqs = await intrBuildRequests('GET /?u=§x§ HTTP/1.1', 'battering-ram', ['admin']);
+      document.getElementById('intr-proc').value = '';
+      return reqs.map(r => r.raw);
+    });
+    expect(raw[0]).toContain('YWRtaW4=');  // processed
+    expect(raw[0]).not.toContain('=admin'); // not the raw payload
+  });
+
   // ═══ Console health ═══
   test('No JS console errors', async () => {
     expect(errors, 'Errors: ' + errors.join('; ')).toHaveLength(0);

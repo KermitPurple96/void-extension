@@ -2900,6 +2900,16 @@ html.theme-hacker {
 .ai-context-bar .btn-xs { padding: 3px 8px; font-size: 11px; }
 
 /* ── Project creation wizard ────────────────────────────── */
+/* Credential warning before export */
+.export-scan-list { margin: 0; padding-left: 18px; font-size: 12px; }
+.export-scan-list li { margin-bottom: 4px; }
+.export-scan-list .export-scan-field { opacity: 0.6; }
+
+/* Intruder grep columns */
+.intr-td-grep { text-align: center; }
+.intr-grep-hit { color: var(--green, #3fb950); font-size: 13px; }
+.intr-td-extract { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; font-size: 11px; opacity: 0.85; }
+
 /* Secret vault */
 .ai-vault-bar { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg2); }
 .ai-vault-bar.unlocked { border-color: var(--green, #3fb950); }

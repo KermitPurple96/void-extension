@@ -3104,6 +3104,9 @@ function intrRenderResults() {
       case "status":  va = a.status || 0; vb = b.status || 0; break;
       case "length":  va = a.length || 0; vb = b.length || 0; break;
       case "elapsed": va = a.elapsed || 0; vb = b.elapsed || 0; break;
+      // The <th>s declare these sort keys; without cases they silently fell through.
+      case "grep":    va = a.grepMatch ? 1 : 0; vb = b.grepMatch ? 1 : 0; break;
+      case "extract": va = a.grepExtract || ""; vb = b.grepExtract || ""; break;
       default:        va = a.id; vb = b.id;
     }
     if (typeof va === "string") { va = va.toLowerCase(); vb = vb.toLowerCase(); }
@@ -3126,14 +3129,7 @@ function intrRenderResults() {
       : entry.status < 400 ? "hist-td-status-rdir" : "hist-td-status-err";
     const lenStr = entry.length > 1024 ? `${(entry.length/1024).toFixed(1)}k` : entry.length;
     const preview = (entry.body || "").slice(0, 120).replace(/\n/g, " ");
-    tr.innerHTML = `
-      <td class="hist-td-num">${Number(entry.id) || 0}</td>
-      <td title="${esc(entry.payload)}">${esc(entry.payload)}</td>
-      <td class="${statusCls}">${esc(String(entry.status))}</td>
-      <td class="hist-td-len">${esc(String(lenStr))}</td>
-      <td class="hist-td-elapsed">${Number(entry.elapsed) || 0}</td>
-      <td class="hist-td-mime" title="${esc(preview)}">${esc(preview)}</td>
-    `;
+    tr.innerHTML = intrRowCells(entry, statusCls, lenStr, preview);
     if (entry.reflected) {
       const dot = document.createElement("span");
       dot.className = "hist-reflect-dot";
@@ -3196,7 +3192,7 @@ function intrExpandPayloads(raw) {
   return result;
 }
 
-function intrBuildRequests(template, attackType, payloadSets) {
+async function intrBuildRequests(template, attackType, payloadSets) {
   const posRegex = /§([^§]*)§/g;
   const positions = [];
   let m;
@@ -3206,7 +3202,15 @@ function intrBuildRequests(template, attackType, payloadSets) {
 
   if (!positions.length) return [];
 
-  const expanded = payloadSets.map(ps => intrExpandPayloads(ps));
+  // Payload processing is per-payload and position-independent, so apply it once
+  // to each expanded list rather than at every substitution site.
+  const proc = document.getElementById("intr-proc")?.value || "";
+  const procVal = document.getElementById("intr-proc-val")?.value || "";
+  const expanded = [];
+  for (const ps of payloadSets) {
+    const list = intrExpandPayloads(ps);
+    expanded.push(proc ? await Promise.all(list.map(p => intrProcessPayload(p, proc, procVal))) : list);
+  }
   const requests = [];
 
   if (attackType === "sniper") {
@@ -3341,7 +3345,7 @@ async function intrStart() {
     return;
   }
 
-  const requests = intrBuildRequests(template, attackType, intrPayloadSets);
+  const requests = await intrBuildRequests(template, attackType, intrPayloadSets);
   if (!requests.length) { document.getElementById("intr-status").textContent = "No positions/payloads"; return; }
 
   intrResults = [];
@@ -3411,6 +3415,7 @@ async function intrStart() {
       // Computed once here rather than per render — the row indicator and the
       // Reflections filter both read it.
       entry.reflected = detectReflections(intrReflectEntry(entry)).length;
+      Object.assign(entry, intrGrepResult(entry.body));
       intrResults.push(entry);
 
       // Add row to table
@@ -3420,14 +3425,7 @@ async function intrStart() {
         : res.status < 400 ? "hist-td-status-rdir" : "hist-td-status-err";
       const lenStr = entry.length > 1024 ? `${(entry.length/1024).toFixed(1)}k` : entry.length;
       const preview = (entry.body || "").slice(0, 120).replace(/\n/g, " ");
-      tr.innerHTML = `
-        <td class="hist-td-num">${Number(entry.id) || 0}</td>
-        <td title="${esc(entry.payload)}">${esc(entry.payload)}</td>
-        <td class="${statusCls}">${esc(String(entry.status))}</td>
-        <td class="hist-td-len">${esc(String(lenStr))}</td>
-        <td class="hist-td-elapsed">${Number(entry.elapsed) || 0}</td>
-        <td class="hist-td-mime" title="${esc(preview)}">${esc(preview)}</td>
-      `;
+      tr.innerHTML = intrRowCells(entry, statusCls, lenStr, preview);
       if (entry.reflected) {
         const dot = document.createElement("span");
         dot.className = "hist-reflect-dot";
@@ -4157,6 +4155,106 @@ function vaultDroppedSecretKeys() {
 }
 
 function vaultHasUnsavedSecrets() { return vaultDroppedSecretKeys().length > 0; }
+
+// ── Credential scan for outgoing files ──────────────────────────────────────
+// Match & Replace rules and auto-injected headers routinely carry live session
+// cookies and Authorization values. They deliberately stay OUT of the vault —
+// background.js applies them on every request, so encrypting them would make the
+// proxy silently stop rewriting whenever the vault is locked. What we can close is
+// the sharing vector: warn before those values leave the machine in a file.
+
+const EXPORT_SCAN_FIELDS = ["matchReplace", "autoHeaders"];
+const CREDENTIAL_PATTERNS = [
+  { name: "Authorization header", re: /^\s*authorization\s*:\s*\S/im },
+  { name: "Bearer token", re: /\bbearer\s+[A-Za-z0-9._~+/-]{8,}/i },
+  { name: "Cookie header", re: /^\s*(?:set-)?cookie\s*:\s*\S/im },
+  { name: "Session cookie", re: /\b(?:PHPSESSID|JSESSIONID|ASP\.NET_SessionId|session(?:id)?|sid|auth[_-]?token)\s*=\s*\S{6,}/i },
+  { name: "API key header", re: /^\s*x-(?:api[_-]?key|auth[_-]?token|access[_-]?token)\s*:\s*\S/im },
+  { name: "JWT", re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+/ },
+  { name: "Basic auth credentials", re: /\bbasic\s+[A-Za-z0-9+/]{12,}={0,2}/i },
+];
+
+// Flatten a settings field into the individual strings worth scanning. Rules are
+// scanned value by value rather than as one JSON blob, so the line-anchored header
+// patterns still work once a rule is inside an array of objects.
+function collectScannableStrings(value, out = []) {
+  if (typeof value === "string") { if (value) out.push(value); return out; }
+  if (Array.isArray(value)) { for (const v of value) collectScannableStrings(v, out); return out; }
+  if (value && typeof value === "object") { for (const v of Object.values(value)) collectScannableStrings(v, out); }
+  return out;
+}
+
+// Returns [{ field, name }] for every credential-shaped value in the fields that
+// are about to be written to a file. One entry per field+pattern, not per match.
+function scanForCredentials(obj) {
+  const hits = [];
+  for (const field of EXPORT_SCAN_FIELDS) {
+    const strings = collectScannableStrings(obj?.[field]);
+    if (!strings.length) continue;
+    for (const { name, re } of CREDENTIAL_PATTERNS) {
+      if (strings.some(s => re.test(s))) hits.push({ field, name });
+    }
+  }
+  return hits;
+}
+
+// Blank the scanned fields. Used when the user chooses to redact before download.
+function redactCredentialFields(obj) {
+  const out = { ...obj };
+  for (const field of EXPORT_SCAN_FIELDS) {
+    if (!(field in out)) continue;
+    out[field] = Array.isArray(out[field]) ? [] : "";
+  }
+  return out;
+}
+
+// Shows the warning and resolves with what the user chose:
+// "redact" | "anyway" | "cancel". Resolves "anyway" if the dialog is missing, so a
+// broken overlay can never block an export outright.
+function confirmCredentialExport(hits) {
+  return new Promise(resolve => {
+    const ov = document.getElementById("export-scan-overlay");
+    const list = document.getElementById("export-scan-list");
+    if (!ov || !list) { resolve("anyway"); return; }
+
+    list.replaceChildren();
+    for (const h of hits) {
+      const li = el("li");
+      li.textContent = h.name;
+      const src = el("span");
+      src.className = "export-scan-field";
+      src.textContent = ` — in ${h.field}`;
+      li.appendChild(src);
+      list.appendChild(li);
+    }
+
+    const returnFocusTo = document.activeElement;
+    const done = choice => {
+      ov.classList.add("hidden");
+      for (const [node, handler] of wired) node.removeEventListener("click", handler);
+      ov.removeEventListener("keydown", onKey);
+      returnFocusTo?.focus?.();
+      resolve(choice);
+    };
+    const onKey = e => { if (e.key === "Escape") { e.preventDefault(); done("cancel"); } };
+    const wired = [];
+    const wire = (id, choice) => {
+      const node = document.getElementById(id);
+      if (!node) return;
+      const handler = () => done(choice);
+      node.addEventListener("click", handler);
+      wired.push([node, handler]);
+    };
+    wire("export-scan-redact", "redact");
+    wire("export-scan-anyway", "anyway");
+    wire("export-scan-cancel", "cancel");
+    wire("export-scan-x", "cancel");
+    ov.addEventListener("keydown", onKey);
+
+    ov.classList.remove("hidden");
+    document.getElementById("export-scan-redact")?.focus();
+  });
+}
 
 // ── Vault UI ────────────────────────────────────────────────────────────────
 
@@ -5004,6 +5102,10 @@ function loadSettingsUI() {
   document.getElementById("cfg-intr-max-threads").value = settings.intrMaxThreads || "20";
   document.getElementById("cfg-intr-retry").value       = settings.intrRetry || "0";
   document.getElementById("cfg-intr-grep-default").value = settings.intrGrepDefault || "";
+  // Seed the Intruder's Extract box from the configured default — the setting was
+  // saved and reloaded but never actually applied anywhere.
+  const grepExtract = document.getElementById("intr-grep-extract");
+  if (grepExtract && !grepExtract.value && settings.intrGrepDefault) grepExtract.value = settings.intrGrepDefault;
   // Tools: Repeater
   document.getElementById("cfg-rep-update-cl").checked  = settings.repUpdateCl !== false;
   document.getElementById("cfg-rep-unpack").checked     = settings.repUnpack !== false;
@@ -5855,8 +5957,17 @@ async function saveSessionToBrowser() {
 }
 
 // ── Export to .json file ─────────────────────────────────────────────────────
-function exportSession() {
+async function exportSession() {
   const data = buildSessionData();
+  // Vault secrets are already stripped by buildSessionData; M&R rules and
+  // auto-headers are not, and this file leaves the machine.
+  const hits = scanForCredentials(data.settings);
+  let redacted = false;
+  if (hits.length) {
+    const choice = await confirmCredentialExport(hits);
+    if (choice === "cancel") { sessionStatus("Export cancelled"); return; }
+    if (choice === "redact") { data.settings = redactCredentialFields(data.settings); redacted = true; }
+  }
   const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
   const a = el("a");
   a.href = URL.createObjectURL(blob);
@@ -5865,7 +5976,7 @@ function exportSession() {
   a.download = `void-${host}-${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-  sessionStatus("Exported");
+  sessionStatus(redacted ? "Exported (credentials excluded)" : "Exported");
 }
 
 // ── Delete saved session ─────────────────────────────────────────────────────
@@ -8262,9 +8373,13 @@ function intrUpdateProgress(current, total) {
 
 // ═══════════════════════════ INTRUDER: CLUSTER BOMB + PAYLOAD PROCESSING ════
 
-function intrProcessPayload(payload) {
-  const proc = document.getElementById("intr-proc").value;
-  const val = document.getElementById("intr-proc-val").value;
+// Applied to every payload before it is substituted into the request template.
+// Async because SHA-1/SHA-256 go through crypto.subtle — returning the payload
+// unchanged for those (as this used to) silently produced a completely different
+// attack from the one the user selected.
+async function intrProcessPayload(payload, proc, val) {
+  if (proc === undefined) proc = document.getElementById("intr-proc")?.value || "";
+  if (val === undefined) val = document.getElementById("intr-proc-val")?.value || "";
   switch (proc) {
     case "url-encode": return encodeURIComponent(payload);
     case "url-decode": try { return decodeURIComponent(payload); } catch { return payload; }
@@ -8272,13 +8387,32 @@ function intrProcessPayload(payload) {
     case "base64-decode": try { return atob(payload); } catch { return payload; }
     case "hex-encode": return Array.from(payload).map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
     case "md5": return md5(payload);
-    case "sha1": case "sha256": return payload; // async crypto not practical inline; use Decoder tab
+    case "sha1": return cryptoHash("SHA-1", payload);
+    case "sha256": return cryptoHash("SHA-256", payload);
     case "lowercase": return payload.toLowerCase();
     case "uppercase": return payload.toUpperCase();
     case "prefix": return val + payload;
     case "suffix": return payload + val;
     default: return payload;
   }
+}
+
+// Single source of truth for an Intruder result row. The live-append path in
+// intrStart and the re-render in intrRenderResults both emitted six cells against
+// an eight-column header, so Grep/Extract never rendered and the response preview
+// showed up under the wrong heading — including for the ten specialised attack
+// modes that do compute those values.
+function intrRowCells(entry, statusCls, lenStr, preview) {
+  return `
+      <td class="hist-td-num">${Number(entry.id) || 0}</td>
+      <td title="${esc(entry.payload)}">${esc(entry.payload)}</td>
+      <td class="${statusCls}">${esc(String(entry.status))}</td>
+      <td class="hist-td-len">${esc(String(lenStr))}</td>
+      <td class="hist-td-elapsed">${Number(entry.elapsed) || 0}</td>
+      <td class="intr-td-grep">${entry.grepMatch ? '<span class="intr-grep-hit" title="Matched the grep pattern">●</span>' : ""}</td>
+      <td class="intr-td-extract" title="${esc(entry.grepExtract || "")}">${esc(entry.grepExtract || "")}</td>
+      <td class="hist-td-mime" title="${esc(preview)}">${esc(preview)}</td>
+    `;
 }
 
 function intrGrepResult(respBody) {
@@ -11732,13 +11866,24 @@ document.addEventListener("DOMContentLoaded", () => {
     cfgRefreshProfiles();
     showToast(`Profile "${name}" deleted`);
   });
-  document.getElementById("cfg-profile-export").addEventListener("click", () => {
+  document.getElementById("cfg-profile-export").addEventListener("click", async () => {
     saveSettings();
-    const blob = new Blob([JSON.stringify(vaultRedact(settings), null, 2)], { type: "application/json" });
+    let payload = vaultRedact(settings);
+    // Vault secrets are already gone; M&R rules and auto-headers are not, so give
+    // the user the call before live credentials leave in a file.
+    const hits = scanForCredentials(payload);
+    let redacted = false;
+    if (hits.length) {
+      const choice = await confirmCredentialExport(hits);
+      if (choice === "cancel") { showToast("Export cancelled"); return; }
+      if (choice === "redact") { payload = redactCredentialFields(payload); redacted = true; }
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = el("a"); a.href = URL.createObjectURL(blob);
     a.download = `void-settings-${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(a.href);
-    showToast("Settings exported (API keys excluded)");
+    showToast(redacted ? "Settings exported (API keys + credentials excluded)"
+                       : "Settings exported (API keys excluded)");
   });
   document.getElementById("cfg-profile-import").addEventListener("click", () => {
     document.getElementById("cfg-profile-file").click();
