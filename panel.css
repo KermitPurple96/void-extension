@@ -3144,6 +3144,9 @@ html.theme-hacker {
 /* ── AI input toolbar ───────────────────────────────────── */
 .ai-input-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; gap: 8px; }
 .ai-agent-switch { display: flex; gap: 3px; align-items: center; }
+.ai-agent-btn { padding: 3px 10px; border: 1px solid var(--border); background: transparent; color: var(--muted); border-radius: 3px; cursor: pointer; font-size: 11px; font-family: inherit; transition: color 0.15s, border-color 0.15s; }
+.ai-agent-btn:hover { color: var(--text); }
+.ai-agent-btn.active { color: var(--accent); border-color: var(--accent); font-weight: 600; }
 .ai-chat-agent-sel { min-width: 140px; font-size: 12px; padding: 3px 8px; }
 .ai-mode-switch { display: flex; gap: 3px; }
 .ai-mode-btn { padding: 3px 10px; border: 1px solid var(--border); background: transparent; color: var(--muted); border-radius: 3px; cursor: pointer; font-size: 11px; font-family: inherit; transition: color 0.15s, border-color 0.15s; }

@@ -36,6 +36,7 @@ window.VOID_WORKFLOWS = [
         "id": "api-recon",
         "name": "API Recon",
         "type": "PHASE",
+        "agent": "recon",
         "skill": "",
         "dependsOn": [],
         "goal": "Map the API surface — endpoints, versions, parameters, auth scheme, and object model",
@@ -69,6 +70,7 @@ window.VOID_WORKFLOWS = [
         "id": "authentication",
         "name": "Authentication",
         "type": "PHASE",
+        "agent": "authhunter",
         "skill": "",
         "dependsOn": [
           "api-recon"
@@ -99,6 +101,7 @@ window.VOID_WORKFLOWS = [
         "id": "api-object-and-property-security",
         "name": "API Object & Property Security",
         "type": "PHASE",
+        "agent": "apihunter",
         "skill": "",
         "dependsOn": [
           "authentication"
@@ -129,6 +132,7 @@ window.VOID_WORKFLOWS = [
         "id": "injection",
         "name": "Injection",
         "type": "PHASE",
+        "agent": "injector",
         "skill": "",
         "dependsOn": [
           "api-object-and-property-security"
@@ -164,6 +168,7 @@ window.VOID_WORKFLOWS = [
         "id": "validation-and-reporting",
         "name": "Validation & Reporting",
         "type": "PHASE",
+        "agent": "auditor",
         "skill": "",
         "dependsOn": [
           "injection"
@@ -198,6 +203,7 @@ window.VOID_WORKFLOWS = [
         "id": "reconnaissance",
         "name": "Reconnaissance",
         "type": "PHASE",
+        "agent": "recon",
         "skill": "",
         "dependsOn": [],
         "goal": "Map the attack surface — endpoints, parameters, tech stack, auth mechanisms",
@@ -231,6 +237,7 @@ window.VOID_WORKFLOWS = [
         "id": "authentication-testing",
         "name": "Authentication Testing",
         "type": "PHASE",
+        "agent": "authhunter",
         "skill": "",
         "dependsOn": [
           "reconnaissance"
@@ -261,6 +268,7 @@ window.VOID_WORKFLOWS = [
         "id": "injection-testing",
         "name": "Injection Testing",
         "type": "PHASE",
+        "agent": "injector",
         "skill": "",
         "dependsOn": [
           "authentication-testing"
@@ -291,6 +299,7 @@ window.VOID_WORKFLOWS = [
         "id": "access-control-testing",
         "name": "Access Control Testing",
         "type": "PHASE",
+        "agent": "apihunter",
         "skill": "",
         "dependsOn": [
           "injection-testing"
@@ -321,6 +330,7 @@ window.VOID_WORKFLOWS = [
         "id": "configuration-and-hardening",
         "name": "Configuration & Hardening",
         "type": "PHASE",
+        "agent": "pentester",
         "skill": "",
         "dependsOn": [
           "access-control-testing"
@@ -351,6 +361,7 @@ window.VOID_WORKFLOWS = [
         "id": "validation-and-reporting",
         "name": "Validation & Reporting",
         "type": "PHASE",
+        "agent": "auditor",
         "skill": "",
         "dependsOn": [
           "configuration-and-hardening"
@@ -385,6 +396,7 @@ window.VOID_WORKFLOWS = [
         "id": "quick-recon",
         "name": "Quick Recon",
         "type": "PHASE",
+        "agent": "recon",
         "skill": "",
         "dependsOn": [],
         "goal": "Identify main endpoints and tech stack",
@@ -413,6 +425,7 @@ window.VOID_WORKFLOWS = [
         "id": "top-checks",
         "name": "Top Checks",
         "type": "PHASE",
+        "agent": "pentester",
         "skill": "",
         "dependsOn": [
           "quick-recon"
@@ -468,6 +481,7 @@ window.VOID_WORKFLOWS = [
         "id": "idor-check",
         "name": "idor-check",
         "type": "SKILL",
+        "agent": "apihunter",
         "skill": "idor-check",
         "ref": "atomic/access-control/idor-check",
         "dependsOn": [],
@@ -534,6 +548,7 @@ window.VOID_WORKFLOWS = [
         "id": "forced-browsing",
         "name": "forced-browsing",
         "type": "SKILL",
+        "agent": "recon",
         "skill": "forced-browsing",
         "ref": "atomic/access-control/forced-browsing",
         "dependsOn": [
@@ -611,6 +626,7 @@ window.VOID_WORKFLOWS = [
         "id": "bola-check",
         "name": "bola-check",
         "type": "SKILL",
+        "agent": "apihunter",
         "skill": "bola-check",
         "ref": "atomic/api/bola-check",
         "dependsOn": [],
@@ -669,6 +685,7 @@ window.VOID_WORKFLOWS = [
         "id": "mass-assignment",
         "name": "mass-assignment",
         "type": "SKILL",
+        "agent": "apihunter",
         "skill": "mass-assignment",
         "ref": "atomic/api/mass-assignment",
         "dependsOn": [
@@ -728,6 +745,7 @@ window.VOID_WORKFLOWS = [
         "id": "rate-limit-check",
         "name": "rate-limit-check",
         "type": "SKILL",
+        "agent": "apihunter",
         "skill": "rate-limit-check",
         "ref": "atomic/api/rate-limit-check",
         "dependsOn": [
@@ -798,6 +816,7 @@ window.VOID_WORKFLOWS = [
         "id": "default-creds",
         "name": "default-creds",
         "type": "SKILL",
+        "agent": "authhunter",
         "skill": "default-creds",
         "ref": "atomic/auth/default-creds",
         "dependsOn": [],
@@ -855,6 +874,7 @@ window.VOID_WORKFLOWS = [
         "id": "enumeration",
         "name": "enumeration",
         "type": "SKILL",
+        "agent": "authhunter",
         "skill": "enumeration",
         "ref": "atomic/auth/enumeration",
         "dependsOn": [
@@ -932,6 +952,7 @@ window.VOID_WORKFLOWS = [
         "id": "sqli-form",
         "name": "sqli-form",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "sqli-form",
         "ref": "atomic/injection/sqli-form",
         "dependsOn": [],
@@ -999,6 +1020,7 @@ window.VOID_WORKFLOWS = [
         "id": "xss-reflected",
         "name": "xss-reflected",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "xss-reflected",
         "ref": "atomic/injection/xss-reflected",
         "dependsOn": [
@@ -1060,6 +1082,7 @@ window.VOID_WORKFLOWS = [
         "id": "xss-stored",
         "name": "xss-stored",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "xss-stored",
         "ref": "atomic/injection/xss-stored",
         "dependsOn": [
@@ -1121,6 +1144,7 @@ window.VOID_WORKFLOWS = [
         "id": "xss-dom",
         "name": "xss-dom",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "xss-dom",
         "ref": "atomic/injection/xss-dom",
         "dependsOn": [
@@ -1182,6 +1206,7 @@ window.VOID_WORKFLOWS = [
         "id": "ssti-detect",
         "name": "ssti-detect",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "ssti-detect",
         "ref": "atomic/injection/ssti-detect",
         "dependsOn": [
@@ -1243,6 +1268,7 @@ window.VOID_WORKFLOWS = [
         "id": "cmdi-detect",
         "name": "cmdi-detect",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "cmdi-detect",
         "ref": "atomic/injection/cmdi-detect",
         "dependsOn": [
@@ -1303,6 +1329,7 @@ window.VOID_WORKFLOWS = [
         "id": "lfi-detect",
         "name": "lfi-detect",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "lfi-detect",
         "ref": "atomic/injection/lfi-detect",
         "dependsOn": [
@@ -1381,6 +1408,7 @@ window.VOID_WORKFLOWS = [
         "id": "bola-check",
         "name": "bola-check",
         "type": "SKILL",
+        "agent": "apihunter",
         "skill": "bola-check",
         "ref": "atomic/api/bola-check",
         "dependsOn": [],
@@ -1449,6 +1477,7 @@ window.VOID_WORKFLOWS = [
         "id": "cmdi-detect",
         "name": "cmdi-detect",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "cmdi-detect",
         "ref": "atomic/injection/cmdi-detect",
         "dependsOn": [],
@@ -1517,6 +1546,7 @@ window.VOID_WORKFLOWS = [
         "id": "default-creds",
         "name": "default-creds",
         "type": "SKILL",
+        "agent": "authhunter",
         "skill": "default-creds",
         "ref": "atomic/auth/default-creds",
         "dependsOn": [],
@@ -1584,6 +1614,7 @@ window.VOID_WORKFLOWS = [
         "id": "endpoint-discovery",
         "name": "endpoint-discovery",
         "type": "SKILL",
+        "agent": "recon",
         "skill": "endpoint-discovery",
         "ref": "atomic/recon/endpoint-discovery",
         "dependsOn": [],
@@ -1652,6 +1683,7 @@ window.VOID_WORKFLOWS = [
         "id": "enumeration",
         "name": "enumeration",
         "type": "SKILL",
+        "agent": "authhunter",
         "skill": "enumeration",
         "ref": "atomic/auth/enumeration",
         "dependsOn": [],
@@ -1727,6 +1759,7 @@ window.VOID_WORKFLOWS = [
         "id": "forced-browsing",
         "name": "forced-browsing",
         "type": "SKILL",
+        "agent": "recon",
         "skill": "forced-browsing",
         "ref": "atomic/access-control/forced-browsing",
         "dependsOn": [],
@@ -1802,6 +1835,7 @@ window.VOID_WORKFLOWS = [
         "id": "idor-check",
         "name": "idor-check",
         "type": "SKILL",
+        "agent": "apihunter",
         "skill": "idor-check",
         "ref": "atomic/access-control/idor-check",
         "dependsOn": [],
@@ -1878,6 +1912,7 @@ window.VOID_WORKFLOWS = [
         "id": "lfi-detect",
         "name": "lfi-detect",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "lfi-detect",
         "ref": "atomic/injection/lfi-detect",
         "dependsOn": [],
@@ -1954,6 +1989,7 @@ window.VOID_WORKFLOWS = [
         "id": "mass-assignment",
         "name": "mass-assignment",
         "type": "SKILL",
+        "agent": "apihunter",
         "skill": "mass-assignment",
         "ref": "atomic/api/mass-assignment",
         "dependsOn": [],
@@ -2021,6 +2057,7 @@ window.VOID_WORKFLOWS = [
         "id": "rate-limit-check",
         "name": "rate-limit-check",
         "type": "SKILL",
+        "agent": "apihunter",
         "skill": "rate-limit-check",
         "ref": "atomic/api/rate-limit-check",
         "dependsOn": [],
@@ -2089,6 +2126,7 @@ window.VOID_WORKFLOWS = [
         "id": "sqli-form",
         "name": "sqli-form",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "sqli-form",
         "ref": "atomic/injection/sqli-form",
         "dependsOn": [],
@@ -2166,6 +2204,7 @@ window.VOID_WORKFLOWS = [
         "id": "ssti-detect",
         "name": "ssti-detect",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "ssti-detect",
         "ref": "atomic/injection/ssti-detect",
         "dependsOn": [],
@@ -2235,6 +2274,7 @@ window.VOID_WORKFLOWS = [
         "id": "tech-stack-fingerprint",
         "name": "tech-stack-fingerprint",
         "type": "SKILL",
+        "agent": "recon",
         "skill": "tech-stack-fingerprint",
         "ref": "atomic/recon/tech-stack-fingerprint",
         "dependsOn": [],
@@ -2311,6 +2351,7 @@ window.VOID_WORKFLOWS = [
         "id": "xss-dom",
         "name": "xss-dom",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "xss-dom",
         "ref": "atomic/injection/xss-dom",
         "dependsOn": [],
@@ -2380,6 +2421,7 @@ window.VOID_WORKFLOWS = [
         "id": "xss-reflected",
         "name": "xss-reflected",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "xss-reflected",
         "ref": "atomic/injection/xss-reflected",
         "dependsOn": [],
@@ -2449,6 +2491,7 @@ window.VOID_WORKFLOWS = [
         "id": "xss-stored",
         "name": "xss-stored",
         "type": "SKILL",
+        "agent": "injector",
         "skill": "xss-stored",
         "ref": "atomic/injection/xss-stored",
         "dependsOn": [],
