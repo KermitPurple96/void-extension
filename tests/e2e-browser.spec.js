@@ -78,7 +78,7 @@ test.describe('Void Extension AI Pentest', () => {
   test('VOID_AGENTS=12', async () => { expect(await page.evaluate(() => window.VOID_AGENTS?.length)).toBe(12); });
   test('VOID_SKILLS=43', async () => { expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS||{}).length)).toBe(43); });
   test('VOID_WORKFLOWS=23', async () => { expect(await page.evaluate(() => window.VOID_WORKFLOWS?.length)).toBe(23); });
-  test('VOID_PROMPTS=15', async () => { expect(await page.evaluate(() => window.VOID_PROMPTS?.length)).toBe(15); });
+  test('VOID_PROMPTS=20', async () => { expect(await page.evaluate(() => window.VOID_PROMPTS?.length)).toBe(20); });
   test('VOID_PAYLOADS=10', async () => { expect(await page.evaluate(() => Object.keys(window.VOID_PAYLOADS||{}).length)).toBe(10); });
   test('VOID_VULN_CLASSES=25', async () => { expect(await page.evaluate(() => window.VOID_VULN_CLASSES?.length)).toBe(25); });
   test('VOID_HYBRID_CHECKS=16', async () => { expect(await page.evaluate(() => Object.keys(window.VOID_HYBRID_CHECKS||{}).length)).toBe(16); });
@@ -562,7 +562,7 @@ test.describe('Void Extension AI Pentest', () => {
       workflows: ucBuiltin.workflows.length,
       prompts: ucBuiltin.prompts.length,
     }));
-    expect(snap).toEqual({ agents: 12, skills: 32, workflows: 23, prompts: 15 });
+    expect(snap).toEqual({ agents: 12, skills: 32, workflows: 23, prompts: 20 });
   });
 
   test('UC: creating a prompt adds it to the live registry', async () => {
@@ -689,7 +689,7 @@ test.describe('Void Extension AI Pentest', () => {
   test('UC: cleanup leaves no test entries behind', async () => {
     await page.evaluate(() => ucRemove('prompts', 'e2e-custom'));
     expect(await page.evaluate(() => window.VOID_PROMPTS.some(p => p.id === 'e2e-custom'))).toBe(false);
-    expect(await page.evaluate(() => window.VOID_PROMPTS.length)).toBe(15);
+    expect(await page.evaluate(() => window.VOID_PROMPTS.length)).toBe(20);
     expect(await page.evaluate(() => window.VOID_AGENTS.length)).toBe(12);
     expect(await page.evaluate(() => window.VOID_WORKFLOWS.length)).toBe(23);
     expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS).length)).toBe(32);

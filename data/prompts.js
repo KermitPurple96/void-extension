@@ -132,5 +132,46 @@ window.VOID_PROMPTS = [
     category: 'analysis',
     template: 'Build an attack path from the confirmed findings on {{target}}.\n\nRead get_pentest_findings. Look for links where one finding supplies a precondition another needs — a leaked identifier feeding an IDOR, an open redirect feeding a token theft, a stored XSS feeding a session takeover.\n\nEvery link must be demonstrated, not assumed. If you cannot show that the output of step N is genuinely accepted as the input of step N+1, the chain is a hypothesis: label it as such and name the unproven link.\n\nReport: the steps in order, what each one gains, the evidence for each link, and the combined impact — which is usually higher than any individual finding.',
     tags: ['target']
+  },
+
+  // ── Additional analysis ──────────────────────────────────────────────────
+  {
+    id: 'security-headers',
+    name: 'Security Headers',
+    category: 'analysis',
+    template: 'Assess the security posture of these HTTP response headers.\n\nHeaders:\n{{headers}}\n\nEvaluate each of the following categories. For each, state the relevant header(s) present or absent, the exact value, and whether it is correctly configured:\n\n1. Transport (HSTS): max-age adequacy, includeSubDomains, preload.\n2. Framing (X-Frame-Options, CSP frame-ancestors): presence, conflicts between the two.\n3. XSS — Content Security Policy script-src: parse every directive. Flag unsafe-inline, unsafe-eval, wildcard hosts, JSONP-capable CDN origins, and data: sources. A CSP with any of these is effectively absent for XSS purposes.\n4. MIME (X-Content-Type-Options): nosniff present?\n5. Referrer-Policy: value and whether it leaks origin to third parties.\n6. Permissions-Policy: sensitive features (camera, microphone, geolocation, payment) restricted?\n7. Cache-Control: no-store on authenticated responses?\n8. Cookies: Secure, HttpOnly, SameSite on session tokens (infer from Set-Cookie if present).\n9. CORS (Access-Control-Allow-Origin): wildcard or credentialed wildcard?\n10. Info leakage: Server, X-Powered-By, X-AspNet-Version — version strings present?\n\nFor CSP specifically, print the parsed directive table before your assessment.\n\nEnd with an overall rating: STRONG (all critical controls present and correctly configured) / ADEQUATE (minor gaps, no critical misconfigurations) / WEAK (one or more critical controls absent or bypassed) / MISSING (no meaningful security headers present).\n\nThe triager reads this alongside raw headers — do not restate values you already quoted.',
+    tags: ['headers']
+  },
+  {
+    id: 'compare-scans',
+    name: 'Compare Scans',
+    category: 'analysis',
+    template: 'Produce a delta report between two sets of findings.\n\nBEFORE (previous scan):\n{{before}}\n\nAFTER (current scan):\n{{after}}\n\nMatch findings on endpoint + vulnerability type, not on exact request body or scanner ID. Treat the same endpoint with different parameters as the same finding if the vulnerability class is identical.\n\nOutput four sections:\n\nNEW — findings in AFTER not matched in BEFORE. For each: endpoint, vuln type, severity.\nRESOLVED — findings in BEFORE not matched in AFTER. For each: endpoint, vuln type, previous severity.\nCHANGED — matched findings where severity or key detail differs. For each: endpoint, vuln type, what changed.\nUNCHANGED — matched findings with no material difference. List endpoint + vuln type only, no detail.\n\nSummary line: X new, Y resolved, Z changed, W unchanged.\nNet risk trend: IMPROVING (resolved > new) / STABLE (resolved ≈ new) / DEGRADING (new > resolved).\n\nDo not editorialize. If the before or after data is empty or clearly truncated, say so rather than inferring a clean slate.',
+    tags: ['before', 'after']
+  },
+
+  // ── Recon extensions ─────────────────────────────────────────────────────
+  {
+    id: 'predict-endpoints',
+    name: 'Predict Endpoints',
+    category: 'recon',
+    template: 'Predict hidden or undocumented API endpoints based on the observed surface.\n\nObserved endpoints:\n{{endpoints}}\n\nApply each of the following patterns. For each prediction, state which pattern generated it and why it is plausible:\n\n1. Version variations: if /v1/ paths exist, predict /v2/, /v3/, /v0/, /beta/, /internal/ variants of the same paths.\n2. Admin and internal paths: /admin/, /internal/, /management/, /debug/, /console/, /backstage/ prefixes on observed resource paths.\n3. CRUD completion: if GET /resource exists, predict POST /resource, PUT /resource/:id, DELETE /resource/:id, PATCH /resource/:id.\n4. ID variations: if /users/123 appears, predict /users/me, /users/current, /users/self, /users/admin, /users/0, /users/-1.\n5. Common framework endpoints: /.well-known/, /actuator/, /actuator/health, /actuator/env, /swagger/, /swagger-ui.html, /api-docs, /graphql, /graphiql, /metrics, /health, /status, /ping, /info.\n6. Singular/plural variants: if /user exists predict /users and vice versa; same for /item↔/items, /order↔/orders, etc.\n7. Export and batch endpoints: /export, /bulk, /batch, /import variants of observed resource paths.\n\nOutput a ranked list. For each predicted endpoint:\nURL | Pattern | Rationale | Security-relevance priority (HIGH/MEDIUM/LOW)\n\nPrioritise: admin paths and CRUD completions that could bypass authorisation (HIGH), version variants that may lack controls the current version added (HIGH), framework metadata endpoints (MEDIUM), export/batch endpoints (MEDIUM), cosmetic variants (LOW).\n\nDo not predict endpoints for which you have no observed anchor — every prediction must trace to a specific observed path.',
+    tags: ['endpoints']
+  },
+
+  // ── Reporting extensions ─────────────────────────────────────────────────
+  {
+    id: 'bug-bounty-report',
+    name: 'Bug Bounty Report',
+    category: 'reporting',
+    template: 'Write a bug bounty submission for {{platform}} (e.g. HackerOne, Bugcrowd).\n\nFinding:\n{{finding}}\n\nThe triager reads hundreds of these. Be precise and brief.\n\nTitle: one line, vuln class + asset + impact. No marketing.\n\nSeverity: Low / Medium / High / Critical. Justify with the actual preconditions. Include a CVSS 3.1 vector string — do NOT compute the numeric score.\n\nAsset: the exact URL, domain, or binary.\n\nVulnerability Type: CWE-ID and name.\n\nDescription: two to four sentences. What is the vulnerability, where does it live, what does an attacker gain. No padding.\n\nSteps to Reproduce:\n1. Start from an unauthenticated or authenticated state (specify which).\n2. Numbered steps, each one a concrete action.\n3. Include the exact request or payload used.\n4. State what you observe.\n5. State what you expected instead.\n\nImpact: one paragraph. Concrete harm — data accessed, account takeover, service disruption. Do not speculate beyond what you demonstrated.\n\nSuggested Fix: one to three sentences, specific to the stack observed. Name the mechanism, not just "sanitise input".\n\nEvidence: state what attachments accompany this report (screenshot, HTTP log, video). Do not embed binary data here.',
+    tags: ['finding', 'platform']
+  },
+  {
+    id: 'threat-model',
+    name: 'Threat Model',
+    category: 'analysis',
+    template: 'Produce a lightweight threat model to guide testing order. Keep it practical — this is a testing roadmap, not a compliance document.\n\nTarget: {{target}}\nStack: {{stack}}\nEndpoints: {{endpoints}}\nAuth mechanism: {{auth}}\n\nProduce the following sections:\n\nTRUST BOUNDARIES\nList the boundaries where data or control crosses a trust level. Example: browser→CDN, CDN→origin, origin→database, origin→third-party API. One line each.\n\nENTRY POINTS\nList all externally reachable inputs: HTTP endpoints, file uploads, WebSocket channels, OAuth callbacks, email/webhook receivers. Mark each as authenticated or unauthenticated.\n\nDATA FLOWS\nFor sensitive data (credentials, PII, tokens, payment data): trace the path from entry to storage/use. Note where it crosses a trust boundary without a control.\n\nTHREAT CATEGORIES (ranked by likelihood given this stack)\nFor each: threat name, affected entry points, why it is plausible here, STRIDE category (Spoofing / Tampering / Repudiation / Information Disclosure / Denial of Service / Elevation of Privilege).\nRank by: unauthenticated exposure first, then complexity of exploit, then impact.\n\nRECOMMENDED TEST PRIORITY\nOrdered list of what to test first. For each item, reference the relevant skill with get_skill(\'slug\') if one exists — e.g. get_skill(\'sqli\'), get_skill(\'auth\'), get_skill(\'idor\'). If no skill exists, name the test class.\n\nDo not list threats that have no plausible path given the stack and entry points you were given.',
+    tags: ['target', 'stack', 'endpoints', 'auth']
   }
 ];
