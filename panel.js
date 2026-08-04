@@ -5061,9 +5061,11 @@ function ucGotoSelect(obj, key) {
 }
 
 function ucBuildStepCard(step, idx) {
-  const card = el("div", "uc-step uc-step-" + step.type.toLowerCase());
+  const card = el("div", "uc-step uc-step-" + step.type.toLowerCase() + " collapsed");
 
   const head = el("div", "uc-step-head");
+  const chevron = el("span", "uc-step-chevron"); chevron.textContent = "\u25b6";
+  head.appendChild(chevron);
   const num = el("span", "uc-step-idx"); num.textContent = String(idx + 1);
   head.appendChild(num);
 
@@ -5075,13 +5077,17 @@ function ucBuildStepCard(step, idx) {
   nameInp.addEventListener("input", ucRefreshGotoTargets);
   head.append(idInp, nameInp);
 
+  // Show assigned agent name in collapsed header for quick overview
+  const agentLabel = el("span", "uc-step-agent-label");
+  agentLabel.textContent = step.agent || "pentester";
+  head.appendChild(agentLabel);
+
   const type = el("select", "filter-sel uc-step-type");
   for (const o of WF_STEP_TYPES) {
     const opt = el("option"); opt.value = o; opt.textContent = o; type.appendChild(opt);
   }
   type.value = step.type;
   type.addEventListener("change", () => {
-    // Rebuild from a fresh template so the card only shows fields its type uses.
     const fresh = ucNewStep(type.value);
     ucEditSteps[idx] = { ...fresh, id: step.id, name: step.name, type: type.value };
     ucRenderSteps();
@@ -5095,6 +5101,13 @@ function ucBuildStepCard(step, idx) {
   const del = el("button", "btn btn-xs btn-ghost uc-step-del"); del.type = "button"; del.textContent = "\u00d7";
   del.addEventListener("click", () => { ucEditSteps.splice(idx, 1); ucRenderSteps(); });
   head.append(up, down, del);
+
+  // Click header to toggle collapse (but not when clicking inputs/selects/buttons)
+  head.addEventListener("click", (e) => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "BUTTON") return;
+    card.classList.toggle("collapsed");
+    chevron.textContent = card.classList.contains("collapsed") ? "\u25b6" : "\u25bc";
+  });
   card.appendChild(head);
 
   if (step.type === "FINISH") {
@@ -5120,13 +5133,18 @@ function ucBuildAgentBody(step) {
   const b = el("div", "uc-step-body");
 
   const agentSel = el("select", "filter-sel uc-step-agent");
-  const none = el("option"); none.value = ""; none.textContent = "— inherit chat agent —";
-  agentSel.appendChild(none);
   for (const a of (window.VOID_AGENTS || [])) {
     const o = el("option"); o.value = a.id; o.textContent = a.title; agentSel.appendChild(o);
   }
-  agentSel.value = step.agent || "";
-  agentSel.addEventListener("change", () => { step.agent = agentSel.value; });
+  // Default to pentester if no agent set
+  if (!step.agent) step.agent = "pentester";
+  agentSel.value = step.agent;
+  agentSel.addEventListener("change", () => {
+    step.agent = agentSel.value;
+    // Update the collapsed header label
+    const label = b.closest(".uc-step")?.querySelector(".uc-step-agent-label");
+    if (label) label.textContent = agentSel.value;
+  });
   b.appendChild(ucStepRow("Agent", agentSel));
   b.appendChild(ucStepRow("Agent override", ucStepInput(step, "agentOverride",
     "Replace this agent's system prompt for this step only", { area: true, rows: 3 })));
