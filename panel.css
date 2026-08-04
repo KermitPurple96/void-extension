@@ -3174,6 +3174,10 @@ html.theme-hacker {
 .ai-finding-sev-medium { background: #a58019; color: #fff1cf; }
 .ai-finding-sev-low { background: #1d588e; color: #d6ecff; }
 .ai-finding-sev-info { background: #3a3a3a; color: #d0d0d0; }
+.finding-conf { font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; font-weight: 600; }
+.finding-conf-high { background: rgba(63,185,80,0.15); color: var(--green, #3fb950); }
+.finding-conf-med { background: rgba(210,153,34,0.15); color: #d29922; }
+.finding-conf-low { background: rgba(229,85,85,0.15); color: var(--red, #e55); }
 .ai-finding-title { font-size: 13px; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-finding-url { font-size: 11px; opacity: 0.6; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-finding-evidence { font-size: 11px; opacity: 0.5; margin-top: 4px; max-height: 40px; overflow: hidden; }

@@ -10793,6 +10793,18 @@ function pentestRenderContextBar() {
 
 // ── Findings Panel ──────────────────────────────────────────────────────────
 
+function findingConfidence(f) {
+  let score = 50; // base: has a finding at all
+  if (f.evidence) score += 15;           // has evidence text
+  if (f.request) score += 10;            // has the request that produced it
+  if (f.reproduction) score += 10;       // has reproduction steps
+  if (f.judgeVerdict === 'confirmed') score += 25;
+  if (f.judgeVerdict === 'refuted') score -= 40;
+  if (f.judgeVerdict === 'insufficient') score -= 10;
+  if (f.verified) score += 15;           // manually verified
+  return Math.max(0, Math.min(100, score));
+}
+
 function pentestRenderFindings() {
   const proj = pentestGetActive();
   const list = document.getElementById('ai-findings-list');
@@ -10813,8 +10825,11 @@ function pentestRenderFindings() {
     const card = document.createElement('div');
     card.className = 'ai-finding-card';
     const sev = f.severity || 'info';
+    const conf = findingConfidence(f);
+    const confLevel = conf >= 70 ? 'high' : conf >= 40 ? 'med' : 'low';
     card.innerHTML = '<div class="ai-finding-card-head">' +
       '<span class="ai-finding-sev ai-finding-sev-' + sev + '">' + sev + '</span>' +
+      '<span class="finding-conf finding-conf-' + confLevel + '">' + conf + '%</span>' +
       '<span class="ai-finding-title"></span>' +
       '<span class="ai-finding-del" title="Delete finding">&times;</span>' +
       '</div>' +
