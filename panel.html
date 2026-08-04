@@ -2129,6 +2129,23 @@
     </div>
   </div>
 
+  <!-- ═══ User Content Editor (persona / skill / workflow / prompt) ═════════ -->
+  <div id="uc-editor-overlay" class="ai-wizard-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="uc-editor-title">
+    <div class="ai-wizard-modal uc-editor-modal">
+      <div class="ai-wizard-header">
+        <span id="uc-editor-title" class="ai-wizard-title">Edit</span>
+        <button id="uc-editor-x" class="ai-wizard-close" aria-label="Close">&times;</button>
+      </div>
+      <div id="uc-editor-fields" class="uc-editor-body"></div>
+      <div id="uc-editor-error" class="vault-error hidden" role="alert"></div>
+      <div class="ai-wizard-nav">
+        <button id="uc-editor-cancel" class="btn btn-sm btn-ghost">Cancel</button>
+        <div style="flex:1"></div>
+        <button id="uc-editor-save" class="btn btn-sm btn-accent">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ Credential Warning Before Export ══════════════════════════════════ -->
   <div id="export-scan-overlay" class="ai-wizard-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="export-scan-title">
     <div class="ai-wizard-modal vault-modal">
@@ -2908,6 +2925,13 @@
                 <option value="custom">Custom</option>
               </select>
             </div>
+            <div class="uc-toolbar">
+              <button id="uc-new-agents" class="btn btn-sm btn-accent">+ New</button>
+              <button id="uc-edit-agents" class="btn btn-sm btn-ghost">Edit</button>
+              <button id="uc-dup-agents" class="btn btn-sm btn-ghost">Duplicate</button>
+              <button id="uc-del-agents" class="btn btn-sm btn-ghost">Delete</button>
+              <button id="uc-restore-agents" class="btn btn-sm btn-ghost">Restore original</button>
+            </div>
             <div id="ai-persona-desc" class="settings-section-desc" style="margin-top:6px"></div>
             <div id="ai-persona-preview" class="ai-persona-preview"></div>
             <div id="ai-custom-prompt-wrap" class="hidden" style="margin-top:8px">
@@ -3003,6 +3027,13 @@
           <div class="settings-section">
             <div class="settings-section-title">Skills Library</div>
             <div class="settings-section-desc">Pentesting methodologies injected into the AI system prompt via slash commands (/xss, /sqli, etc.)</div>
+            <div class="uc-toolbar">
+              <button id="uc-new-skills" class="btn btn-sm btn-accent">+ New</button>
+              <button id="uc-edit-skills" class="btn btn-sm btn-ghost">Edit</button>
+              <button id="uc-dup-skills" class="btn btn-sm btn-ghost">Duplicate</button>
+              <button id="uc-del-skills" class="btn btn-sm btn-ghost">Delete</button>
+              <button id="uc-restore-skills" class="btn btn-sm btn-ghost">Restore original</button>
+            </div>
             <div class="settings-row" style="margin-bottom:8px">
               <input id="ai-skills-search" type="text" class="settings-inp" placeholder="Search skills..." spellcheck="false" style="flex:1">
               <select id="ai-skills-cat-filter" class="filter-sel" style="min-width:120px">
@@ -3024,6 +3055,13 @@
           <div class="settings-section">
             <div class="settings-section-title">Workflows</div>
             <div class="settings-section-desc">Pre-defined testing sequences. Select one when creating a pentest project, or trigger via /workflow command.</div>
+            <div class="uc-toolbar">
+              <button id="uc-new-workflows" class="btn btn-sm btn-accent">+ New</button>
+              <button id="uc-edit-workflows" class="btn btn-sm btn-ghost">Edit</button>
+              <button id="uc-dup-workflows" class="btn btn-sm btn-ghost">Duplicate</button>
+              <button id="uc-del-workflows" class="btn btn-sm btn-ghost">Delete</button>
+              <button id="uc-restore-workflows" class="btn btn-sm btn-ghost">Restore original</button>
+            </div>
             <div id="ai-wf-list" class="ai-wf-list"></div>
             <div id="ai-wf-detail" class="ai-wf-detail hidden">
               <div class="ai-wf-detail-header">
@@ -3041,6 +3079,13 @@
           <div class="settings-section">
             <div class="settings-section-title">Prompt Templates</div>
             <div class="settings-section-desc">Reusable prompts with tag placeholders. Includes hybrid judge/refute templates for vulnerability verification.</div>
+            <div class="uc-toolbar">
+              <button id="uc-new-prompts" class="btn btn-sm btn-accent">+ New</button>
+              <button id="uc-edit-prompts" class="btn btn-sm btn-ghost">Edit</button>
+              <button id="uc-dup-prompts" class="btn btn-sm btn-ghost">Duplicate</button>
+              <button id="uc-del-prompts" class="btn btn-sm btn-ghost">Delete</button>
+              <button id="uc-restore-prompts" class="btn btn-sm btn-ghost">Restore original</button>
+            </div>
             <div id="ai-prompts-list" class="ai-prompts-list"></div>
             <div id="ai-prompt-detail" class="ai-prompt-detail hidden">
               <div class="ai-prompt-detail-header">

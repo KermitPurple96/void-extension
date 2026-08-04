@@ -58,7 +58,8 @@ const ji=[...new Set((js.match(/getElementById\("([^"]+)"\)/g)||[]).map(m=>m.mat
 const hs=new Set(ids);
 const cmpLegacy=new Set(["rep-compare-pane","cfg-auto-headers","cfg-collab-url","cfg-hdr-preset","mr-rules","mr-add","cmp-status","cmp-ignore-headers","cmp-to-rep","cmp-to-intr","cmp-to-poc","cmp-to-notes","cmp-render","cmp-curl","cmp-fetch","cmp-python","cmp-diff","cmp-swap","cmp-clear","cmp-resizer","cmp-left","cmp-right","cmp-left-title","cmp-right-title","cmp-left-req-pre","cmp-left-resp-pre","cmp-right-req-pre","cmp-right-resp-pre","cmp-left-req-pane","cmp-left-resp-pane","cmp-right-req-pane","cmp-right-resp-pane"]);
 // IDs created dynamically at runtime (timeline panel, toast)
-const dynamicIds=new Set(["void-toast","hist-detail-body","tl-back","tl-diff-pre","rep-group-menu"]);
+const dynamicIds=new Set(["void-toast","hist-detail-body","tl-back","tl-diff-pre","rep-group-menu",
+  "uc-steps-list"]); // built by ucBuildStepsField when the workflow editor opens
 const mi=ji.filter(id=>!hs.has(id)&&!cmpLegacy.has(id)&&!dynamicIds.has(id));
 t("All "+ji.length+" refs",mi.length===0);
 if(mi.length)console.log("    "+mi.join(", "));

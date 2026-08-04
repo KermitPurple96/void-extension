@@ -532,6 +532,157 @@ test.describe('Void Extension AI Pentest', () => {
     expect(raw[0]).not.toContain('=admin'); // not the raw payload
   });
 
+  // ═══ User content: editable + creatable personas/skills/workflows/prompts ═══
+  // The data/*.js files are build artifacts, so edits live in a chrome.storage
+  // overlay merged over the shipped data at load.
+  test('UC: toolbars exist for all four kinds', async () => {
+    for (const kind of ['agents', 'skills', 'workflows', 'prompts']) {
+      for (const act of ['new', 'edit', 'dup', 'del', 'restore']) {
+        expect(await page.locator(`#uc-${act}-${kind}`).count(), `uc-${act}-${kind}`).toBe(1);
+      }
+    }
+  });
+
+  test('UC: builtins are snapshotted before any overlay', async () => {
+    const snap = await page.evaluate(() => ({
+      agents: ucBuiltin.agents.length,
+      skills: Object.keys(ucBuiltin.skills).length,
+      workflows: ucBuiltin.workflows.length,
+      prompts: ucBuiltin.prompts.length,
+    }));
+    expect(snap).toEqual({ agents: 11, skills: 32, workflows: 6, prompts: 8 });
+  });
+
+  test('UC: creating a prompt adds it to the live registry', async () => {
+    await page.evaluate(() => ucUpsert('prompts', 'e2e-custom', {
+      id: 'e2e-custom', name: 'E2E Custom', category: 'test',
+      template: 'Probe {{target}} now', tags: ['target'],
+    }));
+    const found = await page.evaluate(() => window.VOID_PROMPTS.find(p => p.id === 'e2e-custom'));
+    expect(found.name).toBe('E2E Custom');
+    expect(await page.evaluate(() => ucIsCustom('prompts', 'e2e-custom'))).toBe(true);
+    // It must survive a reload of the overlay, i.e. actually be persisted.
+    const persisted = await page.evaluate(async () => {
+      const s = await new Promise(r => chrome.storage.local.get('voidUserContent', r));
+      return s.voidUserContent.overrides.prompts['e2e-custom'].template;
+    });
+    expect(persisted).toBe('Probe {{target}} now');
+  });
+
+  test('UC: editing a built-in overrides it without touching the snapshot', async () => {
+    await page.evaluate(() => ucUpsert('agents', 'pentester', { title: 'Edited Pentester' }));
+    expect(await page.evaluate(() => window.VOID_AGENTS.find(a => a.id === 'pentester').title))
+      .toBe('Edited Pentester');
+    // The merge is a shallow overlay, so untouched fields still come from the builtin.
+    expect(await page.evaluate(() => !!window.VOID_AGENTS.find(a => a.id === 'pentester').systemPrompt))
+      .toBe(true);
+    expect(await page.evaluate(() => ucBuiltin.agents.find(a => a.id === 'pentester').title))
+      .not.toBe('Edited Pentester');
+    expect(await page.evaluate(() => ucIsModified('agents', 'pentester'))).toBe(true);
+  });
+
+  test('UC: restore brings the shipped version back', async () => {
+    await page.evaluate(() => ucRestore('agents', 'pentester'));
+    const title = await page.evaluate(() => window.VOID_AGENTS.find(a => a.id === 'pentester').title);
+    expect(title).toBe('Pentester');
+    expect(await page.evaluate(() => ucIsModified('agents', 'pentester'))).toBe(false);
+  });
+
+  test('UC: deleting a built-in hides it and restore undoes that', async () => {
+    await page.evaluate(() => ucRemove('workflows', 'full-pentest'));
+    expect(await page.evaluate(() => window.VOID_WORKFLOWS.some(w => w.id === 'full-pentest'))).toBe(false);
+    await page.evaluate(() => ucRestore('workflows', 'full-pentest'));
+    expect(await page.evaluate(() => window.VOID_WORKFLOWS.some(w => w.id === 'full-pentest'))).toBe(true);
+  });
+
+  test('UC: skills merge by key, not by array position', async () => {
+    await page.evaluate(() => ucUpsert('skills', 'e2e-skill', {
+      name: 'E2E Skill', category: 'test', description: 'd', tags: ['t'], body: 'method',
+    }));
+    expect(await page.evaluate(() => window.VOID_SKILLS['e2e-skill'].name)).toBe('E2E Skill');
+    // Editing a shipped skill keeps the fields the override does not mention.
+    await page.evaluate(() => ucUpsert('skills', 'xss', { name: 'XSS (edited)' }));
+    const xss = await page.evaluate(() => window.VOID_SKILLS.xss);
+    expect(xss.name).toBe('XSS (edited)');
+    expect(xss.category).toBeTruthy();
+    await page.evaluate(() => ucRestore('skills', 'xss'));
+    await page.evaluate(() => ucRemove('skills', 'e2e-skill'));
+    expect(await page.evaluate(() => 'e2e-skill' in window.VOID_SKILLS)).toBe(false);
+  });
+
+  test('UC: custom prompt is reachable from the slash menu', async () => {
+    const cmds = await page.evaluate(() => slashBuildItems().map(i => i.cmd));
+    expect(cmds.length).toBeGreaterThan(40);
+    // Custom skills must show up as slash commands like shipped ones do.
+    await page.evaluate(() => ucUpsert('skills', 'e2e-slash', {
+      name: 'E2E Slash', category: 'test', description: 'd', tags: [], body: 'x',
+    }));
+    const after = await page.evaluate(() => slashBuildItems().map(i => i.cmd));
+    expect(after).toContain('/e2e-slash');
+    await page.evaluate(() => ucRemove('skills', 'e2e-slash'));
+  });
+
+  test('UC: editor validates required fields and rejects duplicate ids', async () => {
+    await page.evaluate(() => ucOpenEditor('prompts', null));
+    await expect(page.locator('#uc-editor-overlay')).toBeVisible();
+    await page.locator('#uc-editor-save').click();
+    await expect(page.locator('#uc-editor-error')).toContainText('required');
+
+    // An id that already exists must not silently overwrite it.
+    await page.evaluate(() => {
+      const set = (k, v) => { const i = document.querySelector(`#uc-editor-fields [data-key="${k}"]`); i.value = v; };
+      set('id', 'e2e-custom'); set('name', 'Clash'); set('category', 'test'); set('template', 'x');
+    });
+    await page.locator('#uc-editor-save').click();
+    await expect(page.locator('#uc-editor-error')).toContainText('already exists');
+
+    // A bad slug is rejected too.
+    await page.evaluate(() => { document.querySelector('#uc-editor-fields [data-key="id"]').value = 'has spaces'; });
+    await page.locator('#uc-editor-save').click();
+    await expect(page.locator('#uc-editor-error')).toContainText('slug');
+    await page.evaluate(() => ucCloseEditor());
+    await expect(page.locator('#uc-editor-overlay')).toBeHidden();
+  });
+
+  test('UC: workflow editor builds Agent-zero shaped steps', async () => {
+    await page.evaluate(() => ucOpenEditor('workflows', null));
+    await expect(page.locator('#uc-editor-overlay')).toBeVisible();
+    // The container starts empty, so it has no height — assert it exists, then
+    // add a step through the real button and assert the card renders.
+    expect(await page.locator('#uc-steps-list').count()).toBe(1);
+    expect(await page.locator('.uc-step').count()).toBe(0);
+    await page.getByRole('button', { name: '+ Add step' }).click();
+    await expect(page.locator('.uc-step').first()).toBeVisible();
+    await expect(page.locator('#uc-steps-list')).toBeVisible();
+    const step = await page.evaluate(() => ucEditSteps[ucEditSteps.length - 1]);
+    // The shape must carry the Agent-zero fields, not just a skill reference.
+    expect(step).toHaveProperty('goal');
+    expect(step).toHaveProperty('intrusive');
+    expect(step).toHaveProperty('decisionTree');
+    expect(step).toHaveProperty('toolGuidance.aiShould');
+    expect(step).toHaveProperty('validation.mustReproduce');
+    expect(step).toHaveProperty('validation.contextCheck');
+    expect(step).toHaveProperty('validation.impactAssessment');
+
+    // The decision tree is the substance of an Agent-zero step, so it must be
+    // editable from the UI, not just present in the data shape.
+    await page.getByRole('button', { name: '+ Add decision' }).click();
+    await expect(page.locator('.uc-dtree-node').first()).toBeVisible();
+    await page.locator('.uc-dtree-node input').first().fill('Send a single quote to each field');
+    expect(await page.evaluate(() => ucEditSteps[ucEditSteps.length - 1].decisionTree[0].action))
+      .toBe('Send a single quote to each field');
+    await page.evaluate(() => ucCloseEditor());
+  });
+
+  test('UC: cleanup leaves no test entries behind', async () => {
+    await page.evaluate(() => ucRemove('prompts', 'e2e-custom'));
+    expect(await page.evaluate(() => window.VOID_PROMPTS.some(p => p.id === 'e2e-custom'))).toBe(false);
+    expect(await page.evaluate(() => window.VOID_PROMPTS.length)).toBe(8);
+    expect(await page.evaluate(() => window.VOID_AGENTS.length)).toBe(11);
+    expect(await page.evaluate(() => window.VOID_WORKFLOWS.length)).toBe(6);
+    expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS).length)).toBe(32);
+  });
+
   // ═══ Console health ═══
   test('No JS console errors', async () => {
     expect(errors, 'Errors: ' + errors.join('; ')).toHaveLength(0);
