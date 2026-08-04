@@ -4861,12 +4861,8 @@ const UC_FIELDS = {
     { key: "tags", label: "Tags", type: "csv", hint: "Placeholder names, without the braces" },
   ],
   workflows: [
-    { key: "id", label: "ID", type: "text", idField: true, required: true },
     { key: "name", label: "Name", type: "text", required: true },
     { key: "description", label: "Description", type: "text" },
-    { key: "level", label: "Level", type: "select", options: ["atomic", "composite", "engagement"],
-      hint: "atomic = one technique · composite = a chain · engagement = phases" },
-    { key: "category", label: "Category", type: "text" },
     { key: "initialInstructions", label: "Initial instructions", type: "textarea", rows: 4,
       hint: "Given to every agent before the first step runs" },
     { key: "triggers", label: "Triggers", type: "triggers" },
@@ -5356,6 +5352,10 @@ async function ucSaveEditor() {
   for (const f of UC_FIELDS[kind]) {
     if (f.required && !String(data[f.key] || "").trim()) { ucEditorError(f.label + " is required"); return; }
   }
+  // Auto-generate id from name for workflows (user never sees or types the id)
+  if (kind === "workflows" && !data.id) {
+    data.id = ucEditOriginalId || (data.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  }
   const id = String(data[def.idKey]).trim();
   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(id)) { ucEditorError("ID must be a slug: letters, digits, dot, dash, underscore"); return; }
   // Renaming onto an existing entry would silently overwrite it.
@@ -5493,10 +5493,10 @@ function renderWorkflowsBrowser() {
     card.className = 'ai-wf-card' + (wf.id === aiWfSelectedId ? ' active' : '');
     const marker = ucIsCustom('workflows', wf.id) ? ' · custom'
       : ucIsModified('workflows', wf.id) ? ' · edited' : '';
-    card.innerHTML = '<div class="ai-wf-card-name">' + esc(wf.name) +
-      '<span class="ai-wf-level ai-wf-level-' + esc(wf.level || 'atomic') + '">' + esc(wf.level || 'atomic') + '</span></div>' +
+    // All values passed through esc() which HTML-entity-encodes (defined at top of file)
+    card.innerHTML = '<div class="ai-wf-card-name">' + esc(wf.name) + '</div>' +
       '<div class="ai-wf-card-desc">' + esc(wf.description) + '</div>' +
-      '<div class="ai-wf-card-meta">' + esc(wf.category || '') + ' · ' + (wf.steps || []).length + ' steps' + marker + '</div>';
+      '<div class="ai-wf-card-meta">' + (wf.steps || []).length + ' steps' + marker + '</div>';
     card.addEventListener('click', () => {
       aiWfSelectedId = wf.id;
       renderWorkflowsBrowser();

@@ -2950,9 +2950,6 @@ html.theme-hacker {
 .ai-wf-step { border-left: 2px solid var(--border); padding-left: 10px; margin-bottom: 14px; }
 .ai-wf-step-goal { font-size: 12px; margin: 4px 0 6px; opacity: 0.85; }
 .ai-wf-step-intrusive { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: rgba(229,85,85,0.15); color: var(--red, #e55); }
-.ai-wf-level { font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; border: 1px solid var(--border); opacity: 0.8; }
-.ai-wf-level-engagement { border-color: var(--accent); color: var(--accent); }
-.ai-wf-level-composite { border-color: var(--green, #3fb950); color: var(--green, #3fb950); }
 .ai-wf-step-includes { display: flex; flex-direction: column; gap: 3px; margin: 4px 0; }
 .ai-wf-include { font-size: 11px; padding: 3px 6px; background: var(--bg2); border-radius: 3px; }
 .ai-wf-include-name { font-weight: 600; margin-right: 6px; }
