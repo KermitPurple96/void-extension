@@ -2129,6 +2129,33 @@
     </div>
   </div>
 
+  <!-- ═══ Secret Vault Passphrase Prompt ════════════════════════════════════ -->
+  <div id="vault-overlay" class="ai-wizard-overlay hidden">
+    <div class="ai-wizard-modal vault-modal">
+      <div class="ai-wizard-header">
+        <span id="vault-modal-title" class="ai-wizard-title">Unlock secret vault</span>
+        <button id="vault-cancel-x" class="ai-wizard-close">&times;</button>
+      </div>
+      <div class="ai-wizard-step">
+        <div id="vault-modal-desc" class="settings-section-desc" style="margin-bottom:12px"></div>
+        <div class="settings-row">
+          <label class="settings-label-sm">Passphrase</label>
+          <input id="vault-pass" type="password" class="settings-inp" spellcheck="false" autocomplete="off" style="flex:1">
+        </div>
+        <div id="vault-confirm-row" class="settings-row hidden">
+          <label class="settings-label-sm">Confirm</label>
+          <input id="vault-pass2" type="password" class="settings-inp" spellcheck="false" autocomplete="off" style="flex:1">
+        </div>
+        <div id="vault-error" class="vault-error hidden"></div>
+      </div>
+      <div class="ai-wizard-nav">
+        <button id="vault-cancel" class="btn btn-sm btn-ghost">Cancel</button>
+        <div style="flex:1"></div>
+        <button id="vault-ok" class="btn btn-sm btn-accent">Unlock</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ Project Creation Wizard ═══════════════════════════════════════════ -->
   <div id="ai-wizard-overlay" class="ai-wizard-overlay hidden">
     <div class="ai-wizard-modal">
@@ -2720,6 +2747,19 @@
 
         <!-- ═══ TAB: Models ═══════════════════════════════════ -->
         <div class="ai-settings-pane" data-aitab="models">
+
+          <!-- Secret Vault -->
+          <div id="ai-vault-bar" class="ai-vault-bar">
+            <span id="ai-vault-icon" class="material-symbols-outlined ai-vault-icon">lock</span>
+            <div class="ai-vault-text">
+              <div id="ai-vault-status" class="ai-vault-status">Vault locked</div>
+              <div class="ai-vault-desc">API keys and project credentials are encrypted with AES-GCM before they touch disk. The passphrase is never stored.</div>
+            </div>
+            <button id="ai-vault-setup" class="ai-vault-btn">Set passphrase</button>
+            <button id="ai-vault-unlock" class="ai-vault-btn hidden">Unlock</button>
+            <button id="ai-vault-lock" class="ai-vault-btn hidden">Lock</button>
+            <button id="ai-vault-change" class="ai-vault-btn hidden">Change</button>
+          </div>
 
           <!-- Execution Mode -->
           <div class="settings-section">

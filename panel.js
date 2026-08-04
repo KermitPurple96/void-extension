@@ -3926,6 +3926,283 @@ async function cryptoHash(algo, input) {
   return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2,"0")).join("");
 }
 
+// ═══════════════════════════ SECRET VAULT ═════════════════════════════════════
+// API keys and project credentials are never written to chrome.storage in plaintext.
+// A passphrase-derived AES-GCM key (PBKDF2-SHA256) encrypts them at persist time.
+// The key lives in memory only, so closing the panel re-locks the vault.
+
+const VAULT_ITERATIONS = 250000;
+const VAULT_VERIFIER = "void-vault-v1";
+const SECRET_SETTING_KEYS = ["aiPrimaryKey", "aiJudgeKey", "aiUtilityKey", "engagementOobToken", "authPass"];
+const SECRET_PROJECT_KEYS = ["password", "apiToken"];
+
+let vaultKey = null;   // CryptoKey — memory only, never persisted
+let vaultMeta = null;  // { salt, iterations, verifier } read from chrome.storage
+let vaultLegacyPlaintext = false; // secrets written in plaintext by an earlier build
+
+function vaultUnlocked() { return !!vaultKey; }
+function vaultExists() { return !!(vaultMeta && vaultMeta.salt && vaultMeta.verifier); }
+
+function b64enc(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function b64dec(str) { return Uint8Array.from(atob(str), c => c.charCodeAt(0)); }
+
+async function vaultDeriveKey(passphrase, salt, iterations) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+    base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+  );
+}
+
+async function vaultEncrypt(plaintext, key = vaultKey) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(plaintext));
+  return { iv: b64enc(iv), ct: b64enc(ct) };
+}
+
+async function vaultDecrypt(blob, key = vaultKey) {
+  if (!blob || !blob.iv || !blob.ct) return "";
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64dec(blob.iv) }, key, b64dec(blob.ct));
+  return new TextDecoder().decode(pt);
+}
+
+function vaultLoadMeta() {
+  return new Promise(resolve => {
+    chrome.storage.local.get("voidVault", r => { vaultMeta = r.voidVault || null; resolve(vaultMeta); });
+  });
+}
+
+// Create the vault, or re-key it with a new passphrase (existing plaintext in
+// memory is re-encrypted by the callers' subsequent save).
+async function vaultCreate(passphrase) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await vaultDeriveKey(passphrase, salt, VAULT_ITERATIONS);
+  vaultMeta = { salt: b64enc(salt), iterations: VAULT_ITERATIONS, verifier: await vaultEncrypt(VAULT_VERIFIER, key) };
+  vaultKey = key;
+  vaultLegacyPlaintext = false; // the callers' save now writes ciphertext
+  await new Promise(r => chrome.storage.local.set({ voidVault: vaultMeta }, r));
+}
+
+// Returns true only when the passphrase reproduces the stored verifier.
+async function vaultUnlock(passphrase) {
+  if (!vaultExists()) return false;
+  const key = await vaultDeriveKey(passphrase, b64dec(vaultMeta.salt), vaultMeta.iterations || VAULT_ITERATIONS);
+  try {
+    if (await vaultDecrypt(vaultMeta.verifier, key) !== VAULT_VERIFIER) return false;
+  } catch {
+    return false; // AES-GCM auth tag mismatch — wrong passphrase
+  }
+  vaultKey = key;
+  await vaultRevealSecrets();
+  return true;
+}
+
+// Drop the key and wipe every decrypted secret from memory. Ciphertext stays put.
+function vaultLock() {
+  vaultKey = null;
+  for (const k of SECRET_SETTING_KEYS) settings[k] = "";
+  for (const p of pentestProjects) {
+    for (const k of SECRET_PROJECT_KEYS) if (p.credentials) p.credentials[k] = "";
+  }
+}
+
+// Decrypt the ciphertext already held in memory back into the plaintext fields.
+async function vaultRevealSecrets() {
+  if (!vaultUnlocked()) return;
+  for (const k of SECRET_SETTING_KEYS) {
+    const blob = settings.__secrets?.[k];
+    if (blob) { try { settings[k] = await vaultDecrypt(blob); } catch { settings[k] = ""; } }
+  }
+  for (const p of pentestProjects) {
+    for (const k of SECRET_PROJECT_KEYS) {
+      const blob = p.credentials?.__secrets?.[k];
+      if (blob) { try { p.credentials[k] = await vaultDecrypt(blob); } catch { p.credentials[k] = ""; } }
+    }
+  }
+}
+
+// Swap plaintext secrets for ciphertext before anything reaches chrome.storage.
+// While locked we carry the existing ciphertext forward rather than wiping it.
+async function vaultSealSettings(src) {
+  const out = { ...src };
+  const enc = vaultUnlocked() ? {} : { ...(src.__secrets || {}) };
+  if (vaultUnlocked()) {
+    for (const k of SECRET_SETTING_KEYS) if (src[k]) enc[k] = await vaultEncrypt(src[k]);
+  }
+  for (const k of SECRET_SETTING_KEYS) out[k] = "";
+  out.__secrets = enc;
+  src.__secrets = enc; // keep memory in sync so a re-key doesn't leave stale ciphertext
+  return out;
+}
+
+async function vaultSealProjects(projects) {
+  const out = [];
+  for (const p of projects) {
+    const c = { ...(p.credentials || {}) };
+    const enc = vaultUnlocked() ? {} : { ...(c.__secrets || {}) };
+    if (vaultUnlocked()) {
+      for (const k of SECRET_PROJECT_KEYS) if (c[k]) enc[k] = await vaultEncrypt(c[k]);
+    }
+    for (const k of SECRET_PROJECT_KEYS) c[k] = "";
+    c.__secrets = enc;
+    if (p.credentials) p.credentials.__secrets = enc;
+    out.push({ ...p, credentials: c });
+  }
+  return out;
+}
+
+// Strip every secret — plaintext and ciphertext — from anything leaving the panel
+// (profile exports, saved profiles). Ciphertext is useless elsewhere and plaintext
+// must never land in a file the user might share.
+function vaultRedact(src) {
+  const out = { ...src };
+  for (const k of SECRET_SETTING_KEYS) delete out[k];
+  delete out.__secrets;
+  return out;
+}
+
+// True when the user has typed a secret that the current vault state cannot persist.
+function vaultHasUnsavedSecrets() {
+  return !vaultUnlocked() && SECRET_SETTING_KEYS.some(k => !!settings[k]);
+}
+
+// ── Vault UI ────────────────────────────────────────────────────────────────
+
+const SECRET_INPUT_IDS = ["ai-primary-key", "ai-judge-key", "ai-utility-key", "ai-oob-token", "cfg-auth-pass"];
+let vaultMode = "unlock"; // "unlock" | "create" | "change"
+
+function vaultRenderStatus() {
+  const bar = document.getElementById("ai-vault-bar");
+  if (!bar) return;
+  const unlocked = vaultUnlocked(), exists = vaultExists();
+  bar.classList.toggle("unlocked", unlocked);
+
+  const icon = document.getElementById("ai-vault-icon");
+  if (icon) icon.textContent = unlocked ? "lock_open" : "lock";
+
+  const st = document.getElementById("ai-vault-status");
+  if (st) {
+    if (vaultLegacyPlaintext && !exists) {
+      st.textContent = "Plaintext secrets found on disk — set a passphrase to encrypt them";
+    } else if (vaultHasUnsavedSecrets()) {
+      st.textContent = exists
+        ? "Vault locked — the keys you typed will NOT be saved"
+        : "No passphrase set — the keys you typed will NOT be saved";
+    } else {
+      st.textContent = !exists ? "No passphrase set — API keys will not be saved"
+        : unlocked ? "Vault unlocked — secrets are encrypted on disk"
+        : "Vault locked — unlock to load your saved API keys";
+    }
+  }
+
+  const show = (id, on) => document.getElementById(id)?.classList.toggle("hidden", !on);
+  show("ai-vault-setup", !exists);
+  show("ai-vault-unlock", exists && !unlocked);
+  show("ai-vault-lock", unlocked);
+  show("ai-vault-change", unlocked);
+
+  // A locked secret field is empty because it is encrypted, not because it is unset.
+  for (const id of SECRET_INPUT_IDS) {
+    const inp = document.getElementById(id);
+    if (!inp) continue;
+    if (inp.dataset.phOrig === undefined) inp.dataset.phOrig = inp.placeholder || "";
+    inp.placeholder = (exists && !unlocked) ? "locked — unlock vault to view" : inp.dataset.phOrig;
+  }
+}
+
+function vaultSetError(msg) {
+  const e = document.getElementById("vault-error");
+  if (!e) return;
+  e.textContent = msg || "";
+  e.classList.toggle("hidden", !msg);
+}
+
+function vaultOpenModal(mode) {
+  vaultMode = mode;
+  const ov = document.getElementById("vault-overlay");
+  if (!ov) return;
+  const creating = mode !== "unlock";
+  const title = document.getElementById("vault-modal-title");
+  if (title) title.textContent = mode === "unlock" ? "Unlock secret vault"
+    : mode === "change" ? "Change vault passphrase" : "Set vault passphrase";
+  const desc = document.getElementById("vault-modal-desc");
+  if (desc) desc.textContent = creating
+    ? "The passphrase is never stored. If you lose it, the saved API keys and credentials cannot be recovered."
+    : "Enter your passphrase to decrypt the saved API keys and project credentials.";
+  document.getElementById("vault-confirm-row")?.classList.toggle("hidden", !creating);
+  const ok = document.getElementById("vault-ok");
+  if (ok) { ok.textContent = creating ? "Save" : "Unlock"; ok.disabled = false; }
+  const p1 = document.getElementById("vault-pass"), p2 = document.getElementById("vault-pass2");
+  if (p1) p1.value = "";
+  if (p2) p2.value = "";
+  vaultSetError("");
+  ov.classList.remove("hidden");
+  p1?.focus();
+}
+
+function vaultCloseModal() {
+  document.getElementById("vault-overlay")?.classList.add("hidden");
+  // Never leave the passphrase sitting in the DOM
+  const p1 = document.getElementById("vault-pass"), p2 = document.getElementById("vault-pass2");
+  if (p1) p1.value = "";
+  if (p2) p2.value = "";
+  vaultSetError("");
+}
+
+async function vaultSubmitModal() {
+  const pass = document.getElementById("vault-pass")?.value || "";
+  if (!pass) { vaultSetError("Enter a passphrase"); return; }
+  const ok = document.getElementById("vault-ok");
+  const okLabel = vaultMode === "unlock" ? "Unlock" : "Save";
+  if (ok) { ok.disabled = true; ok.textContent = "Working…"; }
+  try {
+    if (vaultMode === "unlock") {
+      if (!(await vaultUnlock(pass))) { vaultSetError("Wrong passphrase"); return; }
+      loadSettingsUI();
+      pentestRenderProjectList();
+      showToast("Vault unlocked");
+    } else {
+      // Re-keying only works unlocked, otherwise the plaintext to re-encrypt is gone.
+      if (vaultMode === "change" && !vaultUnlocked()) { vaultSetError("Unlock the vault first"); return; }
+      if (pass.length < 8) { vaultSetError("Use at least 8 characters"); return; }
+      if (pass !== (document.getElementById("vault-pass2")?.value || "")) { vaultSetError("Passphrases do not match"); return; }
+      await vaultCreate(pass);
+      saveSettings();        // re-encrypt whatever is in the form right now
+      pentestSaveProjects();
+      showToast(vaultMode === "change" ? "Passphrase changed" : "Vault created — secrets are now encrypted");
+    }
+    vaultCloseModal();
+  } catch (err) {
+    vaultSetError("Vault error: " + (err?.message || err));
+  } finally {
+    if (ok) { ok.disabled = false; ok.textContent = okLabel; }
+    vaultRenderStatus();
+  }
+}
+
+function wireVaultUI() {
+  document.getElementById("ai-vault-setup")?.addEventListener("click", () => vaultOpenModal("create"));
+  document.getElementById("ai-vault-unlock")?.addEventListener("click", () => vaultOpenModal("unlock"));
+  document.getElementById("ai-vault-change")?.addEventListener("click", () => vaultOpenModal("change"));
+  document.getElementById("ai-vault-lock")?.addEventListener("click", () => {
+    vaultLock();
+    loadSettingsUI();
+    pentestRenderProjectList();
+    vaultRenderStatus();
+    showToast("Vault locked");
+  });
+  document.getElementById("vault-ok")?.addEventListener("click", vaultSubmitModal);
+  document.getElementById("vault-cancel")?.addEventListener("click", vaultCloseModal);
+  document.getElementById("vault-cancel-x")?.addEventListener("click", vaultCloseModal);
+  for (const id of ["vault-pass", "vault-pass2"]) {
+    document.getElementById(id)?.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); vaultSubmitModal(); }
+      if (e.key === "Escape") { e.preventDefault(); vaultCloseModal(); }
+    });
+  }
+  vaultRenderStatus();
+}
+
 // ═══════════════════════════ SETTINGS ═════════════════════════════════════════
 
 const DEFAULT_SETTINGS = {
@@ -3940,13 +4217,21 @@ const DEFAULT_SETTINGS = {
 
 let settings = { ...DEFAULT_SETTINGS };
 
-function loadSettings() {
-  return new Promise(resolve => {
+async function loadSettings() {
+  await vaultLoadMeta();
+  await new Promise(resolve => {
     chrome.storage.local.get("voidSettings", r => {
       if (r.voidSettings) settings = { ...DEFAULT_SETTINGS, ...r.voidSettings };
       resolve();
     });
   });
+  // Secrets stay as ciphertext in settings.__secrets until the vault is unlocked.
+  // Exception: keys written in plaintext by an earlier build stay usable for this
+  // session so nothing breaks — the vault bar prompts the user to encrypt them.
+  for (const k of SECRET_SETTING_KEYS) {
+    if (settings[k]) vaultLegacyPlaintext = true;
+    else settings[k] = "";
+  }
 }
 
 function getActiveSystemPrompt() {
@@ -4504,9 +4789,11 @@ function saveSettings() {
   // engagementVulnModes is updated live by dropdown handlers, just persist what we have
   if (!settings.engagementVulnModes) settings.engagementVulnModes = {};
 
-  chrome.storage.local.set({ voidSettings: settings });
+  // Secrets are encrypted on the way out; the in-memory copy keeps the plaintext.
+  vaultSealSettings(settings).then(sealed => chrome.storage.local.set({ voidSettings: sealed }));
+  vaultRenderStatus();
 
-  // Push to background
+  // Push to background (in-memory only, never persisted there)
   bg({ type: "UPDATE_SETTINGS", settings });
 
   // Push DNS overrides to proxy server
@@ -8829,7 +9116,6 @@ Keep responses concise and technical. When you find something interesting, use a
 
 let aiMessages = []; // conversation history for display
 let aiLlmMessages = []; // conversation history in LLM format
-let aiConfig = { provider: "claude-cli", apiKey: "", model: "", endpoint: "", systemPrompt: AI_SYSTEM_PROMPT, cliPath: "claude" };
 let aiSending = false;
 let aiProxyWs = null;
 let aiSessions = []; // { id, name, messages, llmMessages }
@@ -9249,15 +9535,27 @@ function pentestLoadProjects() {
     chrome.storage.local.get(['voidPentestProjects', 'voidPentestActiveProject'], r => {
       pentestProjects = r.voidPentestProjects || [];
       pentestActiveProjectId = r.voidPentestActiveProject || null;
+      // Credentials stay as ciphertext until the vault is unlocked; plaintext left
+      // by an earlier build stays usable for this session (see loadSettings).
+      for (const p of pentestProjects) {
+        if (!p.credentials) continue;
+        for (const k of SECRET_PROJECT_KEYS) {
+          if (p.credentials[k]) vaultLegacyPlaintext = true;
+          else p.credentials[k] = "";
+        }
+      }
       resolve();
     });
   });
 }
 
 function pentestSaveProjects() {
-  chrome.storage.local.set({
-    voidPentestProjects: pentestProjects,
-    voidPentestActiveProject: pentestActiveProjectId,
+  // Credentials are encrypted on the way out; the in-memory copy keeps the plaintext.
+  vaultSealProjects(pentestProjects).then(sealed => {
+    chrome.storage.local.set({
+      voidPentestProjects: sealed,
+      voidPentestActiveProject: pentestActiveProjectId,
+    });
   });
   pentestRenderProjectList();
   pentestRenderContextBar();
@@ -9525,20 +9823,24 @@ let wizStep = 0;
 let wizInScope = [];
 let wizOutScope = [];
 
+// Field helpers — a missing wizard input must not abort the whole open/create flow.
+const wizSet = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+const wizVal = (id) => document.getElementById(id)?.value || '';
+
 function wizOpen() {
   wizStep = 0;
   wizInScope = [];
   wizOutScope = [];
-  document.getElementById('wiz-name').value = '';
-  document.getElementById('wiz-desc').value = '';
-  document.getElementById('wiz-username').value = '';
-  document.getElementById('wiz-password').value = '';
-  document.getElementById('wiz-login-url').value = '';
-  document.getElementById('wiz-api-token').value = '';
-  document.getElementById('wiz-extra-headers').value = '';
-  document.getElementById('wiz-auth-type').value = 'FORM';
-  document.getElementById('wiz-env').value = settings.engagementEnv || 'unknown';
-  document.getElementById('wiz-mode').value = settings.engagementMode || 'ask';
+  wizSet('wiz-name', '');
+  wizSet('wiz-desc', '');
+  wizSet('wiz-username', '');
+  wizSet('wiz-password', '');
+  wizSet('wiz-login-url', '');
+  wizSet('wiz-api-token', '');
+  wizSet('wiz-extra-headers', '');
+  wizSet('wiz-auth-type', 'FORM');
+  wizSet('wiz-env', settings.engagementEnv || 'unknown');
+  wizSet('wiz-mode', settings.engagementMode || 'ask');
   const bruteChk = document.getElementById('wiz-bruteforce');
   if (bruteChk) bruteChk.checked = !!settings.engagementBruteforce;
   const destChk = document.getElementById('wiz-destructive');
@@ -9552,17 +9854,17 @@ function wizOpen() {
     wizUpdateWorkflowPreview();
   }
   wizUpdateUI();
-  document.getElementById('ai-wizard-overlay').classList.remove('hidden');
+  document.getElementById('ai-wizard-overlay')?.classList.remove('hidden');
 }
 
 function wizClose() {
-  document.getElementById('ai-wizard-overlay').classList.add('hidden');
+  document.getElementById('ai-wizard-overlay')?.classList.add('hidden');
 }
 
 function wizNext() {
-  if (wizStep === 0) {
-    const name = document.getElementById('wiz-name').value.trim();
-    if (!name) { document.getElementById('wiz-name').focus(); return; }
+  if (wizStep === 0 && !wizVal('wiz-name').trim()) {
+    document.getElementById('wiz-name')?.focus();
+    return;
   }
   if (wizStep < 4) { wizStep++; wizUpdateUI(); }
 }
@@ -9583,9 +9885,9 @@ function wizUpdateUI() {
     dot.classList.toggle('done', s < wizStep);
   });
   // Show/hide nav buttons
-  document.getElementById('ai-wizard-back').classList.toggle('hidden', wizStep === 0);
-  document.getElementById('ai-wizard-next').classList.toggle('hidden', wizStep === 4);
-  document.getElementById('ai-wizard-create').classList.toggle('hidden', wizStep !== 4);
+  document.getElementById('ai-wizard-back')?.classList.toggle('hidden', wizStep === 0);
+  document.getElementById('ai-wizard-next')?.classList.toggle('hidden', wizStep === 4);
+  document.getElementById('ai-wizard-create')?.classList.toggle('hidden', wizStep !== 4);
   // Render scope lists
   wizRenderScopeList();
 }
@@ -9653,22 +9955,22 @@ function wizUpdateWorkflowPreview() {
 }
 
 function wizCreate() {
-  const name = document.getElementById('wiz-name').value.trim();
+  const name = wizVal('wiz-name').trim();
   if (!name) return;
   pentestCreateProject({
     name,
-    description: document.getElementById('wiz-desc').value.trim(),
+    description: wizVal('wiz-desc').trim(),
     inScope: wizInScope.map(s => ({ target: s })),
     outScope: wizOutScope,
-    username: document.getElementById('wiz-username').value,
-    password: document.getElementById('wiz-password').value,
-    loginUrl: document.getElementById('wiz-login-url').value,
-    authType: document.getElementById('wiz-auth-type').value,
-    apiToken: document.getElementById('wiz-api-token').value,
-    extraHeaders: document.getElementById('wiz-extra-headers').value,
-    workflowId: document.getElementById('wiz-workflow').value,
-    environment: document.getElementById('wiz-env').value,
-    mode: document.getElementById('wiz-mode').value,
+    username: wizVal('wiz-username'),
+    password: wizVal('wiz-password'),
+    loginUrl: wizVal('wiz-login-url'),
+    authType: wizVal('wiz-auth-type') || 'FORM',
+    apiToken: wizVal('wiz-api-token'),
+    extraHeaders: wizVal('wiz-extra-headers'),
+    workflowId: wizVal('wiz-workflow') || 'full-pentest',
+    environment: wizVal('wiz-env') || 'unknown',
+    mode: wizVal('wiz-mode') || 'ask',
     allowBruteforce: document.getElementById('wiz-bruteforce')?.checked || false,
     allowDestructive: document.getElementById('wiz-destructive')?.checked || false,
   });
@@ -10039,34 +10341,6 @@ async function runHybridScan(targetUrl, checkIds) {
     candidateHits: results.length,
     results: results,
   };
-}
-
-// Run passive checks (CSRF, session, CSP) against captured history
-function runPassiveHybridChecks() {
-  const checks = window.VOID_HYBRID_CHECKS;
-  if (!checks) return [];
-  const results = [];
-
-  // CSP check — look at response headers in history
-  if (checks.csp) {
-    const headers = typeof getHeadersAnalysis === 'function' ? getHeadersAnalysis() : [];
-    // Check each host's headers for CSP issues
-    for (const h of (Array.isArray(headers) ? headers : [])) {
-      const csp = h.headers?.['content-security-policy'] || '';
-      if (!csp) {
-        results.push({ checkId: 'csp', checkName: 'Missing CSP', severity: 'low', url: h.url || h.host, evidence: 'No Content-Security-Policy header', needsJudgment: false });
-      } else {
-        for (const pattern of checks.csp.patterns) {
-          if (pattern.test(csp)) {
-            results.push({ checkId: 'csp', checkName: 'Weak CSP', severity: 'low', url: h.url || h.host, evidence: 'CSP contains: ' + pattern.toString(), matchedPattern: pattern.toString(), needsJudgment: false });
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  return results;
 }
 
 // ── Chat session management ──────────────────────────────────────────────────
@@ -11288,11 +11562,11 @@ document.addEventListener("DOMContentLoaded", () => {
     saveSettings(); // ensure current UI is captured
     const stored = await new Promise(r => chrome.storage.local.get("voidSettingsProfiles", r));
     const profiles = stored.voidSettingsProfiles || {};
-    profiles[name] = { ...settings };
+    profiles[name] = vaultRedact(settings); // never copy secrets into a profile
     await new Promise(r => chrome.storage.local.set({ voidSettingsProfiles: profiles }, r));
     document.getElementById("cfg-profile-name").value = "";
     cfgRefreshProfiles();
-    showToast(`Profile "${name}" saved`);
+    showToast(`Profile "${name}" saved (API keys excluded)`);
   });
   document.getElementById("cfg-profile-load").addEventListener("click", async () => {
     const name = document.getElementById("cfg-profiles").value;
@@ -11300,7 +11574,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const stored = await new Promise(r => chrome.storage.local.get("voidSettingsProfiles", r));
     const profiles = stored.voidSettingsProfiles || {};
     if (!profiles[name]) return;
-    settings = { ...DEFAULT_SETTINGS, ...profiles[name] };
+    // Profiles carry no secrets — keep the ones already unlocked in this session.
+    const keptSecrets = Object.fromEntries(SECRET_SETTING_KEYS.map(k => [k, settings[k]]));
+    settings = { ...DEFAULT_SETTINGS, ...vaultRedact(profiles[name]), ...keptSecrets, __secrets: settings.__secrets };
     loadSettingsUI();
     saveSettings();
     showToast(`Profile "${name}" loaded`);
@@ -11317,11 +11593,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("cfg-profile-export").addEventListener("click", () => {
     saveSettings();
-    const blob = new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(vaultRedact(settings), null, 2)], { type: "application/json" });
     const a = el("a"); a.href = URL.createObjectURL(blob);
     a.download = `void-settings-${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(a.href);
-    showToast("Settings exported");
+    showToast("Settings exported (API keys excluded)");
   });
   document.getElementById("cfg-profile-import").addEventListener("click", () => {
     document.getElementById("cfg-profile-file").click();
@@ -11332,10 +11608,12 @@ document.addEventListener("DOMContentLoaded", () => {
     file.text().then(text => {
       try {
         const imported = JSON.parse(text);
-        settings = { ...DEFAULT_SETTINGS, ...imported };
+        // An imported file must never inject secrets, nor clobber the local vault.
+        const keptSecrets = Object.fromEntries(SECRET_SETTING_KEYS.map(k => [k, settings[k]]));
+        settings = { ...DEFAULT_SETTINGS, ...vaultRedact(imported), ...keptSecrets, __secrets: settings.__secrets };
         loadSettingsUI();
         saveSettings();
-        showToast("Settings imported");
+        showToast("Settings imported (API keys unchanged)");
       } catch { showToast("Invalid JSON file"); }
     });
     e.target.value = "";
@@ -12127,6 +12405,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // New project button
     document.getElementById('ai-new-project')?.addEventListener('click', wizOpen);
 
+    // Secret vault controls
+    wireVaultUI();
+
     // Context bar buttons
     document.getElementById('ai-ctx-deactivate')?.addEventListener('click', pentestDeactivateProject);
 
@@ -12267,6 +12548,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Boot
   loadSettings().then(() => {
     loadSettingsUI();
+    vaultRenderStatus();
     // Sync scope to Target tab
     document.getElementById("tgt-scope-include").value = settings.scopeInclude || "";
     document.getElementById("tgt-scope-exclude").value = settings.scopeExclude || "";

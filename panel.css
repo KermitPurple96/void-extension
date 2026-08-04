@@ -2900,6 +2900,19 @@ html.theme-hacker {
 .ai-context-bar .btn-xs { padding: 3px 8px; font-size: 11px; }
 
 /* ── Project creation wizard ────────────────────────────── */
+/* Secret vault */
+.ai-vault-bar { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg2); }
+.ai-vault-bar.unlocked { border-color: var(--green, #3fb950); }
+.ai-vault-icon { font-size: 20px; color: var(--muted); flex: none; margin-top: 2px; }
+.ai-vault-bar.unlocked .ai-vault-icon { color: var(--green, #3fb950); }
+.ai-vault-text { flex: 1; min-width: 0; }
+.ai-vault-status { font-size: 13px; font-weight: 600; }
+.ai-vault-desc { font-size: 11px; opacity: 0.6; margin-top: 2px; }
+.ai-vault-btn { flex: none; align-self: center; padding: 4px 10px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); cursor: pointer; }
+.ai-vault-btn:hover { border-color: var(--accent); color: var(--accent); }
+.vault-modal { width: 420px; }
+.vault-error { margin-top: 10px; font-size: 12px; color: var(--red, #e55); }
+
 .ai-wizard-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; }
 .ai-wizard-modal { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; width: 560px; max-width: 95vw; max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
 .ai-wizard-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
