@@ -579,3 +579,12 @@ injection. The most impactful findings are usually BOLA and BFLA -- they give
 one user access to another user's data or to admin functions. Start there,
 use `get_endpoints` to map the full surface, and test every endpoint with
 every role. Record findings with `add_pentest_finding` as you go.
+
+## Tooling note
+
+This methodology is designed for the Void panel tools. Use `send_request` for
+HTTP probes, `compare_responses` for baseline diffing, `search_responses` to
+find patterns across captured traffic, `get_endpoints` to map the API surface,
+`decode`/`encode` for token analysis, and `add_pentest_finding` to record
+confirmed results. There is no shell and no filesystem — do not attempt to
+run scripts.
