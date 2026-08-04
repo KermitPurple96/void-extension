@@ -121,7 +121,6 @@ function stopAllTimers() {
   clearInterval(bgSyncTimer);    bgSyncTimer = null;
   clearInterval(logSyncTimer);   logSyncTimer = null;
   clearInterval(wsTimer);        wsTimer = null;
-  clearInterval(respPollTimer);  respPollTimer = null;
   clearInterval(probePollTimer); probePollTimer = null;
   clearInterval(oobPollTimer);   oobPollTimer = null;
   if (scanRunning) { scanRunning = false; }
@@ -457,17 +456,15 @@ function renderInterceptList() {
     } else {
       const btnRep  = txt("button", "btn btn-xs btn-ghost",   "→ Rep");
       const btnIntr = txt("button", "btn btn-xs btn-ghost",   "→ Intr");
-      const btnAi   = txt("button", "btn btn-xs btn-ghost",   "→ AI");
       const btnOpen = txt("button", "btn btn-xs btn-ghost",   "↗"); btnOpen.title = "Open in new tab";
       const btnFwd  = txt("button", "btn btn-xs btn-success", "Forward →");
       const btnDrop = txt("button", "btn btn-xs btn-danger",  "Drop");
       btnRep.addEventListener("click",  e => { e.stopPropagation(); sendToRepeater(req); });
       btnIntr.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder(req); });
-      btnAi.addEventListener("click",   e => { e.stopPropagation(); sendToAIChat(req); });
       btnOpen.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: req.url }); });
       btnFwd.addEventListener("click",  e => { e.stopPropagation(); doForward(req.requestId, null); });
       btnDrop.addEventListener("click", e => { e.stopPropagation(); doDrop(req.requestId); });
-      ap(acts, btnRep, btnIntr, btnAi, btnOpen, btnFwd, btnDrop);
+      ap(acts, btnRep, btnIntr, btnOpen, btnFwd, btnDrop);
       row.addEventListener("click", () => openEditor(req));
     }
 
@@ -1376,36 +1373,6 @@ function histDetailToRepeater() {
   });
 }
 
-// ── Send to AI Chat ──────────────────────────────────────────────────────────
-function sendToAIChat(req) {
-  const method = req.method || "GET";
-  const url    = req.url    || "";
-  const hdrs   = req.rawHeaders || headersToRaw(req.headers || {});
-  const body   = req.body   || "";
-  // Build context block
-  let ctx = method + " " + url;
-  if (hdrs) ctx += "\n" + hdrs;
-  if (body) ctx += "\n\n" + body;
-  // Store as pending context — will be injected when user sends their next message
-  aiPendingRequestCtx = ctx;
-  // Switch to AI Chat tab
-  showTab("aichat");
-  // Pre-fill input with hint
-  const inp = document.getElementById("ai-input");
-  if (inp) {
-    inp.placeholder = "Request attached. Type your question (e.g. 'analyze this for vulns') and press Send...";
-    inp.focus();
-  }
-  // Flash indicator
-  const bdg = document.getElementById("bdg-aichat");
-  if (bdg) {
-    bdg.textContent = "REQ";
-    bdg.className = "bdg has-data";
-    clearTimeout(bdg._timer);
-    bdg._timer = setTimeout(() => { bdg.className = "bdg hidden"; }, 4000);
-  }
-}
-
 // ── Send to Repeater ──────────────────────────────────────────────────────────
 function sendToRepeater(req) {
   const method  = req.method || "GET";
@@ -2150,14 +2117,12 @@ function renderEndpoints() {
       });
     });
     const intrBtn = txt("button", "btn btn-xs btn-ghost", "→ Intr");
-    const aiBtn   = txt("button", "btn btn-xs btn-ghost", "→ AI");
     const openBtn = txt("button", "btn btn-xs btn-ghost", "↗"); openBtn.title = "Open in new tab";
     repBtn.addEventListener("click", e => { e.stopPropagation(); sendToRepeater(ep); });
     intrBtn.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder(ep); });
-    aiBtn.addEventListener("click",   e => { e.stopPropagation(); sendToAIChat(ep); });
     openBtn.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: ep.url }); });
 
-    ap(acts, cpyBtn, repBtn, intrBtn, aiBtn, openBtn);
+    ap(acts, cpyBtn, repBtn, intrBtn, openBtn);
     row.appendChild(acts);
     row.addEventListener("click", () => openEpDetail(ep));
     list.appendChild(row);
@@ -2991,14 +2956,12 @@ function tgtRenderTable(entries) {
     actTd.className = "tgt-act-cell";
     const repBtn = txt("button", "btn btn-xs btn-ghost", "→ Rep");
     const intrBtn = txt("button", "btn btn-xs btn-ghost", "→ Intr");
-    const aiBtn   = txt("button", "btn btn-xs btn-ghost", "→ AI");
     const openBtn = txt("button", "btn btn-xs btn-ghost", "↗");
     openBtn.title = "Open in new tab";
     repBtn.addEventListener("click", e => { e.stopPropagation(); sendToRepeater({ method: entry.method, url: entry.url, headers: entry.headers || {}, body: entry.body || "" }); });
     intrBtn.addEventListener("click", e => { e.stopPropagation(); intrSendToIntruder({ method: entry.method, url: entry.url, headers: entry.headers || {}, body: entry.body || "" }); });
-    aiBtn.addEventListener("click",   e => { e.stopPropagation(); sendToAIChat({ method: entry.method, url: entry.url, headers: entry.headers || {}, body: entry.body || "" }); });
     openBtn.addEventListener("click", e => { e.stopPropagation(); chrome.tabs.create({ url: entry.url }); });
-    ap(actTd, repBtn, intrBtn, aiBtn, openBtn);
+    ap(actTd, repBtn, intrBtn, openBtn);
     tr.appendChild(actTd);
     tr.className = "tgt-clickable";
     tr._entry = entry;
@@ -3140,6 +3103,9 @@ function intrRenderResults() {
       case "status":  va = a.status || 0; vb = b.status || 0; break;
       case "length":  va = a.length || 0; vb = b.length || 0; break;
       case "elapsed": va = a.elapsed || 0; vb = b.elapsed || 0; break;
+      // The <th>s declare these sort keys; without cases they silently fell through.
+      case "grep":    va = a.grepMatch ? 1 : 0; vb = b.grepMatch ? 1 : 0; break;
+      case "extract": va = a.grepExtract || ""; vb = b.grepExtract || ""; break;
       default:        va = a.id; vb = b.id;
     }
     if (typeof va === "string") { va = va.toLowerCase(); vb = vb.toLowerCase(); }
@@ -3162,14 +3128,7 @@ function intrRenderResults() {
       : entry.status < 400 ? "hist-td-status-rdir" : "hist-td-status-err";
     const lenStr = entry.length > 1024 ? `${(entry.length/1024).toFixed(1)}k` : entry.length;
     const preview = (entry.body || "").slice(0, 120).replace(/\n/g, " ");
-    tr.innerHTML = `
-      <td class="hist-td-num">${Number(entry.id) || 0}</td>
-      <td title="${esc(entry.payload)}">${esc(entry.payload)}</td>
-      <td class="${statusCls}">${esc(String(entry.status))}</td>
-      <td class="hist-td-len">${esc(String(lenStr))}</td>
-      <td class="hist-td-elapsed">${Number(entry.elapsed) || 0}</td>
-      <td class="hist-td-mime" title="${esc(preview)}">${esc(preview)}</td>
-    `;
+    tr.innerHTML = intrRowCells(entry, statusCls, lenStr, preview);
     if (entry.reflected) {
       const dot = document.createElement("span");
       dot.className = "hist-reflect-dot";
@@ -3232,7 +3191,7 @@ function intrExpandPayloads(raw) {
   return result;
 }
 
-function intrBuildRequests(template, attackType, payloadSets) {
+async function intrBuildRequests(template, attackType, payloadSets) {
   const posRegex = /§([^§]*)§/g;
   const positions = [];
   let m;
@@ -3242,7 +3201,15 @@ function intrBuildRequests(template, attackType, payloadSets) {
 
   if (!positions.length) return [];
 
-  const expanded = payloadSets.map(ps => intrExpandPayloads(ps));
+  // Payload processing is per-payload and position-independent, so apply it once
+  // to each expanded list rather than at every substitution site.
+  const proc = document.getElementById("intr-proc")?.value || "";
+  const procVal = document.getElementById("intr-proc-val")?.value || "";
+  const expanded = [];
+  for (const ps of payloadSets) {
+    const list = intrExpandPayloads(ps);
+    expanded.push(proc ? await Promise.all(list.map(p => intrProcessPayload(p, proc, procVal))) : list);
+  }
   const requests = [];
 
   if (attackType === "sniper") {
@@ -3377,7 +3344,7 @@ async function intrStart() {
     return;
   }
 
-  const requests = intrBuildRequests(template, attackType, intrPayloadSets);
+  const requests = await intrBuildRequests(template, attackType, intrPayloadSets);
   if (!requests.length) { document.getElementById("intr-status").textContent = "No positions/payloads"; return; }
 
   intrResults = [];
@@ -3447,6 +3414,7 @@ async function intrStart() {
       // Computed once here rather than per render — the row indicator and the
       // Reflections filter both read it.
       entry.reflected = detectReflections(intrReflectEntry(entry)).length;
+      Object.assign(entry, intrGrepResult(entry.body));
       intrResults.push(entry);
 
       // Add row to table
@@ -3456,14 +3424,7 @@ async function intrStart() {
         : res.status < 400 ? "hist-td-status-rdir" : "hist-td-status-err";
       const lenStr = entry.length > 1024 ? `${(entry.length/1024).toFixed(1)}k` : entry.length;
       const preview = (entry.body || "").slice(0, 120).replace(/\n/g, " ");
-      tr.innerHTML = `
-        <td class="hist-td-num">${Number(entry.id) || 0}</td>
-        <td title="${esc(entry.payload)}">${esc(entry.payload)}</td>
-        <td class="${statusCls}">${esc(String(entry.status))}</td>
-        <td class="hist-td-len">${esc(String(lenStr))}</td>
-        <td class="hist-td-elapsed">${Number(entry.elapsed) || 0}</td>
-        <td class="hist-td-mime" title="${esc(preview)}">${esc(preview)}</td>
-      `;
+      tr.innerHTML = intrRowCells(entry, statusCls, lenStr, preview);
       if (entry.reflected) {
         const dot = document.createElement("span");
         dot.className = "hist-reflect-dot";
@@ -3962,6 +3923,519 @@ async function cryptoHash(algo, input) {
   return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2,"0")).join("");
 }
 
+// ═══════════════════════════ SECRET VAULT ═════════════════════════════════════
+// API keys and project credentials are never written to chrome.storage in plaintext.
+// A passphrase-derived AES-GCM key (PBKDF2-SHA256) encrypts them at persist time.
+// The key lives in memory only, so closing the panel re-locks the vault.
+
+// OWASP's current PBKDF2-SHA256 recommendation. Measured at ~220ms in this
+// environment, so the unlock cost stays well under a second.
+const VAULT_ITERATIONS = 600000;
+// Bounds for the count read back from storage. Existing vaults keep unlocking at
+// whatever they were created with (only new vaults get VAULT_ITERATIONS), but a
+// corrupted value must not be able to hang deriveKey or weaken the derivation.
+const VAULT_ITERATIONS_MIN = 100000;
+const VAULT_ITERATIONS_MAX = 5000000;
+const VAULT_VERIFIER = "void-vault-v1";
+const SECRET_SETTING_KEYS = ["aiPrimaryKey", "aiJudgeKey", "aiUtilityKey", "engagementOobToken", "authPass"];
+const SECRET_PROJECT_KEYS = ["password", "apiToken"];
+
+let vaultKey = null;   // CryptoKey — memory only, never persisted
+let vaultMeta = null;  // { salt, iterations, verifier } read from chrome.storage
+// Secrets an earlier build left in plaintext on disk. Tracked per field so an
+// unrelated save can't silently destroy them before the user sets a passphrase.
+const vaultLegacySettingKeys = new Set();      // setting key
+const vaultLegacyProjectKeys = new Set();      // "<projectId>:<credential key>"
+// Ciphertext that failed to decrypt after a successful unlock (corruption, or a
+// stale blob from an interrupted re-key). Preserved rather than overwritten, so a
+// save can't turn a recoverable problem into permanent loss.
+const vaultUndecryptable = new Set();          // same key shapes as above
+function vaultHasLegacyPlaintext() { return vaultLegacySettingKeys.size > 0 || vaultLegacyProjectKeys.size > 0; }
+
+function vaultUnlocked() { return !!vaultKey; }
+function vaultExists() { return !!(vaultMeta && vaultMeta.salt && vaultMeta.verifier); }
+
+function b64enc(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function b64dec(str) { return Uint8Array.from(atob(str), c => c.charCodeAt(0)); }
+
+// Clamped, never trusted raw: iterations come back from storage, and a corrupted
+// value would either weaken the derivation or hang the panel inside deriveKey.
+function vaultClampIterations(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return VAULT_ITERATIONS;
+  return Math.min(VAULT_ITERATIONS_MAX, Math.max(VAULT_ITERATIONS_MIN, Math.floor(v)));
+}
+
+async function vaultDeriveKey(passphrase, salt, iterations) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: vaultClampIterations(iterations), hash: "SHA-256" },
+    base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+  );
+}
+
+async function vaultEncrypt(plaintext, key = vaultKey) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(plaintext));
+  return { iv: b64enc(iv), ct: b64enc(ct) };
+}
+
+async function vaultDecrypt(blob, key = vaultKey) {
+  if (!blob || !blob.iv || !blob.ct) return "";
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64dec(blob.iv) }, key, b64dec(blob.ct));
+  return new TextDecoder().decode(pt);
+}
+
+// Every vault-touching storage write goes through this queue. Sealing is async
+// (AES per secret), so two overlapping saves could otherwise resolve out of order
+// and persist the older snapshot, or interleave with a re-key.
+// Resolved once loadSettings / pentestLoadProjects have populated memory from
+// storage. vaultCreate persists both, so it must not run before they are read.
+let vaultMarkSettingsLoaded, vaultMarkProjectsLoaded;
+const vaultSettingsLoaded = new Promise(r => { vaultMarkSettingsLoaded = r; });
+const vaultProjectsLoaded = new Promise(r => { vaultMarkProjectsLoaded = r; });
+
+let vaultWriteQueue = Promise.resolve();
+function vaultEnqueueWrite(fn) {
+  const run = vaultWriteQueue.then(fn, fn);
+  vaultWriteQueue = run.catch(() => {}); // a failed write must not stall the queue
+  return run;                            // ...but the caller still sees the error
+}
+
+function vaultLoadMeta() {
+  return new Promise(resolve => {
+    chrome.storage.local.get("voidVault", r => { vaultMeta = r.voidVault || null; resolve(vaultMeta); });
+  });
+}
+
+// Create the vault, or re-key it with a new passphrase.
+//
+// New metadata and newly-encrypted secrets go to disk in a SINGLE
+// chrome.storage.local.set — a multi-key set is atomic, so an interrupted re-key
+// can never leave a new salt paired with ciphertext under the old key (which would
+// unlock cleanly and then decrypt to nothing, losing every secret silently).
+// In-memory key/meta are swapped only once that write lands.
+async function vaultCreate(passphrase) {
+  // This writes voidSettings and voidPentestProjects from memory. Running before
+  // they have been read back would persist the empty defaults over the user's data,
+  // so wait for both loads rather than racing them.
+  await Promise.all([vaultSettingsLoaded, vaultProjectsLoaded]);
+
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await vaultDeriveKey(passphrase, salt, VAULT_ITERATIONS);
+  const meta = { salt: b64enc(salt), iterations: VAULT_ITERATIONS, verifier: await vaultEncrypt(VAULT_VERIFIER, key) };
+
+  // Re-encrypt everything currently in memory under the new key before committing.
+  const sealedSettings = await vaultSealSettings(settings, { key, commit: false });
+  const sealedProjects = await vaultSealProjects(pentestProjects, { key, commit: false });
+
+  await new Promise(r => chrome.storage.local.set({
+    voidVault: meta,
+    voidSettings: sealedSettings,
+    voidPentestProjects: sealedProjects,
+  }, r));
+
+  vaultMeta = meta;
+  vaultKey = key;
+  // Plaintext is now encrypted and gone from disk
+  vaultLegacySettingKeys.clear();
+  vaultLegacyProjectKeys.clear();
+  settings.__secrets = sealedSettings.__secrets;
+  pentestProjects.forEach((p, i) => {
+    if (p.credentials) p.credentials.__secrets = sealedProjects[i].credentials.__secrets;
+  });
+}
+
+// Returns true only when the passphrase reproduces the stored verifier.
+async function vaultUnlock(passphrase) {
+  if (!vaultExists()) return false;
+  // Unlock at whatever count this vault was created with — vaultDeriveKey clamps it.
+  const key = await vaultDeriveKey(passphrase, b64dec(vaultMeta.salt), vaultMeta.iterations);
+  try {
+    if (await vaultDecrypt(vaultMeta.verifier, key) !== VAULT_VERIFIER) return false;
+  } catch {
+    return false; // AES-GCM auth tag mismatch — wrong passphrase
+  }
+  vaultKey = key;
+  await vaultRevealSecrets();
+  return true;
+}
+
+// Drop the key and wipe every decrypted secret from memory. Ciphertext stays put.
+function vaultLock() {
+  vaultKey = null;
+  for (const k of SECRET_SETTING_KEYS) settings[k] = "";
+  for (const p of pentestProjects) {
+    for (const k of SECRET_PROJECT_KEYS) if (p.credentials) p.credentials[k] = "";
+  }
+}
+
+// Decrypt the ciphertext already held in memory back into the plaintext fields.
+// A blob we cannot decrypt is recorded, not discarded — see vaultUndecryptable.
+async function vaultRevealSecrets() {
+  if (!vaultUnlocked()) return;
+  vaultUndecryptable.clear();
+  for (const k of SECRET_SETTING_KEYS) {
+    const blob = settings.__secrets?.[k];
+    if (!blob) continue;
+    try { settings[k] = await vaultDecrypt(blob); }
+    catch { settings[k] = ""; vaultUndecryptable.add(k); }
+  }
+  for (const p of pentestProjects) {
+    for (const k of SECRET_PROJECT_KEYS) {
+      const blob = p.credentials?.__secrets?.[k];
+      if (!blob) continue;
+      try { p.credentials[k] = await vaultDecrypt(blob); }
+      catch { p.credentials[k] = ""; vaultUndecryptable.add(p.id + ":" + k); }
+    }
+  }
+}
+
+// Swap plaintext secrets for ciphertext before anything reaches chrome.storage.
+//
+// opts.key    — encrypt under this key instead of vaultKey (used mid-re-key, before
+//               vaultKey has been swapped over).
+// opts.commit — false to skip syncing src.__secrets, for when the caller writes to
+//               storage itself and updates memory only after that write lands.
+async function vaultSealSettings(src, opts = {}) {
+  const key = opts.key || vaultKey;
+  const out = { ...src };
+  let enc;
+  if (key) {
+    enc = {};
+    for (const k of SECRET_SETTING_KEYS) {
+      // Blobs we could not read stay exactly as they are — re-encrypting "" would
+      // destroy recoverable data.
+      if (vaultUndecryptable.has(k) && src.__secrets?.[k]) { enc[k] = src.__secrets[k]; continue; }
+      if (src[k]) enc[k] = await vaultEncrypt(src[k], key);
+    }
+  } else {
+    enc = { ...(src.__secrets || {}) }; // locked: carry existing ciphertext forward
+  }
+  for (const k of SECRET_SETTING_KEYS) out[k] = "";
+  // No vault configured yet: plaintext an older build already wrote stays on disk
+  // rather than being wiped by an unrelated save. It is no worse than before, and
+  // the vault bar prompts to encrypt it. Newly typed secrets are still never written.
+  if (!key && !vaultExists()) {
+    for (const k of SECRET_SETTING_KEYS) if (vaultLegacySettingKeys.has(k) && src[k]) out[k] = src[k];
+  }
+  out.__secrets = enc;
+  if (opts.commit !== false) src.__secrets = enc;
+  return out;
+}
+
+async function vaultSealProjects(projects, opts = {}) {
+  const key = opts.key || vaultKey;
+  const out = [];
+  for (const p of projects) {
+    const c = { ...(p.credentials || {}) };
+    let enc;
+    if (key) {
+      enc = {};
+      for (const k of SECRET_PROJECT_KEYS) {
+        if (vaultUndecryptable.has(p.id + ":" + k) && c.__secrets?.[k]) { enc[k] = c.__secrets[k]; continue; }
+        if (c[k]) enc[k] = await vaultEncrypt(c[k], key);
+      }
+    } else {
+      enc = { ...(c.__secrets || {}) };
+    }
+    for (const k of SECRET_PROJECT_KEYS) c[k] = "";
+    if (!key && !vaultExists()) {
+      for (const k of SECRET_PROJECT_KEYS) {
+        if (vaultLegacyProjectKeys.has(p.id + ":" + k) && p.credentials?.[k]) c[k] = p.credentials[k];
+      }
+    }
+    c.__secrets = enc;
+    if (opts.commit !== false && p.credentials) p.credentials.__secrets = enc;
+    out.push({ ...p, credentials: c });
+  }
+  return out;
+}
+
+// Strip every secret — plaintext and ciphertext — from anything leaving the panel
+// (profile exports, saved profiles). Ciphertext is useless elsewhere and plaintext
+// must never land in a file the user might share.
+function vaultRedact(src) {
+  const out = { ...src };
+  for (const k of SECRET_SETTING_KEYS) delete out[k];
+  delete out.__secrets;
+  return out;
+}
+
+// Secret fields holding a value that the current vault state cannot persist.
+// Legacy plaintext is excluded — a save keeps it on disk exactly as it found it.
+function vaultDroppedSecretKeys() {
+  if (vaultUnlocked()) return [];
+  return SECRET_SETTING_KEYS.filter(k => settings[k] && !(!vaultExists() && vaultLegacySettingKeys.has(k)));
+}
+
+function vaultHasUnsavedSecrets() { return vaultDroppedSecretKeys().length > 0; }
+
+// ── Credential scan for outgoing files ──────────────────────────────────────
+// Match & Replace rules and auto-injected headers routinely carry live session
+// cookies and Authorization values. They deliberately stay OUT of the vault —
+// background.js applies them on every request, so encrypting them would make the
+// proxy silently stop rewriting whenever the vault is locked. What we can close is
+// the sharing vector: warn before those values leave the machine in a file.
+
+const EXPORT_SCAN_FIELDS = ["matchReplace", "autoHeaders"];
+const CREDENTIAL_PATTERNS = [
+  { name: "Authorization header", re: /^\s*authorization\s*:\s*\S/im },
+  { name: "Bearer token", re: /\bbearer\s+[A-Za-z0-9._~+/-]{8,}/i },
+  { name: "Cookie header", re: /^\s*(?:set-)?cookie\s*:\s*\S/im },
+  { name: "Session cookie", re: /\b(?:PHPSESSID|JSESSIONID|ASP\.NET_SessionId|session(?:id)?|sid|auth[_-]?token)\s*=\s*\S{6,}/i },
+  { name: "API key header", re: /^\s*x-(?:api[_-]?key|auth[_-]?token|access[_-]?token)\s*:\s*\S/im },
+  { name: "JWT", re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+/ },
+  { name: "Basic auth credentials", re: /\bbasic\s+[A-Za-z0-9+/]{12,}={0,2}/i },
+];
+
+// Flatten a settings field into the individual strings worth scanning. Rules are
+// scanned value by value rather than as one JSON blob, so the line-anchored header
+// patterns still work once a rule is inside an array of objects.
+function collectScannableStrings(value, out = []) {
+  if (typeof value === "string") { if (value) out.push(value); return out; }
+  if (Array.isArray(value)) { for (const v of value) collectScannableStrings(v, out); return out; }
+  if (value && typeof value === "object") { for (const v of Object.values(value)) collectScannableStrings(v, out); }
+  return out;
+}
+
+// Returns [{ field, name }] for every credential-shaped value in the fields that
+// are about to be written to a file. One entry per field+pattern, not per match.
+function scanForCredentials(obj) {
+  const hits = [];
+  for (const field of EXPORT_SCAN_FIELDS) {
+    const strings = collectScannableStrings(obj?.[field]);
+    if (!strings.length) continue;
+    for (const { name, re } of CREDENTIAL_PATTERNS) {
+      if (strings.some(s => re.test(s))) hits.push({ field, name });
+    }
+  }
+  return hits;
+}
+
+// Blank the scanned fields. Used when the user chooses to redact before download.
+function redactCredentialFields(obj) {
+  const out = { ...obj };
+  for (const field of EXPORT_SCAN_FIELDS) {
+    if (!(field in out)) continue;
+    out[field] = Array.isArray(out[field]) ? [] : "";
+  }
+  return out;
+}
+
+// Shows the warning and resolves with what the user chose:
+// "redact" | "anyway" | "cancel". Resolves "anyway" if the dialog is missing, so a
+// broken overlay can never block an export outright.
+function confirmCredentialExport(hits) {
+  return new Promise(resolve => {
+    const ov = document.getElementById("export-scan-overlay");
+    const list = document.getElementById("export-scan-list");
+    if (!ov || !list) { resolve("anyway"); return; }
+
+    list.replaceChildren();
+    for (const h of hits) {
+      const li = el("li");
+      li.textContent = h.name;
+      const src = el("span");
+      src.className = "export-scan-field";
+      src.textContent = ` — in ${h.field}`;
+      li.appendChild(src);
+      list.appendChild(li);
+    }
+
+    const returnFocusTo = document.activeElement;
+    const done = choice => {
+      ov.classList.add("hidden");
+      for (const [node, handler] of wired) node.removeEventListener("click", handler);
+      ov.removeEventListener("keydown", onKey);
+      returnFocusTo?.focus?.();
+      resolve(choice);
+    };
+    const onKey = e => { if (e.key === "Escape") { e.preventDefault(); done("cancel"); } };
+    const wired = [];
+    const wire = (id, choice) => {
+      const node = document.getElementById(id);
+      if (!node) return;
+      const handler = () => done(choice);
+      node.addEventListener("click", handler);
+      wired.push([node, handler]);
+    };
+    wire("export-scan-redact", "redact");
+    wire("export-scan-anyway", "anyway");
+    wire("export-scan-cancel", "cancel");
+    wire("export-scan-x", "cancel");
+    ov.addEventListener("keydown", onKey);
+
+    ov.classList.remove("hidden");
+    document.getElementById("export-scan-redact")?.focus();
+  });
+}
+
+// ── Vault UI ────────────────────────────────────────────────────────────────
+
+const SECRET_INPUT_IDS = ["ai-primary-key", "ai-judge-key", "ai-utility-key", "ai-oob-token", "cfg-auth-pass"];
+let vaultMode = "unlock"; // "unlock" | "create" | "change"
+
+function vaultRenderStatus() {
+  const bar = document.getElementById("ai-vault-bar");
+  if (!bar) return;
+  const unlocked = vaultUnlocked(), exists = vaultExists();
+  bar.classList.toggle("unlocked", unlocked);
+
+  const icon = document.getElementById("ai-vault-icon");
+  if (icon) icon.textContent = unlocked ? "lock_open" : "lock";
+
+  const st = document.getElementById("ai-vault-status");
+  if (st) {
+    // The "will NOT be saved" warning wins over the legacy notice — it is about
+    // data the user is actively losing right now.
+    if (vaultHasUnsavedSecrets()) {
+      st.textContent = exists
+        ? "Vault locked — the keys you typed will NOT be saved"
+        : "No passphrase set — the keys you typed will NOT be saved";
+    } else if (vaultUndecryptable.size) {
+      st.textContent = `${vaultUndecryptable.size} stored secret(s) could not be decrypted — kept as-is, re-enter them`;
+    } else if (vaultHasLegacyPlaintext() && !exists) {
+      st.textContent = "Plaintext secrets found on disk — set a passphrase to encrypt them";
+    } else if (unlocked && vaultClampIterations(vaultMeta?.iterations) < VAULT_ITERATIONS) {
+      // Created by an older build at a lower PBKDF2 count. Only a re-key can raise
+      // it, since the salt and every blob are tied to the original derivation.
+      st.textContent = "Vault unlocked — created with weaker key stretching, use Change to upgrade";
+    } else {
+      st.textContent = !exists ? "No passphrase set — API keys will not be saved"
+        : unlocked ? "Vault unlocked — secrets are encrypted on disk"
+        : "Vault locked — unlock to load your saved API keys";
+    }
+  }
+
+  const show = (id, on) => document.getElementById(id)?.classList.toggle("hidden", !on);
+  show("ai-vault-setup", !exists);
+  show("ai-vault-unlock", exists && !unlocked);
+  show("ai-vault-lock", unlocked);
+  show("ai-vault-change", unlocked);
+
+  // A locked secret field is empty because it is encrypted, not because it is unset.
+  for (const id of SECRET_INPUT_IDS) {
+    const inp = document.getElementById(id);
+    if (!inp) continue;
+    if (inp.dataset.phOrig === undefined) inp.dataset.phOrig = inp.placeholder || "";
+    inp.placeholder = (exists && !unlocked) ? "locked — unlock vault to view" : inp.dataset.phOrig;
+  }
+}
+
+function vaultSetError(msg) {
+  const e = document.getElementById("vault-error");
+  if (!e) return;
+  e.textContent = msg || "";
+  e.classList.toggle("hidden", !msg);
+}
+
+let vaultReturnFocusTo = null;
+
+function vaultOpenModal(mode) {
+  vaultMode = mode;
+  const ov = document.getElementById("vault-overlay");
+  if (!ov) return;
+  vaultReturnFocusTo = document.activeElement;
+  const creating = mode !== "unlock";
+  const title = document.getElementById("vault-modal-title");
+  if (title) title.textContent = mode === "unlock" ? "Unlock secret vault"
+    : mode === "change" ? "Change vault passphrase" : "Set vault passphrase";
+  const desc = document.getElementById("vault-modal-desc");
+  if (desc) desc.textContent = creating
+    ? "The passphrase is never stored. If you lose it, the saved API keys and credentials cannot be recovered."
+    : "Enter your passphrase to decrypt the saved API keys and project credentials.";
+  document.getElementById("vault-confirm-row")?.classList.toggle("hidden", !creating);
+  const ok = document.getElementById("vault-ok");
+  if (ok) { ok.textContent = creating ? "Save" : "Unlock"; ok.disabled = false; }
+  const p1 = document.getElementById("vault-pass"), p2 = document.getElementById("vault-pass2");
+  if (p1) p1.value = "";
+  if (p2) p2.value = "";
+  vaultSetError("");
+  ov.classList.remove("hidden");
+  p1?.focus();
+}
+
+function vaultCloseModal() {
+  document.getElementById("vault-overlay")?.classList.add("hidden");
+  // Never leave the passphrase sitting in the DOM
+  const p1 = document.getElementById("vault-pass"), p2 = document.getElementById("vault-pass2");
+  if (p1) p1.value = "";
+  if (p2) p2.value = "";
+  vaultSetError("");
+  vaultReturnFocusTo?.focus?.();
+  vaultReturnFocusTo = null;
+}
+
+let vaultSubmitInFlight = false;
+
+async function vaultSubmitModal() {
+  // Guards the Enter path too — two concurrent vaultCreate calls would race on
+  // vaultKey/vaultMeta and could commit one salt while encrypting under another.
+  if (vaultSubmitInFlight) return;
+  const pass = document.getElementById("vault-pass")?.value || "";
+  if (!pass) { vaultSetError("Enter a passphrase"); return; }
+  const ok = document.getElementById("vault-ok");
+  const okLabel = vaultMode === "unlock" ? "Unlock" : "Save";
+  vaultSubmitInFlight = true;
+  if (ok) { ok.disabled = true; ok.textContent = "Working…"; }
+  try {
+    if (vaultMode === "unlock") {
+      if (!(await vaultUnlock(pass))) { vaultSetError("Wrong passphrase"); return; }
+      loadSettingsUI();
+      pentestRenderProjectList();
+      showToast(vaultUndecryptable.size
+        ? `Vault unlocked — ${vaultUndecryptable.size} secret(s) could not be decrypted`
+        : "Vault unlocked");
+    } else {
+      // Re-keying only works unlocked, otherwise the plaintext to re-encrypt is gone.
+      if (vaultMode === "change" && !vaultUnlocked()) { vaultSetError("Unlock the vault first"); return; }
+      if (pass.length < 8) { vaultSetError("Use at least 8 characters"); return; }
+      if (pass !== (document.getElementById("vault-pass2")?.value || "")) { vaultSetError("Passphrases do not match"); return; }
+      // vaultCreate re-encrypts settings and projects and commits them together
+      // with the new metadata in one atomic write.
+      await vaultEnqueueWrite(() => vaultCreate(pass));
+      showToast(vaultMode === "change" ? "Passphrase changed" : "Vault created — secrets are now encrypted");
+    }
+    vaultCloseModal();
+  } catch (err) {
+    vaultSetError("Vault error: " + (err?.message || err));
+  } finally {
+    vaultSubmitInFlight = false;
+    if (ok) { ok.disabled = false; ok.textContent = okLabel; }
+    vaultRenderStatus();
+  }
+}
+
+function wireVaultUI() {
+  document.getElementById("ai-vault-setup")?.addEventListener("click", () => vaultOpenModal("create"));
+  document.getElementById("ai-vault-unlock")?.addEventListener("click", () => vaultOpenModal("unlock"));
+  document.getElementById("ai-vault-change")?.addEventListener("click", () => vaultOpenModal("change"));
+  document.getElementById("ai-vault-lock")?.addEventListener("click", () => {
+    vaultLock();
+    loadSettingsUI();
+    pentestRenderProjectList();
+    vaultRenderStatus();
+    showToast("Vault locked");
+  });
+  document.getElementById("vault-ok")?.addEventListener("click", vaultSubmitModal);
+  document.getElementById("vault-cancel")?.addEventListener("click", vaultCloseModal);
+  document.getElementById("vault-cancel-x")?.addEventListener("click", vaultCloseModal);
+
+  const ov = document.getElementById("vault-overlay");
+  // Click-outside to dismiss, matching the project wizard's behaviour.
+  ov?.addEventListener("click", e => { if (e.target === e.currentTarget) vaultCloseModal(); });
+  // Enter/Escape anywhere in the modal, not just while a passphrase field has focus.
+  ov?.addEventListener("keydown", e => {
+    if (e.key === "Escape") { e.preventDefault(); vaultCloseModal(); }
+    if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); vaultSubmitModal(); }
+  });
+
+  // vaultMeta loads in parallel with wiring — render once it is there, or the bar
+  // would offer "Set passphrase" to a user who already has a vault.
+  vaultLoadMeta().then(vaultRenderStatus);
+}
+
 // ═══════════════════════════ SETTINGS ═════════════════════════════════════════
 
 const DEFAULT_SETTINGS = {
@@ -3976,13 +4450,22 @@ const DEFAULT_SETTINGS = {
 
 let settings = { ...DEFAULT_SETTINGS };
 
-function loadSettings() {
-  return new Promise(resolve => {
+async function loadSettings() {
+  await vaultLoadMeta();
+  await new Promise(resolve => {
     chrome.storage.local.get("voidSettings", r => {
       if (r.voidSettings) settings = { ...DEFAULT_SETTINGS, ...r.voidSettings };
       resolve();
     });
   });
+  // Secrets stay as ciphertext in settings.__secrets until the vault is unlocked.
+  // Exception: keys written in plaintext by an earlier build stay usable for this
+  // session so nothing breaks — the vault bar prompts the user to encrypt them.
+  for (const k of SECRET_SETTING_KEYS) {
+    if (settings[k]) vaultLegacySettingKeys.add(k);
+    else settings[k] = "";
+  }
+  vaultMarkSettingsLoaded();
 }
 
 function getActiveSystemPrompt() {
@@ -4019,14 +4502,23 @@ function getActiveSystemPrompt() {
     // Config
     ctx += '\n\nEngagement config:';
     ctx += '\n- Environment: ' + (proj.config?.environment || 'unknown');
-    ctx += '\n- Mode: ' + (proj.config?.mode || 'ask');
+    const MODE_MEANING = {
+      ask: 'ask — detect only. Prove the issue exists with the least invasive evidence possible (alert(1), one extra row, a 5s delay). Do NOT extract data, dump tables, write files, or run exploitation tools.',
+      manual: 'manual — detect and exploit conservatively by hand. Prove impact on one record, never at scale.',
+      tool: 'tool — detect, then use the automated tools (run_hybrid_scan, run_intruder_attack) to establish depth.',
+    };
+    const mode = proj.config?.mode || 'ask';
+    ctx += '\n- Mode: ' + (MODE_MEANING[mode] || mode);
     if (!proj.config?.allowBruteforce) ctx += '\n- Bruteforce/fuzzing: DISABLED';
     if (!proj.config?.allowDestructive) ctx += '\n- Destructive testing: DISABLED';
     // Credentials hint (never expose usernames or passwords to LLM)
     if (proj.credentials?.username || proj.credentials?.apiToken) {
       ctx += '\n\nCredentials configured: auth type=' + (proj.credentials.authType || 'FORM');
       if (proj.credentials.loginUrl) ctx += ', login URL=' + proj.credentials.loginUrl;
-      ctx += '\nUse the authenticated_request tool to send requests with stored credentials.';
+      // Deliberately no tool name here: there is no tool that injects stored
+      // credentials, and naming one the model cannot call invites a hallucinated
+      // call and a wasted turn.
+      ctx += '\nAuthenticate by sending the login request yourself with send_request, then reuse the session cookie it returns.';
     }
     // Workflow
     if (proj.workflow?.selectedId) {
@@ -4188,6 +4680,745 @@ function applyModelPreset(preset) {
   }
 }
 
+// ═══════════════════ USER CONTENT (editable personas/skills/workflows/prompts) ═
+// The data/*.js files are build artifacts regenerated by scripts/bundle-*.js, so
+// edits made in the panel cannot live there. Instead the shipped data is kept
+// pristine and user changes are stored as an overlay in chrome.storage, merged on
+// top at load. That survives regenerating the bundles and makes "restore original"
+// a matter of dropping the overlay entry.
+
+const UC_KINDS = {
+  agents:    { label: "Agent",    global: "VOID_AGENTS",    shape: "array",  idKey: "id" },
+  skills:    { label: "Skill",    global: "VOID_SKILLS",    shape: "object", idKey: "slug" },
+  workflows: { label: "Workflow", global: "VOID_WORKFLOWS", shape: "array",  idKey: "id" },
+  prompts:   { label: "Prompt",   global: "VOID_PROMPTS",   shape: "array",  idKey: "id" },
+};
+
+let ucBuiltin = null; // pristine deep copy of the shipped data, captured once
+let ucOverrides = { agents: {}, skills: {}, workflows: {}, prompts: {} };
+let ucHidden    = { agents: [], skills: [], workflows: [], prompts: [] };
+
+// Capture the shipped data before any overlay is applied. Must run after the
+// data/*.js scripts have executed and before the first ucApply().
+function ucSnapshotBuiltins() {
+  if (ucBuiltin) return;
+  ucBuiltin = {};
+  for (const [kind, def] of Object.entries(UC_KINDS)) {
+    ucBuiltin[kind] = structuredClone(window[def.global] ?? (def.shape === "array" ? [] : {}));
+  }
+}
+
+function ucLoad() {
+  return new Promise(resolve => {
+    chrome.storage.local.get("voidUserContent", r => {
+      const s = r.voidUserContent || {};
+      for (const kind of Object.keys(UC_KINDS)) {
+        ucOverrides[kind] = s.overrides?.[kind] || {};
+        ucHidden[kind] = s.hidden?.[kind] || [];
+      }
+      resolve();
+    });
+  });
+}
+
+function ucSave() {
+  return new Promise(r => chrome.storage.local.set(
+    { voidUserContent: { overrides: ucOverrides, hidden: ucHidden } }, r));
+}
+
+// Rebuild the window.VOID_* globals from builtin + overlay. The globals are
+// mutated in place because ~40 call sites across the panel read them directly.
+function ucApply() {
+  ucSnapshotBuiltins();
+  for (const [kind, def] of Object.entries(UC_KINDS)) {
+    const hidden = new Set(ucHidden[kind]);
+    const over = ucOverrides[kind] || {};
+    if (def.shape === "array") {
+      const builtinIds = new Set(ucBuiltin[kind].map(o => o[def.idKey]));
+      const merged = ucBuiltin[kind]
+        .filter(o => !hidden.has(o[def.idKey]))
+        .map(o => over[o[def.idKey]] ? { ...o, ...over[o[def.idKey]] } : o);
+      // User-created entries keep insertion order after the shipped ones.
+      for (const [id, obj] of Object.entries(over)) {
+        if (!builtinIds.has(id) && !hidden.has(id)) merged.push(obj);
+      }
+      const target = window[def.global];
+      if (Array.isArray(target)) target.splice(0, target.length, ...merged);
+      else window[def.global] = merged;
+    } else {
+      const merged = {};
+      for (const [id, obj] of Object.entries(ucBuiltin[kind])) {
+        if (!hidden.has(id)) merged[id] = over[id] ? { ...obj, ...over[id] } : obj;
+      }
+      for (const [id, obj] of Object.entries(over)) {
+        if (!(id in ucBuiltin[kind]) && !hidden.has(id)) merged[id] = obj;
+      }
+      const target = window[def.global];
+      if (target && typeof target === "object") {
+        for (const k of Object.keys(target)) delete target[k];
+        Object.assign(target, merged);
+      } else window[def.global] = merged;
+    }
+  }
+}
+
+function ucIsBuiltin(kind, id) {
+  ucSnapshotBuiltins();
+  return UC_KINDS[kind].shape === "array"
+    ? ucBuiltin[kind].some(o => o[UC_KINDS[kind].idKey] === id)
+    : id in ucBuiltin[kind];
+}
+function ucIsCustom(kind, id) { return !ucIsBuiltin(kind, id); }
+function ucIsModified(kind, id) { return ucIsBuiltin(kind, id) && !!ucOverrides[kind]?.[id]; }
+
+// Read one merged entry, whatever the underlying shape.
+function ucGet(kind, id) {
+  const def = UC_KINDS[kind];
+  const g = window[def.global];
+  return def.shape === "array" ? (g || []).find(o => o[def.idKey] === id) : (g || {})[id];
+}
+
+// These three re-render the affected browser themselves. Leaving that to callers
+// meant a programmatic change updated the registries while the visible list kept
+// showing stale entries.
+async function ucUpsert(kind, id, obj) {
+  ucOverrides[kind][id] = obj;
+  ucHidden[kind] = ucHidden[kind].filter(h => h !== id);
+  await ucSave();
+  ucApply();
+  ucRerender(kind);
+}
+
+// Removes a user-created entry outright; hides a shipped one so it can come back.
+async function ucRemove(kind, id) {
+  delete ucOverrides[kind][id];
+  if (ucIsBuiltin(kind, id) && !ucHidden[kind].includes(id)) ucHidden[kind].push(id);
+  await ucSave();
+  ucApply();
+  ucRerender(kind);
+}
+
+// Drop the overlay entry so the shipped version shows through again.
+async function ucRestore(kind, id) {
+  delete ucOverrides[kind][id];
+  ucHidden[kind] = ucHidden[kind].filter(h => h !== id);
+  await ucSave();
+  ucApply();
+  ucRerender(kind);
+}
+
+function ucRerender(kind) {
+  if (kind === "agents") { ucPopulatePersonaSelect(); updatePersonaPreview(); }
+  if (kind === "skills") renderSkillsBrowser();
+  if (kind === "workflows") renderWorkflowsBrowser();
+  if (kind === "prompts") renderPromptsBrowser();
+}
+
+// The persona <select> is static markup, so custom personas need injecting.
+function ucPopulatePersonaSelect() {
+  const sel = document.getElementById("ai-persona");
+  if (!sel) return;
+  const current = sel.value;
+  const custom = sel.querySelector('option[value="custom"]');
+  for (const opt of [...sel.querySelectorAll("option")]) {
+    if (opt.value !== "custom") opt.remove();
+  }
+  for (const a of (window.VOID_AGENTS || [])) {
+    const o = document.createElement("option");
+    o.value = a.id;
+    o.textContent = a.title + (ucIsCustom("agents", a.id) ? "  (custom)" : ucIsModified("agents", a.id) ? "  (edited)" : "");
+    sel.insertBefore(o, custom || null);
+  }
+  if ([...sel.options].some(o => o.value === current)) sel.value = current;
+}
+
+// ── Editor ──────────────────────────────────────────────────────────────────
+// One schema-driven modal for all four kinds; four bespoke editors would be four
+// times the code and four places for the ID-collision rules to drift.
+
+const UC_FIELDS = {
+  agents: [
+    { key: "id", label: "ID", type: "text", idField: true, required: true, hint: "lowercase-slug, used by /agent <id>" },
+    { key: "title", label: "Title", type: "text", required: true },
+    { key: "description", label: "Description", type: "text" },
+    { key: "icon", label: "Icon", type: "text", hint: "Material Symbols name, e.g. security" },
+    { key: "context", label: "Context", type: "text", hint: "One line on when to use this persona" },
+    { key: "systemPrompt", label: "System prompt", type: "textarea", rows: 14, required: true },
+  ],
+  skills: [
+    { key: "slug", label: "Slug", type: "text", idField: true, required: true, hint: "used by the /<slug> command" },
+    { key: "name", label: "Name", type: "text", required: true },
+    { key: "category", label: "Category", type: "text", required: true },
+    { key: "description", label: "Description", type: "text" },
+    { key: "tags", label: "Tags", type: "csv" },
+    { key: "body", label: "Methodology", type: "textarea", rows: 16, hint: "Injected into the system prompt when the skill is invoked" },
+  ],
+  prompts: [
+    { key: "id", label: "ID", type: "text", idField: true, required: true },
+    { key: "name", label: "Name", type: "text", required: true },
+    { key: "category", label: "Category", type: "text", required: true },
+    { key: "template", label: "Template", type: "textarea", rows: 10, required: true, hint: "Use {{tag}} placeholders" },
+    { key: "tags", label: "Tags", type: "csv", hint: "Placeholder names, without the braces" },
+  ],
+  workflows: [
+    { key: "id", label: "ID", type: "text", idField: true, required: true },
+    { key: "name", label: "Name", type: "text", required: true },
+    { key: "description", label: "Description", type: "text" },
+    { key: "level", label: "Level", type: "select", options: ["atomic", "composite", "engagement"],
+      hint: "atomic = one technique · composite = a chain · engagement = phases" },
+    { key: "category", label: "Category", type: "text" },
+    { key: "initialInstructions", label: "Initial instructions", type: "textarea", rows: 4,
+      hint: "Given to every agent before the first step runs" },
+    { key: "triggers", label: "Triggers", type: "triggers" },
+    { key: "steps", label: "Steps", type: "steps" },
+  ],
+};
+
+let ucEditKind = null, ucEditOriginalId = null, ucEditSteps = [], ucEditTriggers = [];
+
+// A step is one of three things: an AGENT does work, a CONDITION branches on what
+// the AI concludes from everything logged so far, and FINISH ends the run.
+const WF_STEP_TYPES = ["AGENT", "CONDITION", "FINISH"];
+
+function ucNewStep(type = "AGENT") {
+  const base = { id: "step-" + (ucEditSteps.length + 1), name: "", type, next: "" };
+  if (type === "CONDITION") {
+    return { ...base, check: "", branches: [{ condition: "", goto: "" }], elseGoto: "" };
+  }
+  if (type === "FINISH") return { ...base, summary: "" };
+  return {
+    ...base,
+    // What the step runs as. Each may be overridden inline for this workflow only,
+    // so tuning a step never edits the shared agent/skill/prompt.
+    agent: "", agentOverride: "",
+    skills: [], skillOverrides: {},
+    prompt: "", promptOverride: "",
+    dependsOn: [], goal: "", intrusive: false,
+    decisionTree: [], toolGuidance: { aiShould: "", useToolWhen: {} },
+    techniqueRefs: [], validation: { mustReproduce: false, contextCheck: "", impactAssessment: "" },
+  };
+}
+
+function ucNewTrigger() {
+  return { id: "trigger-" + (ucEditTriggers.length + 1), name: "", condition: "", action: "stop", target: "" };
+}
+
+function ucOpenEditor(kind, id, { duplicate = false } = {}) {
+  ucEditKind = kind;
+  const def = UC_KINDS[kind];
+  const existing = id ? structuredClone(ucGet(kind, id)) : null;
+  ucEditOriginalId = duplicate ? null : id;
+
+  const body = document.getElementById("uc-editor-fields");
+  const title = document.getElementById("uc-editor-title");
+  if (!body || !title) return;
+  title.textContent = (existing ? (duplicate ? "Duplicate " : "Edit ") : "New ") + def.label;
+
+  // Skills are keyed by their object key, so surface it as a normal field.
+  const data = existing ? { ...existing } : {};
+  if (kind === "skills" && id && !duplicate) data.slug = id;
+  if (duplicate && data[def.idKey]) data[def.idKey] = data[def.idKey] + "-copy";
+
+  ucEditSteps = kind === "workflows"
+    ? (data.steps || []).map(s => ({ ...ucNewStep(s.type === "PHASE" ? "AGENT" : (s.type || "AGENT")), ...s }))
+    : [];
+  ucEditTriggers = kind === "workflows" ? (data.triggers || []).map(t => ({ ...ucNewTrigger(), ...t })) : [];
+
+  body.replaceChildren();
+  for (const f of UC_FIELDS[kind]) {
+    if (f.type === "steps") { body.appendChild(ucBuildStepsField()); continue; }
+    if (f.type === "triggers") { body.appendChild(ucBuildTriggersField()); continue; }
+    body.appendChild(ucBuildField(f, data[f.key]));
+  }
+  document.getElementById("uc-editor-error")?.classList.add("hidden");
+  document.getElementById("uc-editor-overlay")?.classList.remove("hidden");
+  body.querySelector("input,textarea,select")?.focus();
+}
+
+function ucBuildField(f, value) {
+  const row = el("div", "uc-field");
+  const lab = el("label", "settings-label-sm");
+  lab.textContent = f.label + (f.required ? " *" : "");
+  row.appendChild(lab);
+
+  let input;
+  if (f.type === "textarea") {
+    input = el("textarea", "raw-ta uc-input");
+    input.rows = f.rows || 6;
+    input.value = value || "";
+  } else if (f.type === "select") {
+    input = el("select", "filter-sel uc-input");
+    for (const o of f.options) {
+      const opt = el("option"); opt.value = o; opt.textContent = o;
+      input.appendChild(opt);
+    }
+    input.value = value || f.options[0];
+  } else {
+    input = el("input", "settings-inp uc-input");
+    input.type = "text";
+    input.value = f.type === "csv" ? (Array.isArray(value) ? value.join(", ") : (value || "")) : (value || "");
+  }
+  input.dataset.key = f.key;
+  input.dataset.ftype = f.type;
+  input.spellcheck = false;
+  row.appendChild(input);
+  if (f.hint) { const h = el("div", "uc-hint"); h.textContent = f.hint; row.appendChild(h); }
+  return row;
+}
+
+// Reads every field back out of the DOM into a plain object.
+function ucCollect() {
+  const out = {};
+  for (const inp of document.querySelectorAll("#uc-editor-fields .uc-input")) {
+    const v = inp.value;
+    out[inp.dataset.key] = inp.dataset.ftype === "csv"
+      ? v.split(",").map(s => s.trim()).filter(Boolean)
+      : v;
+  }
+  if (ucEditKind === "workflows") { out.steps = ucEditSteps; out.triggers = ucEditTriggers; }
+  return out;
+}
+
+// ── Steps sub-editor (mirrors the Agent-zero atomic workflow shape) ─────────
+
+function ucBuildStepsField() {
+  const wrap = el("div", "uc-field");
+  const lab = el("label", "settings-label-sm");
+  lab.textContent = "Steps";
+  wrap.appendChild(lab);
+  const hint = el("div", "uc-hint");
+  hint.textContent = "AGENT does work · CONDITION branches on what the AI concludes so far · FINISH ends the run";
+  wrap.appendChild(hint);
+  const list = el("div", "uc-steps"); list.id = "uc-steps-list";
+  wrap.appendChild(list);
+
+  const bar = el("div", "uc-toolbar");
+  for (const type of WF_STEP_TYPES) {
+    const b = el("button", "btn btn-sm btn-ghost");
+    b.type = "button";
+    b.textContent = "+ " + type;
+    b.addEventListener("click", () => { ucEditSteps.push(ucNewStep(type)); ucRenderSteps(); });
+    bar.appendChild(b);
+  }
+  wrap.appendChild(bar);
+  setTimeout(ucRenderSteps, 0);
+  return wrap;
+}
+
+function ucRenderSteps() {
+  const list = document.getElementById("uc-steps-list");
+  if (!list) return;
+  list.replaceChildren();
+  ucEditSteps.forEach((s, i) => list.appendChild(ucBuildStepCard(s, i)));
+  ucRefreshGotoTargets();
+}
+
+// Every "go to" dropdown offers the current set of steps. Rebuilt after any
+// add/remove/rename so a branch can never point at a step that no longer exists.
+function ucRefreshGotoTargets() {
+  const opts = ucEditSteps.map(s => ({ v: s.id, t: (s.name || s.id) + "  (" + s.type + ")" }));
+  for (const sel of document.querySelectorAll("#uc-steps-list select[data-goto], #uc-triggers-list select[data-goto]")) {
+    const cur = sel.dataset.value || sel.value;
+    sel.replaceChildren();
+    const none = el("option"); none.value = ""; none.textContent = "— next step —";
+    sel.appendChild(none);
+    for (const o of opts) {
+      const op = el("option"); op.value = o.v; op.textContent = o.t;
+      sel.appendChild(op);
+    }
+    sel.value = opts.some(o => o.v === cur) ? cur : "";
+  }
+}
+
+function ucStepInput(step, key, ph, { area = false, rows = 2 } = {}) {
+  const i = el(area ? "textarea" : "input", area ? "raw-ta uc-step-ta" : "settings-inp");
+  if (area) i.rows = rows; else i.type = "text";
+  i.placeholder = ph || ""; i.spellcheck = false;
+  i.value = key.split(".").reduce((o, k) => o?.[k], step) || "";
+  i.addEventListener("input", () => {
+    const parts = key.split("."); const last = parts.pop();
+    const tgt = parts.reduce((o, k) => (o[k] = o[k] || {}), step);
+    tgt[last] = i.value;
+  });
+  return i;
+}
+
+function ucStepRow(label, node) {
+  const r = el("div", "uc-step-row");
+  const l = el("label", "settings-label-sm"); l.textContent = label;
+  r.append(l, node);
+  return r;
+}
+
+function ucGotoSelect(obj, key) {
+  const sel = el("select", "filter-sel");
+  sel.dataset.goto = "1";
+  sel.dataset.value = obj[key] || "";
+  sel.addEventListener("change", () => { obj[key] = sel.value; sel.dataset.value = sel.value; });
+  return sel;
+}
+
+function ucBuildStepCard(step, idx) {
+  const card = el("div", "uc-step uc-step-" + step.type.toLowerCase());
+
+  const head = el("div", "uc-step-head");
+  const num = el("span", "uc-step-idx"); num.textContent = String(idx + 1);
+  head.appendChild(num);
+
+  const idInp = ucStepInput(step, "id", "step id");
+  idInp.className = "settings-inp uc-step-id";
+  idInp.addEventListener("input", ucRefreshGotoTargets);
+  const nameInp = ucStepInput(step, "name", "step name");
+  nameInp.className = "settings-inp uc-step-name";
+  nameInp.addEventListener("input", ucRefreshGotoTargets);
+  head.append(idInp, nameInp);
+
+  const type = el("select", "filter-sel uc-step-type");
+  for (const o of WF_STEP_TYPES) {
+    const opt = el("option"); opt.value = o; opt.textContent = o; type.appendChild(opt);
+  }
+  type.value = step.type;
+  type.addEventListener("change", () => {
+    // Rebuild from a fresh template so the card only shows fields its type uses.
+    const fresh = ucNewStep(type.value);
+    ucEditSteps[idx] = { ...fresh, id: step.id, name: step.name, type: type.value };
+    ucRenderSteps();
+  });
+  head.appendChild(type);
+
+  const up = el("button", "btn btn-xs btn-ghost"); up.type = "button"; up.textContent = "\u2191";
+  up.addEventListener("click", () => { if (idx > 0) { [ucEditSteps[idx - 1], ucEditSteps[idx]] = [ucEditSteps[idx], ucEditSteps[idx - 1]]; ucRenderSteps(); } });
+  const down = el("button", "btn btn-xs btn-ghost"); down.type = "button"; down.textContent = "\u2193";
+  down.addEventListener("click", () => { if (idx < ucEditSteps.length - 1) { [ucEditSteps[idx + 1], ucEditSteps[idx]] = [ucEditSteps[idx], ucEditSteps[idx + 1]]; ucRenderSteps(); } });
+  const del = el("button", "btn btn-xs btn-ghost uc-step-del"); del.type = "button"; del.textContent = "\u00d7";
+  del.addEventListener("click", () => { ucEditSteps.splice(idx, 1); ucRenderSteps(); });
+  head.append(up, down, del);
+  card.appendChild(head);
+
+  if (step.type === "FINISH") {
+    const b = el("div", "uc-step-body");
+    b.appendChild(ucStepRow("Summary", ucStepInput(step, "summary", "What to report when the flow ends", { area: true })));
+    card.appendChild(b);
+    return card;
+  }
+
+  if (step.type === "CONDITION") {
+    card.appendChild(ucBuildConditionBody(step));
+    return card;
+  }
+
+  card.appendChild(ucBuildAgentBody(step));
+  card.appendChild(ucBuildDecisionTree(step));
+  return card;
+}
+
+// ── AGENT step: agent + skills + prompt, each overridable inline ────────────
+
+function ucBuildAgentBody(step) {
+  const b = el("div", "uc-step-body");
+
+  const agentSel = el("select", "filter-sel uc-step-agent");
+  const none = el("option"); none.value = ""; none.textContent = "— inherit chat agent —";
+  agentSel.appendChild(none);
+  for (const a of (window.VOID_AGENTS || [])) {
+    const o = el("option"); o.value = a.id; o.textContent = a.title; agentSel.appendChild(o);
+  }
+  agentSel.value = step.agent || "";
+  agentSel.addEventListener("change", () => { step.agent = agentSel.value; });
+  b.appendChild(ucStepRow("Agent", agentSel));
+  b.appendChild(ucStepRow("Agent override", ucStepInput(step, "agentOverride",
+    "Replace this agent's system prompt for this step only", { area: true, rows: 3 })));
+
+  // Skills are multi-select: a step commonly needs more than one methodology.
+  const skillsBox = el("div", "uc-skill-picker");
+  const chosen = new Set(step.skills || []);
+  for (const [slug, sk] of Object.entries(window.VOID_SKILLS || {})) {
+    const tag = el("label", "uc-skill-tag" + (chosen.has(slug) ? " on" : ""));
+    const cb = el("input"); cb.type = "checkbox"; cb.checked = chosen.has(slug);
+    cb.addEventListener("change", () => {
+      if (cb.checked) chosen.add(slug); else chosen.delete(slug);
+      step.skills = [...chosen];
+      tag.classList.toggle("on", cb.checked);
+      renderSkillOverrides();
+    });
+    tag.append(cb, document.createTextNode(sk.name || slug));
+    skillsBox.appendChild(tag);
+  }
+  b.appendChild(ucStepRow("Skills", skillsBox));
+
+  const overrideWrap = el("div", "uc-skill-overrides");
+  const renderSkillOverrides = () => {
+    overrideWrap.replaceChildren();
+    for (const slug of (step.skills || [])) {
+      const ta = el("textarea", "raw-ta uc-step-ta");
+      ta.rows = 2;
+      ta.placeholder = "Override the " + slug + " methodology for this step only";
+      ta.spellcheck = false;
+      ta.value = step.skillOverrides?.[slug] || "";
+      ta.addEventListener("input", () => {
+        step.skillOverrides = step.skillOverrides || {};
+        if (ta.value) step.skillOverrides[slug] = ta.value; else delete step.skillOverrides[slug];
+      });
+      overrideWrap.appendChild(ucStepRow(slug, ta));
+    }
+  };
+  renderSkillOverrides();
+  b.appendChild(overrideWrap);
+
+  const promptSel = el("select", "filter-sel uc-step-prompt");
+  const pnone = el("option"); pnone.value = ""; pnone.textContent = "— no template —";
+  promptSel.appendChild(pnone);
+  for (const p of (window.VOID_PROMPTS || [])) {
+    const o = el("option"); o.value = p.id; o.textContent = p.name; promptSel.appendChild(o);
+  }
+  promptSel.value = step.prompt || "";
+  promptSel.addEventListener("change", () => { step.prompt = promptSel.value; });
+  b.appendChild(ucStepRow("Prompt", promptSel));
+  b.appendChild(ucStepRow("Prompt override", ucStepInput(step, "promptOverride",
+    "Replace the template for this step only — {{tag}} placeholders still work", { area: true, rows: 3 })));
+
+  b.appendChild(ucStepRow("Goal", ucStepInput(step, "goal", "What this step must establish", { area: true })));
+
+  const intrRow = el("div", "uc-step-row");
+  const intrLab = el("label", "settings-label");
+  const intrChk = el("input"); intrChk.type = "checkbox"; intrChk.checked = !!step.intrusive;
+  intrChk.addEventListener("change", () => { step.intrusive = intrChk.checked; });
+  intrLab.append(intrChk, el("span", "toggle-track"), document.createTextNode(" Intrusive"));
+  intrRow.appendChild(intrLab);
+  b.appendChild(intrRow);
+
+  b.appendChild(ucStepRow("Then go to", ucGotoSelect(step, "next")));
+  return b;
+}
+
+// ── CONDITION step: the AI judges, the user defines the branches ────────────
+
+function ucBuildConditionBody(step) {
+  const b = el("div", "uc-step-body");
+  b.appendChild(ucStepRow("Check", ucStepInput(step, "check",
+    "What the AI must determine from everything logged so far", { area: true, rows: 3 })));
+
+  const rows = el("div", "uc-branches");
+  const render = () => {
+    rows.replaceChildren();
+    (step.branches || []).forEach((br, i) => {
+      const r = el("div", "uc-branch");
+      const kw = el("span", "uc-branch-kw"); kw.textContent = i === 0 ? "if" : "else if";
+      const cond = el("input", "settings-inp");
+      cond.type = "text"; cond.placeholder = "condition, e.g. a SQL error was returned"; cond.spellcheck = false;
+      cond.value = br.condition || "";
+      cond.addEventListener("input", () => { br.condition = cond.value; });
+      const arrow = el("span", "uc-branch-arrow"); arrow.textContent = "\u2192";
+      const goto = ucGotoSelect(br, "goto");
+      const del = el("button", "btn btn-xs btn-ghost uc-step-del");
+      del.type = "button"; del.textContent = "\u00d7";
+      del.addEventListener("click", () => { step.branches.splice(i, 1); render(); ucRefreshGotoTargets(); });
+      r.append(kw, cond, arrow, goto, del);
+      rows.appendChild(r);
+    });
+    const elseRow = el("div", "uc-branch");
+    const kw = el("span", "uc-branch-kw"); kw.textContent = "else";
+    const spacer = el("span", "uc-branch-spacer");
+    const arrow = el("span", "uc-branch-arrow"); arrow.textContent = "\u2192";
+    elseRow.append(kw, spacer, arrow, ucGotoSelect(step, "elseGoto"));
+    rows.appendChild(elseRow);
+    ucRefreshGotoTargets();
+  };
+  b.appendChild(rows);
+
+  const add = el("button", "btn btn-xs btn-ghost");
+  add.type = "button"; add.textContent = "+ Add branch";
+  add.addEventListener("click", () => {
+    step.branches = step.branches || [];
+    step.branches.push({ condition: "", goto: "" });
+    render();
+  });
+  b.appendChild(add);
+  render();
+  return b;
+}
+
+// ── Triggers: checked after every step, can abort or divert the run ─────────
+
+function ucBuildTriggersField() {
+  const wrap = el("div", "uc-field");
+  const lab = el("label", "settings-label-sm"); lab.textContent = "Triggers";
+  wrap.appendChild(lab);
+  const hint = el("div", "uc-hint");
+  hint.textContent = "Evaluated after every step — a match stops the run or jumps to a step";
+  wrap.appendChild(hint);
+  const list = el("div", "uc-triggers"); list.id = "uc-triggers-list";
+  wrap.appendChild(list);
+
+  const add = el("button", "btn btn-sm btn-ghost");
+  add.type = "button"; add.textContent = "+ Add trigger";
+  add.addEventListener("click", () => { ucEditTriggers.push(ucNewTrigger()); ucRenderTriggers(); });
+  wrap.appendChild(add);
+  setTimeout(ucRenderTriggers, 0);
+  return wrap;
+}
+
+function ucRenderTriggers() {
+  const list = document.getElementById("uc-triggers-list");
+  if (!list) return;
+  list.replaceChildren();
+  ucEditTriggers.forEach((tr, i) => {
+    const row = el("div", "uc-trigger");
+    const name = el("input", "settings-inp uc-trigger-name");
+    name.type = "text"; name.placeholder = "trigger name"; name.spellcheck = false;
+    name.value = tr.name || "";
+    name.addEventListener("input", () => { tr.name = name.value; });
+
+    const cond = el("input", "settings-inp");
+    cond.type = "text"; cond.placeholder = "stop if\u2026 e.g. the target returned 5xx three times"; cond.spellcheck = false;
+    cond.value = tr.condition || "";
+    cond.addEventListener("input", () => { tr.condition = cond.value; });
+
+    const act = el("select", "filter-sel uc-trigger-act");
+    for (const [v, t] of [["stop", "stop the run"], ["goto", "jump to step"]]) {
+      const o = el("option"); o.value = v; o.textContent = t; act.appendChild(o);
+    }
+    act.value = tr.action || "stop";
+    const goto = ucGotoSelect(tr, "target");
+    const syncGoto = () => { goto.classList.toggle("hidden", act.value !== "goto"); };
+    act.addEventListener("change", () => { tr.action = act.value; syncGoto(); });
+    syncGoto();
+
+    const del = el("button", "btn btn-xs btn-ghost uc-step-del");
+    del.type = "button"; del.textContent = "\u00d7";
+    del.addEventListener("click", () => { ucEditTriggers.splice(i, 1); ucRenderTriggers(); });
+
+    row.append(name, cond, act, goto, del);
+    list.appendChild(row);
+  });
+  ucRefreshGotoTargets();
+}
+
+function ucBuildDecisionTree(step) {
+  const wrap = el("div", "uc-dtree");
+  const head = el("div", "pane-label");
+  head.textContent = "DECISION TREE";
+  wrap.appendChild(head);
+
+  const rows = el("div", "uc-dtree-rows");
+  const render = () => {
+    rows.replaceChildren();
+    (step.decisionTree || []).forEach((node, i) => {
+      const r = el("div", "uc-dtree-node");
+      const mk = (ph, key) => {
+        const inp = el("input", "settings-inp");
+        inp.type = "text"; inp.placeholder = ph; inp.value = node[key] || ""; inp.spellcheck = false;
+        inp.addEventListener("input", () => { node[key] = inp.value; });
+        return inp;
+      };
+      const idx = el("span", "uc-dtree-idx"); idx.textContent = String(i + 1);
+      const del = el("button", "btn btn-xs btn-ghost uc-step-del");
+      del.type = "button"; del.textContent = "×";
+      del.addEventListener("click", () => { step.decisionTree.splice(i, 1); render(); });
+      r.append(idx, mk("action — what to do", "action"), del);
+      r.append(mk("if positive →", "ifPositive"), mk("if negative →", "ifNegative"), mk("stop when…", "stopWhen"));
+      rows.appendChild(r);
+    });
+  };
+  wrap.appendChild(rows);
+
+  const add = el("button", "btn btn-xs btn-ghost");
+  add.type = "button"; add.textContent = "+ Add decision";
+  add.addEventListener("click", () => {
+    step.decisionTree = step.decisionTree || [];
+    step.decisionTree.push({ action: "", approach: "", ifPositive: "", ifNegative: "", stopWhen: "" });
+    render();
+  });
+  wrap.appendChild(add);
+  render();
+  return wrap;
+}
+
+function ucEditorError(msg) {
+  const e = document.getElementById("uc-editor-error");
+  if (!e) return;
+  e.textContent = msg || "";
+  e.classList.toggle("hidden", !msg);
+}
+
+function ucCloseEditor() {
+  document.getElementById("uc-editor-overlay")?.classList.add("hidden");
+  ucEditKind = null; ucEditOriginalId = null; ucEditSteps = [];
+  ucEditorError("");
+}
+
+async function ucSaveEditor() {
+  const kind = ucEditKind;
+  if (!kind) return;
+  const def = UC_KINDS[kind];
+  const data = ucCollect();
+
+  for (const f of UC_FIELDS[kind]) {
+    if (f.required && !String(data[f.key] || "").trim()) { ucEditorError(f.label + " is required"); return; }
+  }
+  const id = String(data[def.idKey]).trim();
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(id)) { ucEditorError("ID must be a slug: letters, digits, dot, dash, underscore"); return; }
+  // Renaming onto an existing entry would silently overwrite it.
+  if (id !== ucEditOriginalId && ucGet(kind, id)) { ucEditorError(`A ${def.label.toLowerCase()} with id "${id}" already exists`); return; }
+
+  // Skills are stored under their key, so the slug is not part of the value.
+  if (kind === "skills") delete data.slug;
+  await ucUpsert(kind, id, data);
+  // A rename leaves the old entry behind unless it is cleaned up.
+  if (ucEditOriginalId && ucEditOriginalId !== id) await ucRemove(kind, ucEditOriginalId);
+
+  ucCloseEditor();
+  showToast(`${def.label} "${id}" saved`);
+}
+
+// ── Toolbars ────────────────────────────────────────────────────────────────
+
+function ucSelectedId(kind) {
+  return kind === "skills" ? aiSkillsSelectedSlug
+    : kind === "workflows" ? aiWfSelectedId
+    : kind === "prompts" ? aiPromptSelectedId
+    : document.getElementById("ai-persona")?.value;
+}
+
+function ucWireToolbar(kind) {
+  const def = UC_KINDS[kind];
+  const on = (id, fn) => document.getElementById(id)?.addEventListener("click", fn);
+  on(`uc-new-${kind}`, () => ucOpenEditor(kind, null));
+  on(`uc-edit-${kind}`, () => {
+    const id = ucSelectedId(kind);
+    if (!id || !ucGet(kind, id)) { showToast(`Select a ${def.label.toLowerCase()} first`); return; }
+    ucOpenEditor(kind, id);
+  });
+  on(`uc-dup-${kind}`, () => {
+    const id = ucSelectedId(kind);
+    if (!id || !ucGet(kind, id)) { showToast(`Select a ${def.label.toLowerCase()} first`); return; }
+    ucOpenEditor(kind, id, { duplicate: true });
+  });
+  on(`uc-del-${kind}`, async () => {
+    const id = ucSelectedId(kind);
+    if (!id || !ucGet(kind, id)) { showToast(`Select a ${def.label.toLowerCase()} first`); return; }
+    await ucRemove(kind, id);
+    showToast(ucIsBuiltin(kind, id) ? `Built-in "${id}" hidden — Restore brings it back` : `"${id}" deleted`);
+  });
+  on(`uc-restore-${kind}`, async () => {
+    const id = ucSelectedId(kind);
+    if (!id) { showToast(`Select a ${def.label.toLowerCase()} first`); return; }
+    if (!ucIsBuiltin(kind, id)) { showToast(`"${id}" is user-created — nothing to restore`); return; }
+    await ucRestore(kind, id);
+    showToast(`"${id}" restored to the shipped version`);
+  });
+}
+
+function wireUserContent() {
+  for (const kind of Object.keys(UC_KINDS)) ucWireToolbar(kind);
+  document.getElementById("uc-editor-save")?.addEventListener("click", ucSaveEditor);
+  document.getElementById("uc-editor-cancel")?.addEventListener("click", ucCloseEditor);
+  document.getElementById("uc-editor-x")?.addEventListener("click", ucCloseEditor);
+  const ov = document.getElementById("uc-editor-overlay");
+  ov?.addEventListener("click", e => { if (e.target === e.currentTarget) ucCloseEditor(); });
+  ov?.addEventListener("keydown", e => { if (e.key === "Escape") { e.preventDefault(); ucCloseEditor(); } });
+}
+
 // ── Skills Browser ──────────────────────────────────────────────────────────
 
 let aiSkillsSelectedSlug = null;
@@ -4254,37 +5485,24 @@ let aiWfSelectedId = null;
 function renderWorkflowsBrowser() {
   const list = document.getElementById('ai-wf-list');
   const detail = document.getElementById('ai-wf-detail');
-  const emptyEl = document.getElementById('ai-wf-empty');
   if (!list || !window.VOID_WORKFLOWS) return;
 
   list.replaceChildren();
   for (const wf of window.VOID_WORKFLOWS) {
     const card = document.createElement('div');
     card.className = 'ai-wf-card' + (wf.id === aiWfSelectedId ? ' active' : '');
-    const nameDiv = document.createElement('div');
-    nameDiv.className = 'ai-wf-card-name';
-    nameDiv.textContent = wf.name;
-    const descDiv = document.createElement('div');
-    descDiv.className = 'ai-wf-card-desc';
-    descDiv.textContent = wf.description;
-    const metaDiv = document.createElement('div');
-    metaDiv.className = 'ai-wf-card-meta';
-    metaDiv.textContent = wf.category + ' \u00B7 ' + wf.steps.length + ' steps';
-    card.appendChild(nameDiv);
-    card.appendChild(descDiv);
-    card.appendChild(metaDiv);
+    const marker = ucIsCustom('workflows', wf.id) ? ' · custom'
+      : ucIsModified('workflows', wf.id) ? ' · edited' : '';
+    card.innerHTML = '<div class="ai-wf-card-name">' + esc(wf.name) +
+      '<span class="ai-wf-level ai-wf-level-' + esc(wf.level || 'atomic') + '">' + esc(wf.level || 'atomic') + '</span></div>' +
+      '<div class="ai-wf-card-desc">' + esc(wf.description) + '</div>' +
+      '<div class="ai-wf-card-meta">' + esc(wf.category || '') + ' · ' + (wf.steps || []).length + ' steps' + marker + '</div>';
     card.addEventListener('click', () => {
       aiWfSelectedId = wf.id;
       renderWorkflowsBrowser();
       renderWorkflowDetail(wf);
     });
-    addEditBtnToWfCard(wf, card);
     list.appendChild(card);
-  }
-  // Show empty placeholder if nothing selected
-  if (!aiWfSelectedId && emptyEl) {
-    emptyEl.classList.remove('hidden');
-    if (detail) detail.classList.add('hidden');
   }
 }
 
@@ -4293,102 +5511,78 @@ function renderWorkflowDetail(wf) {
   const nameEl = document.getElementById('ai-wf-detail-name');
   const descEl = document.getElementById('ai-wf-detail-desc');
   const stepsEl = document.getElementById('ai-wf-steps');
-  const emptyEl = document.getElementById('ai-wf-empty');
   if (!detail) return;
 
   detail.classList.remove('hidden');
-  if (emptyEl) emptyEl.classList.add('hidden');
   if (nameEl) nameEl.textContent = wf.name;
   if (descEl) descEl.textContent = wf.description;
   if (stepsEl) {
     stepsEl.replaceChildren();
-    wf.steps.forEach((s, i) => {
-      const row = document.createElement('div');
-      row.className = 'ai-wf-step-row';
-      // Step index circle
-      const idx = document.createElement('span');
-      idx.className = 'ai-wf-step-idx';
-      idx.textContent = i + 1;
-      row.appendChild(idx);
-      // Step name
-      const name = document.createElement('span');
-      name.className = 'ai-wf-step-name';
-      name.textContent = s.name;
-      row.appendChild(name);
-      // Type badge
-      if (s.type === 'CONDITION') {
-        const typeBadge = document.createElement('span');
-        typeBadge.className = 'ai-wf-step-type ai-wf-step-type-condition';
-        typeBadge.textContent = 'CONDITION';
-        row.appendChild(typeBadge);
-      } else if (s.type === 'FINISH') {
-        const typeBadge = document.createElement('span');
-        typeBadge.className = 'ai-wf-step-type ai-wf-step-type-finish';
-        typeBadge.textContent = 'FINISH';
-        row.appendChild(typeBadge);
-      } else {
-        // Show agent name if set
-        if (s.agent) {
-          const agBadge = document.createElement('span');
-          agBadge.className = 'ai-wf-step-type ai-wf-step-type-agent';
-          const ag = window.VOID_AGENTS?.find(a => a.id === s.agent);
-          agBadge.textContent = ag ? ag.title : s.agent;
-          row.appendChild(agBadge);
-        }
-        // Show skills as badges
-        const skills = s.skills || (s.skill ? [s.skill] : []);
-        for (const sk of skills) {
-          const skBadge = document.createElement('span');
-          skBadge.className = 'ai-wf-step-type ai-wf-step-type-skill';
-          skBadge.textContent = sk;
-          row.appendChild(skBadge);
-        }
-      }
-      // Dependencies
-      if (s.dependsOn?.length) {
-        const deps = document.createElement('span');
-        deps.className = 'ai-wf-step-deps';
-        deps.textContent = '\u2192 ' + s.dependsOn.join(', ');
-        row.appendChild(deps);
-      }
-      stepsEl.appendChild(row);
-      // Conditional branching indicators
-      if (s.type === 'CONDITION') {
-        const branchesDiv = document.createElement('div');
-        branchesDiv.className = 'ai-wf-condition-branches';
-        // New multi-branch format
-        if (s.branches && s.branches.length > 0) {
-          s.branches.forEach((b, bi) => {
-            const label = document.createElement('span');
-            label.className = 'ai-wf-branch ai-wf-branch-if';
-            label.textContent = (bi === 0 ? 'if ' : 'else if ') + (b.when || '?') + ' \u2192 ' + (b.goto || '?');
-            branchesDiv.appendChild(label);
-          });
-          if (s.elseGoto) {
-            const elseLabel = document.createElement('span');
-            elseLabel.className = 'ai-wf-branch ai-wf-branch-else';
-            elseLabel.textContent = 'else \u2192 ' + s.elseGoto;
-            branchesDiv.appendChild(elseLabel);
-          }
-        } else {
-          // Legacy onTrue/onFalse format
-          if (s.onTrue) {
-            const trueLabel = document.createElement('span');
-            trueLabel.className = 'ai-wf-branch ai-wf-branch-true';
-            trueLabel.textContent = '\u2714 ' + s.onTrue;
-            branchesDiv.appendChild(trueLabel);
-          }
-          if (s.onFalse) {
-            const falseLabel = document.createElement('span');
-            falseLabel.className = 'ai-wf-branch ai-wf-branch-false';
-            falseLabel.textContent = '\u2718 ' + s.onFalse;
-            branchesDiv.appendChild(falseLabel);
-          }
-        }
-        stepsEl.appendChild(branchesDiv);
-      }
-    });
+    (wf.steps || []).forEach((s, i) => stepsEl.appendChild(renderWorkflowStep(s, i)));
   }
+}
+
+// A step is the substance of a workflow — goal, decision tree and validation —
+// not just a name and a type, so the detail pane renders all of it.
+function renderWorkflowStep(s, i) {
+  const wrap = el('div', 'ai-wf-step');
+
+  const row = el('div', 'ai-wf-step-row');
+  row.innerHTML = '<span class="ai-wf-step-idx">' + (i + 1) + '</span>' +
+    '<span class="ai-wf-step-name">' + esc(s.name) + '</span>' +
+    '<span class="ai-wf-step-type">' + esc(s.type) + '</span>' +
+    (s.intrusive ? '<span class="ai-wf-step-intrusive" title="Sends attack traffic">intrusive</span>' : '') +
+    (s.dependsOn?.length ? '<span class="ai-wf-step-deps">after: ' + s.dependsOn.map(d => esc(d)).join(', ') + '</span>' : '');
+  wrap.appendChild(row);
+
+  if (s.goal) wrap.appendChild(txt('div', 'ai-wf-step-goal', s.goal));
+
+  // Phases pull in other workflows; show what they cover without making the user
+  // go and resolve each reference.
+  if (s.includes?.length) {
+    const inc = el('div', 'ai-wf-step-includes');
+    for (const c of s.includes) {
+      const item = el('div', 'ai-wf-include');
+      item.appendChild(txt('span', 'ai-wf-include-name', c.name));
+      if (c.goal) item.appendChild(txt('span', 'ai-wf-include-goal', c.goal));
+      inc.appendChild(item);
+    }
+    wrap.appendChild(inc);
+  }
+  if (s.extraChecks?.length) {
+    wrap.appendChild(txt('div', 'ai-wf-step-checks', 'extra checks: ' + s.extraChecks.join(', ')));
+  }
+
+  if (s.decisionTree?.length) {
+    const tree = el('div', 'ai-wf-dtree');
+    tree.appendChild(txt('div', 'pane-label', 'DECISION TREE'));
+    s.decisionTree.forEach((d, di) => {
+      const node = el('div', 'ai-wf-dnode');
+      node.appendChild(txt('span', 'ai-wf-dnode-idx', String(di + 1)));
+      const body = el('div', 'ai-wf-dnode-body');
+      body.appendChild(txt('div', 'ai-wf-dnode-action', d.action));
+      if (d.approach) body.appendChild(txt('div', 'ai-wf-dnode-approach', d.approach));
+      if (d.ifPositive) body.appendChild(txt('div', 'ai-wf-dnode-pos', '✓ ' + d.ifPositive));
+      if (d.ifNegative) body.appendChild(txt('div', 'ai-wf-dnode-neg', '✗ ' + d.ifNegative));
+      if (d.stopWhen) body.appendChild(txt('div', 'ai-wf-dnode-stop', 'stop when: ' + d.stopWhen));
+      node.appendChild(body);
+      tree.appendChild(node);
+    });
+    wrap.appendChild(tree);
+  }
+
+  if (s.toolGuidance?.aiShould) {
+    wrap.appendChild(txt('div', 'ai-wf-step-guidance', s.toolGuidance.aiShould));
+  }
+  const v = s.validation || {};
+  if (v.contextCheck || v.impactAssessment || v.mustReproduce) {
+    const val = el('div', 'ai-wf-step-validation');
+    if (v.mustReproduce) val.appendChild(txt('span', 'ai-wf-badge', 'must reproduce'));
+    if (v.contextCheck) val.appendChild(txt('div', '', 'Context: ' + v.contextCheck));
+    if (v.impactAssessment) val.appendChild(txt('div', '', 'Impact: ' + v.impactAssessment));
+    wrap.appendChild(val);
+  }
+  return wrap;
 }
 
 // ── Prompts Browser ─────────────────────────────────────────────────────────
@@ -4397,33 +5591,20 @@ let aiPromptSelectedId = null;
 
 function renderPromptsBrowser() {
   const list = document.getElementById('ai-prompts-list');
-  const detail = document.getElementById('ai-prompt-detail');
-  const emptyEl = document.getElementById('ai-prompt-empty');
   if (!list || !window.VOID_PROMPTS) return;
 
   list.replaceChildren();
   for (const p of window.VOID_PROMPTS) {
     const item = document.createElement('div');
     item.className = 'ai-prompt-item' + (p.id === aiPromptSelectedId ? ' active' : '');
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'ai-prompt-item-name';
-    nameSpan.textContent = p.name;
-    const catSpan = document.createElement('span');
-    catSpan.className = 'ai-prompt-item-cat ai-prompt-cat-' + (p.category || '').replace(/[^a-z]/g, '');
-    catSpan.textContent = p.category;
-    item.appendChild(nameSpan);
-    item.appendChild(catSpan);
+    item.innerHTML = '<span class="ai-prompt-item-name">' + esc(p.name) + '</span>' +
+      '<span class="ai-prompt-item-cat">' + esc(p.category) + '</span>';
     item.addEventListener('click', () => {
       aiPromptSelectedId = p.id;
       renderPromptsBrowser();
       renderPromptDetail(p);
     });
-    addEditBtnToPromptItem(p, item);
     list.appendChild(item);
-  }
-  if (!aiPromptSelectedId && emptyEl) {
-    emptyEl.classList.remove('hidden');
-    if (detail) detail.classList.add('hidden');
   }
 }
 
@@ -4433,11 +5614,9 @@ function renderPromptDetail(p) {
   const catEl = document.getElementById('ai-prompt-detail-cat');
   const bodyEl = document.getElementById('ai-prompt-detail-body');
   const tagsEl = document.getElementById('ai-prompt-detail-tags');
-  const emptyEl = document.getElementById('ai-prompt-empty');
   if (!detail) return;
 
   detail.classList.remove('hidden');
-  if (emptyEl) emptyEl.classList.add('hidden');
   if (nameEl) nameEl.textContent = p.name;
   if (catEl) catEl.textContent = p.category;
   if (bodyEl) bodyEl.textContent = p.template;
@@ -4450,952 +5629,6 @@ function renderPromptDetail(p) {
       tagsEl.appendChild(span);
     }
   }
-}
-
-// ── Item Editor CRUD (Agents, Skills, Workflows, Prompts) ────────────────────
-
-let customAgents = [];
-let customSkills = {};
-let customWorkflows = [];
-let customPrompts = [];
-
-function loadCustomItems() {
-  if (typeof chrome !== 'undefined' && chrome.storage) {
-    chrome.storage.local.get(['voidCustomAgents', 'voidCustomSkills', 'voidCustomWorkflows', 'voidCustomPrompts'], r => {
-      customAgents = r.voidCustomAgents || [];
-      customSkills = r.voidCustomSkills || {};
-      customWorkflows = r.voidCustomWorkflows || [];
-      customPrompts = r.voidCustomPrompts || [];
-      mergeCustomItems();
-    });
-  }
-}
-
-function saveCustomItems() {
-  if (typeof chrome !== 'undefined' && chrome.storage) {
-    chrome.storage.local.set({
-      voidCustomAgents: customAgents,
-      voidCustomSkills: customSkills,
-      voidCustomWorkflows: customWorkflows,
-      voidCustomPrompts: customPrompts,
-    });
-  }
-  mergeCustomItems();
-}
-
-function mergeCustomItems() {
-  // Merge agents: built-in + custom (custom can override by id)
-  const builtInAgents = window._VOID_AGENTS_BUILTIN || window.VOID_AGENTS || [];
-  if (!window._VOID_AGENTS_BUILTIN) window._VOID_AGENTS_BUILTIN = [...builtInAgents];
-  const merged = [...window._VOID_AGENTS_BUILTIN];
-  for (const ca of customAgents) {
-    const idx = merged.findIndex(a => a.id === ca.id);
-    if (idx >= 0) merged[idx] = ca;
-    else merged.push(ca);
-  }
-  window.VOID_AGENTS = merged;
-
-  // Merge workflows
-  const builtInWf = window._VOID_WORKFLOWS_BUILTIN || window.VOID_WORKFLOWS || [];
-  if (!window._VOID_WORKFLOWS_BUILTIN) window._VOID_WORKFLOWS_BUILTIN = [...builtInWf];
-  const mergedWf = [...window._VOID_WORKFLOWS_BUILTIN];
-  for (const cw of customWorkflows) {
-    const idx = mergedWf.findIndex(w => w.id === cw.id);
-    if (idx >= 0) mergedWf[idx] = cw;
-    else mergedWf.push(cw);
-  }
-  window.VOID_WORKFLOWS = mergedWf;
-
-  // Merge prompts
-  const builtInPr = window._VOID_PROMPTS_BUILTIN || window.VOID_PROMPTS || [];
-  if (!window._VOID_PROMPTS_BUILTIN) window._VOID_PROMPTS_BUILTIN = [...builtInPr];
-  const mergedPr = [...window._VOID_PROMPTS_BUILTIN];
-  for (const cp of customPrompts) {
-    const idx = mergedPr.findIndex(p => p.id === cp.id);
-    if (idx >= 0) mergedPr[idx] = cp;
-    else mergedPr.push(cp);
-  }
-  window.VOID_PROMPTS = mergedPr;
-
-  // Merge skills
-  const builtInSk = window._VOID_SKILLS_BUILTIN || window.VOID_SKILLS || {};
-  if (!window._VOID_SKILLS_BUILTIN) window._VOID_SKILLS_BUILTIN = { ...builtInSk };
-  window.VOID_SKILLS = { ...window._VOID_SKILLS_BUILTIN, ...customSkills };
-}
-
-// -- Generic editor open/close
-let editorType = null;
-let editorItem = null;
-let editorIsNew = false;
-
-function editorOpen(type, item) {
-  editorType = type;
-  editorItem = item ? JSON.parse(JSON.stringify(item)) : null;
-  editorIsNew = !item;
-  const overlay = document.getElementById('item-editor-overlay');
-  const titleEl = document.getElementById('item-editor-title');
-  const body = document.getElementById('item-editor-body');
-  const delBtn = document.getElementById('item-editor-delete');
-  overlay.classList.remove('hidden');
-  delBtn.classList.toggle('hidden', editorIsNew || !editorItem?._custom);
-  body.replaceChildren();
-
-  if (type === 'agent') {
-    titleEl.textContent = editorIsNew ? 'New Agent' : 'Edit Agent';
-    if (!editorItem) editorItem = { id: '', title: '', description: '', context: '', icon: 'smart_toy', systemPrompt: '', _custom: true };
-    editorBuildAgentForm(body, editorItem);
-  } else if (type === 'workflow') {
-    titleEl.textContent = editorIsNew ? 'New Workflow' : 'Edit Workflow';
-    if (!editorItem) editorItem = { id: '', name: '', description: '', category: 'engagement', steps: [], _custom: true };
-    editorBuildWorkflowForm(body, editorItem);
-  } else if (type === 'prompt') {
-    titleEl.textContent = editorIsNew ? 'New Prompt' : 'Edit Prompt';
-    if (!editorItem) editorItem = { id: '', name: '', category: 'detection', template: '', tags: [], _custom: true };
-    editorBuildPromptForm(body, editorItem);
-  } else if (type === 'skill') {
-    titleEl.textContent = editorIsNew ? 'New Skill' : 'Edit Skill';
-    if (!editorItem) editorItem = { slug: '', name: '', description: '', category: '', body: '', _custom: true };
-    editorBuildSkillForm(body, editorItem);
-  }
-}
-
-function editorClose() {
-  document.getElementById('item-editor-overlay').classList.add('hidden');
-  editorType = null;
-  editorItem = null;
-}
-
-function editorSave() {
-  if (editorType === 'agent') editorSaveAgent();
-  else if (editorType === 'workflow') editorSaveWorkflow();
-  else if (editorType === 'prompt') editorSavePrompt();
-  else if (editorType === 'skill') editorSaveSkill();
-  editorClose();
-}
-
-function editorDelete() {
-  if (!editorItem) return;
-  if (editorType === 'agent') {
-    customAgents = customAgents.filter(a => a.id !== editorItem.id);
-  } else if (editorType === 'workflow') {
-    customWorkflows = customWorkflows.filter(w => w.id !== editorItem.id);
-  } else if (editorType === 'prompt') {
-    customPrompts = customPrompts.filter(p => p.id !== editorItem.id);
-  } else if (editorType === 'skill') {
-    delete customSkills[editorItem.slug];
-  }
-  saveCustomItems();
-  editorRefreshView();
-  editorClose();
-}
-
-function editorRefreshView() {
-  if (editorType === 'agent' || !editorType) {
-    // Refresh persona dropdown
-    const sel = document.getElementById('ai-persona');
-    if (sel) {
-      sel.replaceChildren();
-      for (const a of window.VOID_AGENTS) {
-        const opt = document.createElement('option');
-        opt.value = a.id;
-        opt.textContent = a.title + (a._custom ? ' *' : '');
-        sel.appendChild(opt);
-      }
-      const customOpt = document.createElement('option');
-      customOpt.value = 'custom';
-      customOpt.textContent = 'Custom';
-      sel.appendChild(customOpt);
-    }
-    // Refresh chat agent dropdown
-    const chatSel = document.getElementById('ai-chat-agent-sel');
-    if (chatSel) {
-      chatSel.replaceChildren();
-      for (const a of window.VOID_AGENTS) {
-        const opt = document.createElement('option');
-        opt.value = a.id;
-        opt.textContent = a.title;
-        chatSel.appendChild(opt);
-      }
-    }
-  }
-  if (editorType === 'workflow' || !editorType) renderWorkflowsBrowser();
-  if (editorType === 'prompt' || !editorType) renderPromptsBrowser();
-  if (editorType === 'skill' || !editorType) renderSkillsBrowser();
-}
-
-// -- Agent form
-function editorBuildAgentForm(body, item) {
-  body.replaceChildren();
-  const fields = [
-    { label: 'ID (slug)', id: 'ed-agent-id', val: item.id, ph: 'my-agent', disabled: !editorIsNew },
-    { label: 'Title', id: 'ed-agent-title', val: item.title, ph: 'My Agent' },
-    { label: 'Description', id: 'ed-agent-desc', val: item.description, ph: 'What this agent does...' },
-    { label: 'Icon (Material Symbol)', id: 'ed-agent-icon', val: item.icon || 'smart_toy', ph: 'smart_toy' },
-  ];
-  for (const f of fields) {
-    const row = document.createElement('div');
-    row.className = 'settings-row';
-    const label = document.createElement('label');
-    label.className = 'settings-label-sm';
-    label.textContent = f.label;
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.className = 'settings-inp';
-    inp.id = f.id;
-    inp.value = f.val || '';
-    inp.placeholder = f.ph || '';
-    inp.spellcheck = false;
-    inp.style.flex = '1';
-    if (f.disabled) inp.disabled = true;
-    row.appendChild(label);
-    row.appendChild(inp);
-    body.appendChild(row);
-  }
-  const promptLabel = document.createElement('div');
-  promptLabel.className = 'pane-label';
-  promptLabel.textContent = 'SYSTEM PROMPT';
-  body.appendChild(promptLabel);
-  const ta = document.createElement('textarea');
-  ta.className = 'editor-ta editor-ta-lg';
-  ta.id = 'ed-agent-prompt';
-  ta.value = item.systemPrompt || '';
-  ta.placeholder = 'You are a security testing agent...';
-  ta.spellcheck = false;
-  body.appendChild(ta);
-}
-
-function editorSaveAgent() {
-  const id = document.getElementById('ed-agent-id').value.trim();
-  const title = document.getElementById('ed-agent-title').value.trim();
-  if (!id || !title) return;
-  const agent = {
-    id,
-    title,
-    description: document.getElementById('ed-agent-desc').value.trim(),
-    context: document.getElementById('ed-agent-desc').value.trim(),
-    icon: document.getElementById('ed-agent-icon').value.trim() || 'smart_toy',
-    systemPrompt: document.getElementById('ed-agent-prompt').value,
-    _custom: true,
-  };
-  const idx = customAgents.findIndex(a => a.id === id);
-  if (idx >= 0) customAgents[idx] = agent;
-  else customAgents.push(agent);
-  saveCustomItems();
-  editorRefreshView();
-}
-
-// -- Workflow form
-function editorBuildWorkflowForm(body, item) {
-  body.replaceChildren();
-  const fields = [
-    { label: 'ID (slug)', id: 'ed-wf-id', val: item.id, ph: 'my-workflow', disabled: !editorIsNew },
-    { label: 'Name', id: 'ed-wf-name', val: item.name, ph: 'My Workflow' },
-    { label: 'Description', id: 'ed-wf-desc', val: item.description, ph: 'What this workflow does...' },
-  ];
-  for (const f of fields) {
-    const row = document.createElement('div');
-    row.className = 'settings-row';
-    const label = document.createElement('label');
-    label.className = 'settings-label-sm';
-    label.textContent = f.label;
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.className = 'settings-inp';
-    inp.id = f.id;
-    inp.value = f.val || '';
-    inp.placeholder = f.ph || '';
-    inp.spellcheck = false;
-    inp.style.flex = '1';
-    if (f.disabled) inp.disabled = true;
-    row.appendChild(label);
-    row.appendChild(inp);
-    body.appendChild(row);
-  }
-  // Category
-  const catRow = document.createElement('div');
-  catRow.className = 'settings-row';
-  const catLabel = document.createElement('label');
-  catLabel.className = 'settings-label-sm';
-  catLabel.textContent = 'Category';
-  const catSel = document.createElement('select');
-  catSel.className = 'filter-sel';
-  catSel.id = 'ed-wf-cat';
-  for (const c of ['engagement', 'composite']) {
-    const opt = document.createElement('option');
-    opt.value = c;
-    opt.textContent = c;
-    if (c === item.category) opt.selected = true;
-    catSel.appendChild(opt);
-  }
-  catRow.appendChild(catLabel);
-  catRow.appendChild(catSel);
-  body.appendChild(catRow);
-
-  // Steps
-  const stepsLabel = document.createElement('div');
-  stepsLabel.className = 'pane-label';
-  stepsLabel.textContent = 'STEPS';
-  body.appendChild(stepsLabel);
-  const stepsContainer = document.createElement('div');
-  stepsContainer.className = 'item-editor-steps';
-  stepsContainer.id = 'ed-wf-steps';
-  body.appendChild(stepsContainer);
-  editorWfSteps = [...(item.steps || [])];
-  editorRenderWfSteps();
-
-  const addBtn = document.createElement('button');
-  addBtn.className = 'btn btn-xs btn-ghost';
-  addBtn.textContent = '+ Add Step';
-  addBtn.style.marginTop = '6px';
-  addBtn.addEventListener('click', () => {
-    const nextNum = editorWfSteps.length + 1;
-    editorWfSteps.push({ id: 'step-' + nextNum, name: 'Step ' + nextNum, type: 'STEP', skills: [], agent: '', prompt: '', instructions: '', dependsOn: [] });
-    editorRenderWfSteps();
-  });
-  body.appendChild(addBtn);
-}
-
-let editorWfSteps = [];
-let editorDragIdx = -1;
-
-function editorRenderWfSteps() {
-  const container = document.getElementById('ed-wf-steps');
-  if (!container) return;
-  container.replaceChildren();
-  editorWfSteps.forEach((s, i) => {
-    // ── Main row ──
-    const wrapper = document.createElement('div');
-    wrapper.className = 'wf-step-wrapper';
-    wrapper.dataset.idx = i;
-
-    const row = document.createElement('div');
-    row.className = 'item-editor-step';
-    row.draggable = true;
-
-    // Drag handle
-    const handle = document.createElement('span');
-    handle.className = 'step-handle';
-    handle.textContent = '\u2630';
-    row.appendChild(handle);
-
-    // Step number
-    const num = document.createElement('span');
-    num.className = 'step-num';
-    num.textContent = (i + 1);
-    row.appendChild(num);
-
-    // Name
-    const nameInp = document.createElement('input');
-    nameInp.className = 'step-name-inp';
-    nameInp.value = s.name || '';
-    nameInp.placeholder = 'Step name';
-    nameInp.addEventListener('input', () => {
-      s.name = nameInp.value;
-      // Auto-generate id from name if id is still a default
-      if (!s.id || s.id.startsWith('step-')) {
-        s.id = nameInp.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || ('step-' + (i + 1));
-      }
-    });
-    row.appendChild(nameInp);
-
-    // Type selector (STEP or CONDITION)
-    const typeSel = document.createElement('select');
-    typeSel.className = 'step-type-sel';
-    for (const t of ['STEP', 'CONDITION', 'FINISH']) {
-      const opt = document.createElement('option');
-      opt.value = t;
-      opt.textContent = t;
-      if (t === s.type) opt.selected = true;
-      typeSel.appendChild(opt);
-    }
-    typeSel.addEventListener('change', () => {
-      s.type = typeSel.value;
-      if (s.type === 'STEP' && !s.skills) s.skills = [];
-      editorRenderWfSteps();
-    });
-    row.appendChild(typeSel);
-
-    // Delete button
-    const del = document.createElement('span');
-    del.className = 'step-del';
-    del.textContent = '\u00D7';
-    del.addEventListener('click', () => {
-      editorWfSteps.splice(i, 1);
-      editorRenderWfSteps();
-    });
-    row.appendChild(del);
-
-    // ── Drag events ──
-    row.addEventListener('dragstart', e => {
-      editorDragIdx = i;
-      row.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    row.addEventListener('dragend', () => {
-      row.classList.remove('dragging');
-      editorDragIdx = -1;
-      container.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-    });
-    row.addEventListener('dragover', e => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      wrapper.classList.add('drag-over');
-    });
-    row.addEventListener('dragleave', () => {
-      wrapper.classList.remove('drag-over');
-    });
-    row.addEventListener('drop', e => {
-      e.preventDefault();
-      wrapper.classList.remove('drag-over');
-      if (editorDragIdx < 0 || editorDragIdx === i) return;
-      const moved = editorWfSteps.splice(editorDragIdx, 1)[0];
-      editorWfSteps.splice(i, 0, moved);
-      editorRenderWfSteps();
-    });
-
-    wrapper.appendChild(row);
-
-    // ── Step config panel (agent, skills, prompt, instructions) ──
-    if (s.type === 'STEP') {
-      if (!s.skills) s.skills = [];
-      const cfgBox = document.createElement('div');
-      cfgBox.className = 'step-config-box';
-
-      // Row 1: Agent + Prompt
-      const row1 = document.createElement('div');
-      row1.className = 'step-cfg-row';
-
-      // Agent
-      const agLabel = document.createElement('span');
-      agLabel.className = 'step-cfg-label';
-      agLabel.textContent = 'Agent';
-      row1.appendChild(agLabel);
-      const agentSel = document.createElement('select');
-      agentSel.className = 'filter-sel';
-      const agDef = document.createElement('option');
-      agDef.value = '';
-      agDef.textContent = '— default —';
-      agentSel.appendChild(agDef);
-      if (window.VOID_AGENTS) {
-        for (const a of window.VOID_AGENTS) {
-          const opt = document.createElement('option');
-          opt.value = a.id;
-          opt.textContent = a.title;
-          if (a.id === s.agent) opt.selected = true;
-          agentSel.appendChild(opt);
-        }
-      }
-      agentSel.addEventListener('change', () => { s.agent = agentSel.value || undefined; });
-      row1.appendChild(agentSel);
-
-      // Prompt
-      const prLabel = document.createElement('span');
-      prLabel.className = 'step-cfg-label';
-      prLabel.textContent = 'Prompt';
-      row1.appendChild(prLabel);
-      const promptSel = document.createElement('select');
-      promptSel.className = 'filter-sel';
-      const prDef = document.createElement('option');
-      prDef.value = '';
-      prDef.textContent = '— none —';
-      promptSel.appendChild(prDef);
-      if (window.VOID_PROMPTS) {
-        for (const p of window.VOID_PROMPTS) {
-          const opt = document.createElement('option');
-          opt.value = p.id;
-          opt.textContent = p.name;
-          if (p.id === s.prompt) opt.selected = true;
-          promptSel.appendChild(opt);
-        }
-      }
-      promptSel.addEventListener('change', () => { s.prompt = promptSel.value || undefined; });
-      row1.appendChild(promptSel);
-      cfgBox.appendChild(row1);
-
-      // Row 2: Skills (multi-select as chips + dropdown)
-      const row2 = document.createElement('div');
-      row2.className = 'step-cfg-row';
-      const skLabel = document.createElement('span');
-      skLabel.className = 'step-cfg-label';
-      skLabel.textContent = 'Skills';
-      row2.appendChild(skLabel);
-      const skChips = document.createElement('span');
-      skChips.className = 'step-deps-chips';
-      for (const sk of s.skills) {
-        const chip = document.createElement('span');
-        chip.className = 'step-dep-chip';
-        chip.textContent = sk + ' ';
-        const chipDel = document.createElement('span');
-        chipDel.className = 'tag-del';
-        chipDel.textContent = '\u00D7';
-        chipDel.addEventListener('click', () => {
-          s.skills = s.skills.filter(x => x !== sk);
-          editorRenderWfSteps();
-        });
-        chip.appendChild(chipDel);
-        skChips.appendChild(chip);
-      }
-      row2.appendChild(skChips);
-      if (window.VOID_SKILLS) {
-        const available = Object.keys(window.VOID_SKILLS).sort().filter(k => !s.skills.includes(k));
-        if (available.length > 0) {
-          const skAdd = document.createElement('select');
-          skAdd.className = 'filter-sel step-dep-add-sel';
-          const skDef = document.createElement('option');
-          skDef.value = '';
-          skDef.textContent = '+ add...';
-          skAdd.appendChild(skDef);
-          for (const slug of available) {
-            const opt = document.createElement('option');
-            opt.value = slug;
-            opt.textContent = slug;
-            skAdd.appendChild(opt);
-          }
-          skAdd.addEventListener('change', () => {
-            if (skAdd.value && !s.skills.includes(skAdd.value)) {
-              s.skills.push(skAdd.value);
-              editorRenderWfSteps();
-            }
-          });
-          row2.appendChild(skAdd);
-        }
-      }
-      cfgBox.appendChild(row2);
-
-      // Row 3: Instructions (free text)
-      const row3 = document.createElement('div');
-      row3.className = 'step-cfg-row';
-      const insLabel = document.createElement('span');
-      insLabel.className = 'step-cfg-label';
-      insLabel.textContent = 'Notes';
-      row3.appendChild(insLabel);
-      const insInp = document.createElement('textarea');
-      insInp.className = 'step-instructions-ta';
-      insInp.value = s.instructions || '';
-      insInp.placeholder = 'Free-text instructions, context, or notes for this step...';
-      insInp.rows = 2;
-      insInp.spellcheck = false;
-      insInp.addEventListener('input', () => { s.instructions = insInp.value; });
-      row3.appendChild(insInp);
-      cfgBox.appendChild(row3);
-
-      wrapper.appendChild(cfgBox);
-    }
-
-    // ── Conditional fields (shown only for CONDITION type) ──
-    if (s.type === 'CONDITION') {
-      if (!s.branches) s.branches = [];
-      const condBox = document.createElement('div');
-      condBox.className = 'step-condition-box';
-
-      // Free-text condition description
-      const descRow = document.createElement('div');
-      descRow.className = 'step-cond-row';
-      const descLabel = document.createElement('span');
-      descLabel.className = 'step-cond-label';
-      descLabel.textContent = 'Evaluate';
-      const descInp = document.createElement('input');
-      descInp.type = 'text';
-      descInp.className = 'settings-inp';
-      descInp.value = s.condition || '';
-      descInp.placeholder = 'What should the AI check? e.g. "Does the target have a login page?"';
-      descInp.style.flex = '1';
-      descInp.spellcheck = false;
-      descInp.addEventListener('input', () => { s.condition = descInp.value; });
-      descRow.appendChild(descLabel);
-      descRow.appendChild(descInp);
-      condBox.appendChild(descRow);
-
-      // if/else if branches
-      const branchesContainer = document.createElement('div');
-      branchesContainer.className = 'step-branches';
-      s.branches.forEach((b, bi) => {
-        const bRow = document.createElement('div');
-        bRow.className = 'step-cond-row';
-        const keyword = document.createElement('span');
-        keyword.className = 'step-cond-keyword';
-        keyword.textContent = bi === 0 ? 'if' : 'else if';
-        bRow.appendChild(keyword);
-
-        const whenInp = document.createElement('input');
-        whenInp.type = 'text';
-        whenInp.className = 'settings-inp';
-        whenInp.value = b.when || '';
-        whenInp.placeholder = 'condition...';
-        whenInp.style.flex = '1';
-        whenInp.spellcheck = false;
-        whenInp.addEventListener('input', () => { b.when = whenInp.value; });
-        bRow.appendChild(whenInp);
-
-        const arrow = document.createElement('span');
-        arrow.className = 'step-cond-arrow';
-        arrow.textContent = '\u2192';
-        bRow.appendChild(arrow);
-
-        const gotoSel = editorBuildStepRefSelect(b.goto, i);
-        gotoSel.addEventListener('change', () => { b.goto = gotoSel.value; });
-        bRow.appendChild(gotoSel);
-
-        const delBranch = document.createElement('span');
-        delBranch.className = 'step-del';
-        delBranch.textContent = '\u00D7';
-        delBranch.addEventListener('click', () => {
-          s.branches.splice(bi, 1);
-          editorRenderWfSteps();
-        });
-        bRow.appendChild(delBranch);
-        branchesContainer.appendChild(bRow);
-      });
-      condBox.appendChild(branchesContainer);
-
-      // else branch
-      const elseRow = document.createElement('div');
-      elseRow.className = 'step-cond-row';
-      const elseKw = document.createElement('span');
-      elseKw.className = 'step-cond-keyword step-cond-else';
-      elseKw.textContent = 'else';
-      elseRow.appendChild(elseKw);
-      const elseSpacer = document.createElement('span');
-      elseSpacer.style.flex = '1';
-      elseRow.appendChild(elseSpacer);
-      const elseArrow = document.createElement('span');
-      elseArrow.className = 'step-cond-arrow';
-      elseArrow.textContent = '\u2192';
-      elseRow.appendChild(elseArrow);
-      const elseSel = editorBuildStepRefSelect(s.elseGoto, i);
-      elseSel.addEventListener('change', () => { s.elseGoto = elseSel.value; });
-      elseRow.appendChild(elseSel);
-      condBox.appendChild(elseRow);
-
-      // Add branch button
-      const addBranchBtn = document.createElement('button');
-      addBranchBtn.className = 'btn btn-xs btn-ghost';
-      addBranchBtn.textContent = '+ Add branch';
-      addBranchBtn.style.marginTop = '4px';
-      addBranchBtn.addEventListener('click', () => {
-        s.branches.push({ when: '', goto: '' });
-        editorRenderWfSteps();
-      });
-      condBox.appendChild(addBranchBtn);
-
-      wrapper.appendChild(condBox);
-    }
-
-    // ── DependsOn (dropdown + chips) ──
-    const depsRow = document.createElement('div');
-    depsRow.className = 'step-deps-row';
-    const depsLabel = document.createElement('span');
-    depsLabel.className = 'step-deps-label';
-    depsLabel.textContent = 'after:';
-    depsRow.appendChild(depsLabel);
-
-    // Show current deps as removable chips
-    const depsChips = document.createElement('span');
-    depsChips.className = 'step-deps-chips';
-    if (s.dependsOn && s.dependsOn.length > 0) {
-      for (const depId of s.dependsOn) {
-        const depStep = editorWfSteps.find(x => x.id === depId);
-        const chip = document.createElement('span');
-        chip.className = 'step-dep-chip';
-        chip.textContent = (depStep ? depStep.name : depId) + ' ';
-        const chipDel = document.createElement('span');
-        chipDel.className = 'tag-del';
-        chipDel.textContent = '\u00D7';
-        chipDel.addEventListener('click', () => {
-          s.dependsOn = s.dependsOn.filter(d => d !== depId);
-          editorRenderWfSteps();
-        });
-        chip.appendChild(chipDel);
-        depsChips.appendChild(chip);
-      }
-    }
-    depsRow.appendChild(depsChips);
-
-    // Dropdown to add a dependency
-    const otherSteps = editorWfSteps.filter((_, j) => j !== i);
-    const available = otherSteps.filter(o => !(s.dependsOn || []).includes(o.id));
-    if (available.length > 0) {
-      const addDepSel = document.createElement('select');
-      addDepSel.className = 'filter-sel step-dep-add-sel';
-      const defOpt = document.createElement('option');
-      defOpt.value = '';
-      defOpt.textContent = '+ add...';
-      addDepSel.appendChild(defOpt);
-      for (const o of available) {
-        const opt = document.createElement('option');
-        opt.value = o.id;
-        opt.textContent = o.name || o.id;
-        addDepSel.appendChild(opt);
-      }
-      addDepSel.addEventListener('change', () => {
-        if (!addDepSel.value) return;
-        if (!s.dependsOn) s.dependsOn = [];
-        if (!s.dependsOn.includes(addDepSel.value)) {
-          s.dependsOn.push(addDepSel.value);
-          editorRenderWfSteps();
-        }
-      });
-      depsRow.appendChild(addDepSel);
-    }
-    wrapper.appendChild(depsRow);
-
-    container.appendChild(wrapper);
-  });
-}
-
-function editorBuildStepRefSelect(currentVal, excludeIdx) {
-  const sel = document.createElement('select');
-  sel.className = 'filter-sel step-goto-sel';
-  const noneOpt = document.createElement('option');
-  noneOpt.value = '';
-  noneOpt.textContent = '-- step --';
-  sel.appendChild(noneOpt);
-  editorWfSteps.forEach((s, j) => {
-    if (j === excludeIdx) return;
-    const opt = document.createElement('option');
-    opt.value = s.id;
-    opt.textContent = s.name || s.id;
-    if (s.id === currentVal) opt.selected = true;
-    sel.appendChild(opt);
-  });
-  return sel;
-}
-
-function editorSaveWorkflow() {
-  const id = document.getElementById('ed-wf-id').value.trim();
-  const name = document.getElementById('ed-wf-name').value.trim();
-  if (!id || !name) return;
-  // Read step IDs from names
-  editorWfSteps.forEach((s, i) => {
-    if (!s.id) s.id = 'step-' + (i + 1);
-    if (!s.name) s.name = 'Step ' + (i + 1);
-  });
-  const wf = {
-    id,
-    name,
-    description: document.getElementById('ed-wf-desc').value.trim(),
-    category: document.getElementById('ed-wf-cat').value,
-    steps: editorWfSteps,
-    _custom: true,
-  };
-  const idx = customWorkflows.findIndex(w => w.id === id);
-  if (idx >= 0) customWorkflows[idx] = wf;
-  else customWorkflows.push(wf);
-  saveCustomItems();
-  editorRefreshView();
-}
-
-// -- Prompt form
-function editorBuildPromptForm(body, item) {
-  body.replaceChildren();
-  const fields = [
-    { label: 'ID (slug)', id: 'ed-pr-id', val: item.id, ph: 'my-prompt', disabled: !editorIsNew },
-    { label: 'Name', id: 'ed-pr-name', val: item.name, ph: 'My Prompt' },
-  ];
-  for (const f of fields) {
-    const row = document.createElement('div');
-    row.className = 'settings-row';
-    const label = document.createElement('label');
-    label.className = 'settings-label-sm';
-    label.textContent = f.label;
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.className = 'settings-inp';
-    inp.id = f.id;
-    inp.value = f.val || '';
-    inp.placeholder = f.ph || '';
-    inp.spellcheck = false;
-    inp.style.flex = '1';
-    if (f.disabled) inp.disabled = true;
-    row.appendChild(label);
-    row.appendChild(inp);
-    body.appendChild(row);
-  }
-  // Category
-  const catRow = document.createElement('div');
-  catRow.className = 'settings-row';
-  const catLabel = document.createElement('label');
-  catLabel.className = 'settings-label-sm';
-  catLabel.textContent = 'Category';
-  const catSel = document.createElement('select');
-  catSel.className = 'filter-sel';
-  catSel.id = 'ed-pr-cat';
-  for (const c of ['recon', 'detection', 'analysis', 'exploitation', 'reporting', 'hybrid']) {
-    const opt = document.createElement('option');
-    opt.value = c;
-    opt.textContent = c;
-    if (c === item.category) opt.selected = true;
-    catSel.appendChild(opt);
-  }
-  catRow.appendChild(catLabel);
-  catRow.appendChild(catSel);
-  body.appendChild(catRow);
-
-  // Template
-  const tmplLabel = document.createElement('div');
-  tmplLabel.className = 'pane-label';
-  tmplLabel.textContent = 'TEMPLATE';
-  body.appendChild(tmplLabel);
-  const ta = document.createElement('textarea');
-  ta.className = 'editor-ta editor-ta-lg';
-  ta.id = 'ed-pr-template';
-  ta.value = item.template || '';
-  ta.placeholder = 'Use {{tag_name}} for placeholders that will be filled at send time...';
-  ta.spellcheck = false;
-  body.appendChild(ta);
-
-  // Tags
-  const tagsLabel = document.createElement('div');
-  tagsLabel.className = 'pane-label';
-  tagsLabel.textContent = 'TAGS';
-  body.appendChild(tagsLabel);
-  editorPromptTags = [...(item.tags || [])];
-  const tagsContainer = document.createElement('div');
-  tagsContainer.className = 'item-editor-tags';
-  tagsContainer.id = 'ed-pr-tags';
-  body.appendChild(tagsContainer);
-  const tagRow = document.createElement('div');
-  tagRow.className = 'settings-row';
-  tagRow.style.marginTop = '4px';
-  const tagInp = document.createElement('input');
-  tagInp.type = 'text';
-  tagInp.className = 'settings-inp';
-  tagInp.placeholder = 'tag_name';
-  tagInp.style.flex = '1';
-  tagInp.spellcheck = false;
-  const tagAddBtn = document.createElement('button');
-  tagAddBtn.className = 'btn btn-xs btn-ghost';
-  tagAddBtn.textContent = '+ Add Tag';
-  tagAddBtn.addEventListener('click', () => {
-    const v = tagInp.value.trim().replace(/[^a-z0-9_]/gi, '_');
-    if (v && !editorPromptTags.includes(v)) {
-      editorPromptTags.push(v);
-      editorRenderPromptTags();
-    }
-    tagInp.value = '';
-  });
-  tagRow.appendChild(tagInp);
-  tagRow.appendChild(tagAddBtn);
-  body.appendChild(tagRow);
-  editorRenderPromptTags();
-}
-
-let editorPromptTags = [];
-
-function editorRenderPromptTags() {
-  const container = document.getElementById('ed-pr-tags');
-  if (!container) return;
-  container.replaceChildren();
-  editorPromptTags.forEach((tag, i) => {
-    const chip = document.createElement('span');
-    chip.className = 'tag-chip';
-    chip.textContent = '{{' + tag + '}} ';
-    const del = document.createElement('span');
-    del.className = 'tag-del';
-    del.textContent = '\u00D7';
-    del.addEventListener('click', () => {
-      editorPromptTags.splice(i, 1);
-      editorRenderPromptTags();
-    });
-    chip.appendChild(del);
-    container.appendChild(chip);
-  });
-}
-
-function editorSavePrompt() {
-  const id = document.getElementById('ed-pr-id').value.trim();
-  const name = document.getElementById('ed-pr-name').value.trim();
-  if (!id || !name) return;
-  const prompt = {
-    id,
-    name,
-    category: document.getElementById('ed-pr-cat').value,
-    template: document.getElementById('ed-pr-template').value,
-    tags: editorPromptTags,
-    _custom: true,
-  };
-  const idx = customPrompts.findIndex(p => p.id === id);
-  if (idx >= 0) customPrompts[idx] = prompt;
-  else customPrompts.push(prompt);
-  saveCustomItems();
-  editorRefreshView();
-}
-
-// -- Skill form
-function editorBuildSkillForm(body, item) {
-  body.replaceChildren();
-  const fields = [
-    { label: 'Slug', id: 'ed-sk-slug', val: item.slug, ph: 'my-skill', disabled: !editorIsNew },
-    { label: 'Name', id: 'ed-sk-name', val: item.name, ph: 'My Skill' },
-    { label: 'Description', id: 'ed-sk-desc', val: item.description, ph: 'One-line description' },
-    { label: 'Category', id: 'ed-sk-cat', val: item.category, ph: 'injection' },
-  ];
-  for (const f of fields) {
-    const row = document.createElement('div');
-    row.className = 'settings-row';
-    const label = document.createElement('label');
-    label.className = 'settings-label-sm';
-    label.textContent = f.label;
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.className = 'settings-inp';
-    inp.id = f.id;
-    inp.value = f.val || '';
-    inp.placeholder = f.ph || '';
-    inp.spellcheck = false;
-    inp.style.flex = '1';
-    if (f.disabled) inp.disabled = true;
-    row.appendChild(label);
-    row.appendChild(inp);
-    body.appendChild(row);
-  }
-  const bodyLabel = document.createElement('div');
-  bodyLabel.className = 'pane-label';
-  bodyLabel.textContent = 'METHODOLOGY (MARKDOWN)';
-  body.appendChild(bodyLabel);
-  const ta = document.createElement('textarea');
-  ta.className = 'editor-ta editor-ta-lg';
-  ta.id = 'ed-sk-body';
-  ta.value = item.body || '';
-  ta.placeholder = '# My Skill\n\n## Steps\n1. First step...\n2. Second step...';
-  ta.spellcheck = false;
-  body.appendChild(ta);
-}
-
-function editorSaveSkill() {
-  const slug = document.getElementById('ed-sk-slug').value.trim();
-  const name = document.getElementById('ed-sk-name').value.trim();
-  if (!slug || !name) return;
-  customSkills[slug] = {
-    slug,
-    name,
-    description: document.getElementById('ed-sk-desc').value.trim(),
-    category: document.getElementById('ed-sk-cat').value.trim(),
-    body: document.getElementById('ed-sk-body').value,
-    _custom: true,
-  };
-  saveCustomItems();
-  editorRefreshView();
-}
-
-// -- Add edit buttons to browser views
-
-function addEditBtnToWfCard(wf, card) {
-  if (!wf._custom) return;
-  const badge = document.createElement('span');
-  badge.className = 'item-editor-custom-badge';
-  badge.textContent = 'custom';
-  card.querySelector('.ai-wf-card-name')?.appendChild(badge);
-  card.addEventListener('dblclick', e => { e.stopPropagation(); editorOpen('workflow', wf); });
-}
-
-function addEditBtnToPromptItem(p, item) {
-  if (!p._custom) return;
-  const badge = document.createElement('span');
-  badge.className = 'item-editor-custom-badge';
-  badge.textContent = 'custom';
-  item.querySelector('.ai-prompt-item-name')?.appendChild(badge);
-  item.addEventListener('dblclick', e => { e.stopPropagation(); editorOpen('prompt', p); });
 }
 
 async function probeModelCapability() {
@@ -5596,9 +5829,15 @@ function saveSettings() {
   // engagementVulnModes is updated live by dropdown handlers, just persist what we have
   if (!settings.engagementVulnModes) settings.engagementVulnModes = {};
 
-  chrome.storage.local.set({ voidSettings: settings });
+  // Secrets are encrypted on the way out; the in-memory copy keeps the plaintext.
+  // Serialized through vaultWriteQueue so overlapping saves land in call order.
+  const settingsWritten = vaultEnqueueWrite(async () => {
+    const sealed = await vaultSealSettings(settings);
+    await new Promise(r => chrome.storage.local.set({ voidSettings: sealed }, r));
+  });
+  vaultRenderStatus();
 
-  // Push to background
+  // Push to background (in-memory only, never persisted there)
   bg({ type: "UPDATE_SETTINGS", settings });
 
   // Push DNS overrides to proxy server
@@ -5606,9 +5845,18 @@ function saveSettings() {
     aiProxyWs.send(JSON.stringify({ type: "dns_overrides", enabled: settings.dnsEnabled !== false, mappings: settings.dnsOverrides || "" }));
   }
 
+  // Don't claim success when the vault silently dropped a secret the user typed.
+  const dropped = vaultDroppedSecretKeys();
   const st = document.getElementById("cfg-status");
-  st.textContent = "Saved";
-  setTimeout(() => { st.textContent = ""; }, 1500);
+  if (dropped.length) {
+    st.textContent = vaultExists() ? "Saved — unlock the vault to store API keys"
+                                   : "Saved — set a vault passphrase to store API keys";
+    showToast(`Not saved: ${dropped.join(", ")} — ${vaultExists() ? "unlock" : "set"} the vault passphrase first`);
+  } else {
+    st.textContent = "Saved";
+  }
+  setTimeout(() => { st.textContent = ""; }, dropped.length ? 4000 : 1500);
+  return settingsWritten;
 }
 
 function loadSettingsUI() {
@@ -5679,6 +5927,10 @@ function loadSettingsUI() {
   document.getElementById("cfg-intr-max-threads").value = settings.intrMaxThreads || "20";
   document.getElementById("cfg-intr-retry").value       = settings.intrRetry || "0";
   document.getElementById("cfg-intr-grep-default").value = settings.intrGrepDefault || "";
+  // Seed the Intruder's Extract box from the configured default — the setting was
+  // saved and reloaded but never actually applied anywhere.
+  const grepExtract = document.getElementById("intr-grep-extract");
+  if (grepExtract && !grepExtract.value && settings.intrGrepDefault) grepExtract.value = settings.intrGrepDefault;
   // Tools: Repeater
   document.getElementById("cfg-rep-update-cl").checked  = settings.repUpdateCl !== false;
   document.getElementById("cfg-rep-unpack").checked     = settings.repUnpack !== false;
@@ -5731,8 +5983,7 @@ function loadSettingsUI() {
   setVal('ai-oob-token', settings.engagementOobToken || '');
   updatePersonaPreview();
   // Update quick-switch buttons
-  const chatAgentSel = document.getElementById('ai-chat-agent-sel');
-  if (chatAgentSel) chatAgentSel.value = settings.aiPersona || 'pentester';
+  document.querySelectorAll('.ai-agent-btn').forEach(b => b.classList.toggle('active', b.dataset.agent === (settings.aiPersona || 'pentester')));
   updateSafetyStatus();
   renderVulnClassTable();
   renderMRRules();
@@ -6463,8 +6714,9 @@ function buildSessionData() {
     endpoints:    state.endpoints || [],
     technologies: state.technologies || [],
     headers:      state.headers || {},
-    // Settings
-    settings,
+    // Settings — redacted: sessions are saved to storage AND exported to a file
+    // the user may share, so no secret may ride along.
+    settings: vaultRedact(settings),
     // Target scope
     scopeInclude: document.getElementById("tgt-scope-include").value,
     scopeExclude: document.getElementById("tgt-scope-exclude").value,
@@ -6530,8 +6782,17 @@ async function saveSessionToBrowser() {
 }
 
 // ── Export to .json file ─────────────────────────────────────────────────────
-function exportSession() {
+async function exportSession() {
   const data = buildSessionData();
+  // Vault secrets are already stripped by buildSessionData; M&R rules and
+  // auto-headers are not, and this file leaves the machine.
+  const hits = scanForCredentials(data.settings);
+  let redacted = false;
+  if (hits.length) {
+    const choice = await confirmCredentialExport(hits);
+    if (choice === "cancel") { sessionStatus("Export cancelled"); return; }
+    if (choice === "redact") { data.settings = redactCredentialFields(data.settings); redacted = true; }
+  }
   const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
   const a = el("a");
   a.href = URL.createObjectURL(blob);
@@ -6540,7 +6801,7 @@ function exportSession() {
   a.download = `void-${host}-${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-  sessionStatus("Exported");
+  sessionStatus(redacted ? "Exported (credentials excluded)" : "Exported");
 }
 
 // ── Delete saved session ─────────────────────────────────────────────────────
@@ -6659,9 +6920,12 @@ async function applySessionData(data) {
   if (data.technologies) state.technologies = data.technologies;
   if (data.headers) state.headers = data.headers;
 
-  // Restore settings
+  // Restore settings. A session file carries no secrets, so keep the ones held in
+  // this session and — critically — carry __secrets forward, or the save below
+  // would overwrite the vault's ciphertext with an empty object.
   if (data.settings) {
-    settings = { ...DEFAULT_SETTINGS, ...data.settings };
+    const keptSecrets = Object.fromEntries(SECRET_SETTING_KEYS.map(k => [k, settings[k]]));
+    settings = { ...DEFAULT_SETTINGS, ...vaultRedact(data.settings), ...keptSecrets, __secrets: settings.__secrets };
     loadSettingsUI();
     saveSettings();
   }
@@ -7993,13 +8257,10 @@ function simpleHash(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (
 
 let interceptedResponses = [];
 let editingResp = null;
-let respPollTimer = null;
 
-// Response polling is now handled by doPollTick (via interceptResponses flag),
-// eliminating the dual-writer race condition. These are kept as no-ops for
-// call-site compatibility.
-function startRespPoll() {}
-function stopRespPoll() { clearInterval(respPollTimer); respPollTimer = null; }
+// Response polling is handled by doPollTick via the interceptResponses flag. The
+// old start/stop helpers here were empty no-ops kept "for call-site
+// compatibility" with call sites that no longer existed, so they are gone.
 
 function openRespEditor(resp) {
   editingResp = resp;
@@ -8934,9 +9195,13 @@ function intrUpdateProgress(current, total) {
 
 // ═══════════════════════════ INTRUDER: CLUSTER BOMB + PAYLOAD PROCESSING ════
 
-function intrProcessPayload(payload) {
-  const proc = document.getElementById("intr-proc").value;
-  const val = document.getElementById("intr-proc-val").value;
+// Applied to every payload before it is substituted into the request template.
+// Async because SHA-1/SHA-256 go through crypto.subtle — returning the payload
+// unchanged for those (as this used to) silently produced a completely different
+// attack from the one the user selected.
+async function intrProcessPayload(payload, proc, val) {
+  if (proc === undefined) proc = document.getElementById("intr-proc")?.value || "";
+  if (val === undefined) val = document.getElementById("intr-proc-val")?.value || "";
   switch (proc) {
     case "url-encode": return encodeURIComponent(payload);
     case "url-decode": try { return decodeURIComponent(payload); } catch { return payload; }
@@ -8944,13 +9209,32 @@ function intrProcessPayload(payload) {
     case "base64-decode": try { return atob(payload); } catch { return payload; }
     case "hex-encode": return Array.from(payload).map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
     case "md5": return md5(payload);
-    case "sha1": case "sha256": return payload; // async crypto not practical inline; use Decoder tab
+    case "sha1": return cryptoHash("SHA-1", payload);
+    case "sha256": return cryptoHash("SHA-256", payload);
     case "lowercase": return payload.toLowerCase();
     case "uppercase": return payload.toUpperCase();
     case "prefix": return val + payload;
     case "suffix": return payload + val;
     default: return payload;
   }
+}
+
+// Single source of truth for an Intruder result row. The live-append path in
+// intrStart and the re-render in intrRenderResults both emitted six cells against
+// an eight-column header, so Grep/Extract never rendered and the response preview
+// showed up under the wrong heading — including for the ten specialised attack
+// modes that do compute those values.
+function intrRowCells(entry, statusCls, lenStr, preview) {
+  return `
+      <td class="hist-td-num">${Number(entry.id) || 0}</td>
+      <td title="${esc(entry.payload)}">${esc(entry.payload)}</td>
+      <td class="${statusCls}">${esc(String(entry.status))}</td>
+      <td class="hist-td-len">${esc(String(lenStr))}</td>
+      <td class="hist-td-elapsed">${Number(entry.elapsed) || 0}</td>
+      <td class="intr-td-grep">${entry.grepMatch ? '<span class="intr-grep-hit" title="Matched the grep pattern">●</span>' : ""}</td>
+      <td class="intr-td-extract" title="${esc(entry.grepExtract || "")}">${esc(entry.grepExtract || "")}</td>
+      <td class="hist-td-mime" title="${esc(preview)}">${esc(preview)}</td>
+    `;
 }
 
 function intrGrepResult(respBody) {
@@ -9922,7 +10206,6 @@ Keep responses concise and technical. When you find something interesting, use a
 
 let aiMessages = []; // conversation history for display
 let aiLlmMessages = []; // conversation history in LLM format
-let aiConfig = { provider: "claude-cli", apiKey: "", model: "", endpoint: "", systemPrompt: AI_SYSTEM_PROMPT, cliPath: "claude" };
 let aiSending = false;
 let aiProxyWs = null;
 let aiSessions = []; // { id, name, messages, llmMessages }
@@ -9931,7 +10214,6 @@ let aiNextSessionId = 1;
 let aiInputHistory = [];
 let aiInputHistIdx = -1;
 let aiInputDraft = "";
-let aiPendingRequestCtx = null;
 
 // Tool executor — runs tools locally in panel.js where all extension state lives
 async function aiExecTool(name, args) {
@@ -10343,18 +10625,33 @@ function pentestLoadProjects() {
     chrome.storage.local.get(['voidPentestProjects', 'voidPentestActiveProject'], r => {
       pentestProjects = r.voidPentestProjects || [];
       pentestActiveProjectId = r.voidPentestActiveProject || null;
+      // Credentials stay as ciphertext until the vault is unlocked; plaintext left
+      // by an earlier build stays usable for this session (see loadSettings).
+      for (const p of pentestProjects) {
+        if (!p.credentials) continue;
+        for (const k of SECRET_PROJECT_KEYS) {
+          if (p.credentials[k]) vaultLegacyProjectKeys.add(p.id + ":" + k);
+          else p.credentials[k] = "";
+        }
+      }
+      vaultMarkProjectsLoaded();
       resolve();
     });
   });
 }
 
 function pentestSaveProjects() {
-  chrome.storage.local.set({
-    voidPentestProjects: pentestProjects,
-    voidPentestActiveProject: pentestActiveProjectId,
+  // Credentials are encrypted on the way out; the in-memory copy keeps the plaintext.
+  const written = vaultEnqueueWrite(async () => {
+    const sealed = await vaultSealProjects(pentestProjects);
+    await new Promise(r => chrome.storage.local.set({
+      voidPentestProjects: sealed,
+      voidPentestActiveProject: pentestActiveProjectId,
+    }, r));
   });
   pentestRenderProjectList();
   pentestRenderContextBar();
+  return written;
 }
 
 function pentestGetActive() {
@@ -10383,7 +10680,6 @@ function pentestCreateProject(data) {
     config: {
       environment: data.environment || 'unknown',
       mode: data.mode || 'ask',
-      agent: data.agent || 'pentester',
       vulnModes: {},
       allowBruteforce: data.allowBruteforce || false,
       allowDestructive: data.allowDestructive || false,
@@ -10391,7 +10687,7 @@ function pentestCreateProject(data) {
       oobToken: data.oobToken || '',
     },
     workflow: {
-      selectedId: data.workflowId || '',
+      selectedId: data.workflowId || 'full-pentest',
     },
     findings: [],
     notes: '',
@@ -10434,185 +10730,57 @@ function pentestAddFinding(projectId, finding) {
 // ── Project list & context bar rendering ────────────────────────────────────
 
 function pentestRenderProjectList() {
-  // Populate project selector dropdown
-  const sel = document.getElementById('ai-project-sel');
-  if (sel) {
-    sel.replaceChildren();
-    const noneOpt = document.createElement('option');
-    noneOpt.value = '';
-    noneOpt.textContent = 'No project';
-    sel.appendChild(noneOpt);
-    for (const proj of pentestProjects) {
-      const opt = document.createElement('option');
-      opt.value = proj.id;
-      opt.textContent = proj.name + ((proj.findings || []).length > 0 ? ' (' + proj.findings.length + 'f)' : '');
-      sel.appendChild(opt);
-    }
-    sel.value = pentestActiveProjectId || '';
+  const container = document.getElementById('ai-project-list');
+  if (!container) return;
+  container.replaceChildren();
+  for (const proj of pentestProjects) {
+    const item = document.createElement('div');
+    item.className = 'ai-project-item' + (proj.id === pentestActiveProjectId ? ' active' : '');
+    const findingCount = (proj.findings || []).length;
+    item.innerHTML = '<span class="ai-proj-name"></span>' +
+      (findingCount > 0 ? '<span class="ai-proj-findings">' + findingCount + 'f</span>' : '') +
+      '<span class="ai-proj-del" title="Delete project">&times;</span>';
+    item.querySelector('.ai-proj-name').textContent = proj.name;
+    item.addEventListener('click', () => pentestActivateProject(proj.id));
+    item.querySelector('.ai-proj-del').addEventListener('click', e => {
+      e.stopPropagation();
+      if (confirm('Delete project "' + proj.name + '"?')) pentestDeleteProject(proj.id);
+    });
+    container.appendChild(item);
   }
-  // Render right panel config
-  pentestRenderRightPanel();
 }
 
 function pentestRenderContextBar() {
-  // Context bar was replaced by the right panel subtabs — delegate
-  pentestRenderRightPanel();
-}
-
-// ── Right Panel (Config + Memory + Findings) ────────────────────────────────
-
-let workflowMemory = {
-  currentStep: null,
-  notes: '',
-  context: '',
-  requests: [],
-  findings: [],
-};
-
-function pentestRenderRightPanel() {
+  const bar = document.getElementById('ai-context-bar');
+  if (!bar) return;
   const proj = pentestGetActive();
-  const noProj = document.getElementById('ai-rp-no-project');
-  const cfgDiv = document.getElementById('ai-rp-config');
   if (!proj) {
-    if (noProj) noProj.classList.remove('hidden');
-    if (cfgDiv) cfgDiv.classList.add('hidden');
+    bar.classList.add('hidden');
     return;
   }
-  if (noProj) noProj.classList.add('hidden');
-  if (cfgDiv) cfgDiv.classList.remove('hidden');
-
-  // Scope
-  const scopeIn = document.getElementById('ai-rp-scope-in');
-  if (scopeIn) {
-    scopeIn.replaceChildren();
-    for (const s of (proj.scope?.inScope || [])) {
-      const el = document.createElement('div');
-      el.className = 'ai-rp-list-item';
-      el.textContent = s.target || s;
-      scopeIn.appendChild(el);
-    }
-    if (!proj.scope?.inScope?.length) { const e = document.createElement('div'); e.className = 'ai-rp-list-item'; e.textContent = '(none)'; e.style.opacity = '0.4'; scopeIn.appendChild(e); }
+  bar.classList.remove('hidden');
+  const nameEl = document.getElementById('ai-ctx-name');
+  const scopeEl = document.getElementById('ai-ctx-scope');
+  const findingsEl = document.getElementById('ai-ctx-findings');
+  if (nameEl) nameEl.textContent = proj.name;
+  if (scopeEl) {
+    const inCount = (proj.scope?.inScope || []).length;
+    const outCount = (proj.scope?.outScope || []).length;
+    scopeEl.textContent = inCount + ' in-scope' + (outCount > 0 ? ', ' + outCount + ' excluded' : '');
   }
-  const scopeOut = document.getElementById('ai-rp-scope-out');
-  if (scopeOut) {
-    scopeOut.replaceChildren();
-    for (const s of (proj.scope?.outScope || [])) {
-      const el = document.createElement('div');
-      el.className = 'ai-rp-list-item';
-      el.textContent = s.target || s;
-      scopeOut.appendChild(el);
-    }
-  }
-
-  // Environment + Mode
-  const envEl = document.getElementById('ai-rp-env');
-  if (envEl) envEl.textContent = proj.config?.environment || 'unknown';
-  const modeEl = document.getElementById('ai-rp-mode');
-  if (modeEl) modeEl.textContent = proj.config?.mode || 'ask';
-
-  // Agent
-  const agentEl = document.getElementById('ai-rp-agent');
-  if (agentEl) {
-    const ag = window.VOID_AGENTS?.find(a => a.id === proj.config?.agent);
-    agentEl.textContent = ag ? ag.title : (proj.config?.agent || 'Default');
-  }
-
-  // Workflow
-  const wfEl = document.getElementById('ai-rp-workflow');
-  if (wfEl) {
-    const wf = window.VOID_WORKFLOWS?.find(w => w.id === proj.workflow?.selectedId);
-    wfEl.textContent = wf ? wf.name : 'None';
-  }
-
-  // Safety
-  const bruteEl = document.getElementById('ai-rp-brute');
-  if (bruteEl) {
-    bruteEl.textContent = proj.config?.allowBruteforce ? 'Bruteforce ON' : 'Bruteforce OFF';
-    bruteEl.className = 'ai-rp-badge ' + (proj.config?.allowBruteforce ? 'on' : 'off');
-  }
-  const destEl = document.getElementById('ai-rp-destructive');
-  if (destEl) {
-    destEl.textContent = proj.config?.allowDestructive ? 'Destructive ON' : 'Destructive OFF';
-    destEl.className = 'ai-rp-badge ' + (proj.config?.allowDestructive ? 'on' : 'off');
-  }
-
-  // Credentials
-  const credsEl = document.getElementById('ai-rp-creds');
-  if (credsEl) {
-    const c = proj.credentials || {};
-    if (c.username) credsEl.textContent = c.authType + ': ' + c.username;
-    else credsEl.textContent = 'None configured';
-  }
-
-  // Render findings in right panel
-  pentestRenderRightFindings();
-  pentestRenderMemoryPanel();
-}
-
-function pentestRenderRightFindings() {
-  const proj = pentestGetActive();
-  const list = document.getElementById('ai-rp-findings-list');
-  if (!list) return;
-  list.replaceChildren();
-  const findings = proj?.findings || [];
-  if (!findings.length) {
-    const empty = document.createElement('div');
-    empty.className = 'ai-rp-empty';
-    empty.textContent = 'No findings yet';
-    list.appendChild(empty);
-    return;
-  }
-  const sevColors = { critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#22c55e', info: '#3b82f6' };
-  for (const f of findings) {
-    const card = document.createElement('div');
-    card.className = 'ai-rp-finding';
-    const title = document.createElement('span');
-    title.className = 'ai-rp-finding-title';
-    title.textContent = f.title || f.type || 'Finding';
-    card.appendChild(title);
-    if (f.severity) {
-      const sev = document.createElement('span');
-      sev.className = 'ai-rp-finding-sev';
-      sev.textContent = f.severity.toUpperCase();
-      sev.style.background = 'color-mix(in srgb, transparent 85%, ' + (sevColors[f.severity] || '#888') + ' 15%)';
-      sev.style.color = sevColors[f.severity] || '#888';
-      card.appendChild(sev);
-    }
-    if (f.url) {
-      const url = document.createElement('div');
-      url.style.cssText = 'font-size:10px;font-family:var(--mono);opacity:0.6;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-      url.textContent = f.url;
-      card.appendChild(url);
-    }
-    list.appendChild(card);
-  }
-}
-
-function pentestRenderMemoryPanel() {
-  const noMem = document.getElementById('ai-rp-no-memory');
-  const memDiv = document.getElementById('ai-rp-memory');
-  if (!workflowMemory.currentStep) {
-    if (noMem) noMem.classList.remove('hidden');
-    if (memDiv) memDiv.classList.add('hidden');
-    return;
-  }
-  if (noMem) noMem.classList.add('hidden');
-  if (memDiv) memDiv.classList.remove('hidden');
-
-  const stepEl = document.getElementById('ai-mem-step');
-  if (stepEl) stepEl.textContent = workflowMemory.currentStep;
-  const notesEl = document.getElementById('ai-mem-notes');
-  if (notesEl) notesEl.textContent = workflowMemory.notes || '(empty)';
-  const ctxEl = document.getElementById('ai-mem-context');
-  if (ctxEl) ctxEl.textContent = workflowMemory.context ? (workflowMemory.context.length + ' chars accumulated') : 'None';
-  const reqCountEl = document.getElementById('ai-mem-req-count');
-  if (reqCountEl) reqCountEl.textContent = workflowMemory.requests.length;
-  const reqEl = document.getElementById('ai-mem-requests');
-  if (reqEl) {
-    if (workflowMemory.requests.length === 0) {
-      reqEl.textContent = '(none captured)';
+  if (findingsEl) {
+    const findings = proj.findings || [];
+    if (findings.length === 0) {
+      findingsEl.textContent = 'No findings';
     } else {
-      reqEl.textContent = workflowMemory.requests.slice(-10).map(r => r.method + ' ' + r.url).join('\n');
+      const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+      for (const f of findings) counts[f.severity || 'info']++;
+      const parts = [];
+      if (counts.critical) parts.push('<span class="sev-c">' + counts.critical + 'C</span>');
+      if (counts.high) parts.push('<span class="sev-h">' + counts.high + 'H</span>');
+      if (counts.medium) parts.push('<span class="sev-m">' + counts.medium + 'M</span>');
+      if (counts.low) parts.push('<span class="sev-l">' + counts.low + 'L</span>');
+      findingsEl.innerHTML = parts.join(' ') || findings.length + ' findings';
     }
   }
 }
@@ -10744,101 +10912,50 @@ function toggleSlidePanel(panelId) {
 
 // ── Project Wizard ──────────────────────────────────────────────────────────
 
+// Index of the final wizard step. Kept as a constant so adding or removing a step
+// only changes one number instead of three scattered literals.
+const WIZ_LAST_STEP = 3;
+
 let wizStep = 0;
 let wizInScope = [];
 let wizOutScope = [];
-let wizEditId = null;
 
-function wizOpen(editProject) {
+// Field helpers — a missing wizard input must not abort the whole open/create flow.
+const wizSet = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+const wizVal = (id) => document.getElementById(id)?.value || '';
+
+function wizOpen() {
   wizStep = 0;
   wizInScope = [];
   wizOutScope = [];
-  wizEditId = null;
-  const p = editProject || {};
-  document.getElementById('wiz-name').value = p.name || '';
-  document.getElementById('wiz-desc').value = p.description || '';
-  document.getElementById('wiz-username').value = p.credentials?.username || '';
-  document.getElementById('wiz-password').value = p.credentials?.password || '';
-  document.getElementById('wiz-login-url').value = p.credentials?.loginUrl || '';
-  document.getElementById('wiz-api-token').value = p.credentials?.apiToken || '';
-  document.getElementById('wiz-extra-headers').value = p.credentials?.extraHeaders || '';
-  document.getElementById('wiz-auth-type').value = p.credentials?.authType || 'FORM';
-  document.getElementById('wiz-env').value = p.config?.environment || settings.engagementEnv || 'unknown';
-  document.getElementById('wiz-mode').value = p.config?.mode || settings.engagementMode || 'ask';
+  wizSet('wiz-name', '');
+  wizSet('wiz-desc', '');
+  wizSet('wiz-username', '');
+  wizSet('wiz-password', '');
+  wizSet('wiz-login-url', '');
+  wizSet('wiz-api-token', '');
+  wizSet('wiz-extra-headers', '');
+  wizSet('wiz-auth-type', 'FORM');
+  wizSet('wiz-env', settings.engagementEnv || 'unknown');
+  wizSet('wiz-mode', settings.engagementMode || 'ask');
   const bruteChk = document.getElementById('wiz-bruteforce');
-  if (bruteChk) bruteChk.checked = p.config ? !!p.config.allowBruteforce : !!settings.engagementBruteforce;
+  if (bruteChk) bruteChk.checked = !!settings.engagementBruteforce;
   const destChk = document.getElementById('wiz-destructive');
-  if (destChk) destChk.checked = p.config ? !!p.config.allowDestructive : !!settings.engagementDestructive;
-  const wizOobServer = document.getElementById('wiz-oob-server');
-  if (wizOobServer) wizOobServer.value = p.config?.oobServer || settings.engagementOobServer || '';
-  const wizOobToken = document.getElementById('wiz-oob-token');
-  if (wizOobToken) wizOobToken.value = p.config?.oobToken || settings.engagementOobToken || '';
-  // Populate agent dropdown
-  const agSel = document.getElementById('wiz-agent');
-  if (agSel && window.VOID_AGENTS) {
-    agSel.replaceChildren();
-    for (const a of window.VOID_AGENTS) {
-      const opt = document.createElement('option');
-      opt.value = a.id;
-      opt.textContent = a.title;
-      agSel.appendChild(opt);
-    }
-    agSel.value = p.config?.agent || settings.aiPersona || 'pentester';
-  }
-  // Populate workflow dropdown
-  const wfSel = document.getElementById('wiz-workflow');
-  if (wfSel && window.VOID_WORKFLOWS) {
-    wfSel.replaceChildren();
-    const noneOpt = document.createElement('option');
-    noneOpt.value = '';
-    noneOpt.textContent = '— None —';
-    wfSel.appendChild(noneOpt);
-    for (const w of window.VOID_WORKFLOWS) {
-      const opt = document.createElement('option');
-      opt.value = w.id;
-      opt.textContent = w.name;
-      wfSel.appendChild(opt);
-    }
-    wfSel.value = p.workflow?.selectedId || '';
-  }
-  // Pre-fill scope if editing
-  if (p.scope) {
-    wizInScope = (p.scope.inScope || []).map(s => s.target || s);
-    wizOutScope = (p.scope.outScope || []).map(s => typeof s === 'string' ? { target: s, reason: '' } : s);
-  }
-  if (editProject) wizEditId = editProject.id;
-  // Update title
-  const titleEl = document.querySelector('.ai-wizard-title');
-  if (titleEl) titleEl.textContent = editProject ? 'Edit Project' : 'New AI Pentest Project';
-  const createBtn = document.getElementById('ai-wizard-create');
-  if (createBtn) createBtn.textContent = editProject ? 'Save Changes' : 'Create Project';
-  // Show active session info
-  const sessionBadge = document.getElementById('wiz-session-name');
-  if (sessionBadge) {
-    const sessionSel = document.getElementById('session-configs');
-    const sessionName = sessionSel?.selectedOptions?.[0]?.textContent;
-    if (sessionSel?.value) {
-      sessionBadge.textContent = sessionName || 'Session loaded';
-      sessionBadge.className = 'wiz-session-badge active';
-    } else {
-      sessionBadge.textContent = 'No session loaded — create one in Project tab first';
-      sessionBadge.className = 'wiz-session-badge';
-    }
-  }
+  if (destChk) destChk.checked = !!settings.engagementDestructive;
   wizUpdateUI();
-  document.getElementById('ai-wizard-overlay').classList.remove('hidden');
+  document.getElementById('ai-wizard-overlay')?.classList.remove('hidden');
 }
 
 function wizClose() {
-  document.getElementById('ai-wizard-overlay').classList.add('hidden');
+  document.getElementById('ai-wizard-overlay')?.classList.add('hidden');
 }
 
 function wizNext() {
-  if (wizStep === 0) {
-    const name = document.getElementById('wiz-name').value.trim();
-    if (!name) { document.getElementById('wiz-name').focus(); return; }
+  if (wizStep === 0 && !wizVal('wiz-name').trim()) {
+    document.getElementById('wiz-name')?.focus();
+    return;
   }
-  if (wizStep < 3) { wizStep++; wizUpdateUI(); }
+  if (wizStep < WIZ_LAST_STEP) { wizStep++; wizUpdateUI(); }
 }
 
 function wizBack() {
@@ -10846,20 +10963,21 @@ function wizBack() {
 }
 
 function wizUpdateUI() {
-  // Show/hide steps
-  document.querySelectorAll('.ai-wizard-step').forEach(el => {
+  // Scoped to the wizard overlay — a bare `.ai-wizard-step` selector would also
+  // hide any other modal that reused the class.
+  document.querySelectorAll('#ai-wizard-overlay .ai-wizard-step').forEach(el => {
     el.classList.toggle('hidden', parseInt(el.dataset.step) !== wizStep);
   });
   // Update dots
-  document.querySelectorAll('.ai-wizard-dot').forEach(dot => {
+  document.querySelectorAll('#ai-wizard-overlay .ai-wizard-dot').forEach(dot => {
     const s = parseInt(dot.dataset.step);
     dot.classList.toggle('active', s === wizStep);
     dot.classList.toggle('done', s < wizStep);
   });
   // Show/hide nav buttons
-  document.getElementById('ai-wizard-back').classList.toggle('hidden', wizStep === 0);
-  document.getElementById('ai-wizard-next').classList.toggle('hidden', wizStep === 3);
-  document.getElementById('ai-wizard-create').classList.toggle('hidden', wizStep !== 3);
+  document.getElementById('ai-wizard-back')?.classList.toggle('hidden', wizStep === 0);
+  document.getElementById('ai-wizard-next')?.classList.toggle('hidden', wizStep === WIZ_LAST_STEP);
+  document.getElementById('ai-wizard-create')?.classList.toggle('hidden', wizStep !== WIZ_LAST_STEP);
   // Render scope lists
   wizRenderScopeList();
 }
@@ -10912,58 +11030,28 @@ function wizAddOutScope() {
   input.focus();
 }
 
-function pentestUpdateProject(id, data) {
-  const proj = pentestProjects.find(p => p.id === id);
-  if (!proj) return;
-  proj.name = data.name;
-  proj.description = data.description;
-  proj.scope = { inScope: data.inScope || [], outScope: data.outScope || [] };
-  proj.credentials = {
-    username: data.username || '', password: data.password || '',
-    loginUrl: data.loginUrl || '', authType: data.authType || 'FORM',
-    apiToken: data.apiToken || '', extraHeaders: data.extraHeaders || '',
-  };
-  proj.config = {
-    environment: data.environment || 'unknown', mode: data.mode || 'ask',
-    agent: data.agent || 'pentester', vulnModes: proj.config?.vulnModes || {},
-    allowBruteforce: data.allowBruteforce || false,
-    allowDestructive: data.allowDestructive || false,
-    oobServer: data.oobServer || '', oobToken: data.oobToken || '',
-  };
-  proj.workflow = { selectedId: data.workflowId || '' };
-  pentestSaveProjects();
-  pentestRenderProjectList();
-  pentestRenderContextBar();
-}
-
 function wizCreate() {
-  const name = document.getElementById('wiz-name').value.trim();
+  const name = wizVal('wiz-name').trim();
   if (!name) return;
-  const data = {
+  pentestCreateProject({
     name,
-    description: document.getElementById('wiz-desc').value.trim(),
+    description: wizVal('wiz-desc').trim(),
     inScope: wizInScope.map(s => ({ target: s })),
     outScope: wizOutScope,
-    username: document.getElementById('wiz-username').value,
-    password: document.getElementById('wiz-password').value,
-    loginUrl: document.getElementById('wiz-login-url').value,
-    authType: document.getElementById('wiz-auth-type').value,
-    apiToken: document.getElementById('wiz-api-token').value,
-    extraHeaders: document.getElementById('wiz-extra-headers').value,
-    workflowId: document.getElementById('wiz-workflow')?.value || '',
-    agent: document.getElementById('wiz-agent')?.value || 'pentester',
-    environment: document.getElementById('wiz-env').value,
-    mode: document.getElementById('wiz-mode').value,
+    username: wizVal('wiz-username'),
+    password: wizVal('wiz-password'),
+    loginUrl: wizVal('wiz-login-url'),
+    authType: wizVal('wiz-auth-type') || 'FORM',
+    apiToken: wizVal('wiz-api-token'),
+    extraHeaders: wizVal('wiz-extra-headers'),
+    // No workflow is chosen at creation time — creating a project must not commit
+    // the user to running a scan. Pick one later from AI Settings -> Workflows.
+    workflowId: '',
+    environment: wizVal('wiz-env') || 'unknown',
+    mode: wizVal('wiz-mode') || 'ask',
     allowBruteforce: document.getElementById('wiz-bruteforce')?.checked || false,
     allowDestructive: document.getElementById('wiz-destructive')?.checked || false,
-    oobServer: document.getElementById('wiz-oob-server')?.value || '',
-    oobToken: document.getElementById('wiz-oob-token')?.value || '',
-  };
-  if (wizEditId) {
-    pentestUpdateProject(wizEditId, data);
-  } else {
-    pentestCreateProject(data);
-  }
+  });
   wizClose();
 }
 
@@ -11128,20 +11216,215 @@ let autoStepIndex = 0;
 let autoMaxSteps = 50;
 let autoWorkflowSteps = null; // array of workflow steps when running a workflow
 
+// ═══════════════════════════ WORKFLOW RUN ════════════════════════════════════
+// The proxy the panel talks to. Kept as a constant because a hand-written copy of
+// this URL had drifted to a nonexistent port, and the caller's fail-closed error
+// handling made that look like "the judge is offline" rather than a wrong URL.
+const VOID_PROXY_CHAT_URL = "http://localhost:8081/api/chat";
+
+// A run is a cursor over the workflow's steps plus a log of everything that has
+// happened. The log is what gives each agent context: a step does not see the
+// previous agent's chat, it sees the recorded outcome of every step before it.
+
+let wfRun = null;
+// Set while an AGENT step is in flight so the completion handler knows which step
+// to record against and where to go next.
+let wfPendingStep = null;
+
+function wfRunNew(wf) {
+  return {
+    workflowId: wf.id,
+    workflowName: wf.name,
+    startedAt: new Date().toISOString(),
+    status: "running",        // running | finished | stopped
+    cursor: wf.steps?.[0]?.id || null,
+    visited: [],              // step ids in execution order, for loop detection
+    log: [],
+  };
+}
+
+// Everything the run does lands here, and nothing else is the source of context.
+function wfLog(kind, text, data) {
+  if (!wfRun) return;
+  wfRun.log.push({ t: new Date().toISOString(), kind, text, data });
+  wfRenderLog();
+}
+
+function wfStepById(wf, id) { return (wf.steps || []).find(s => s.id === id); }
+
+function wfActiveWorkflow() {
+  if (!wfRun) return null;
+  return (window.VOID_WORKFLOWS || []).find(w => w.id === wfRun.workflowId) || null;
+}
+
+// The context block handed to the next agent. Deliberately the log rather than the
+// chat transcript, so a step is reproducible regardless of what the user typed.
+function wfBuildContext(wf) {
+  const parts = [];
+  if (wf.initialInstructions) parts.push("INITIAL INSTRUCTIONS:\n" + wf.initialInstructions);
+  if (wfRun?.log.length) {
+    const lines = wfRun.log
+      .filter(e => e.kind !== "note")
+      .map(e => `[${e.kind}] ${e.text}`);
+    parts.push("WORKFLOW LOG SO FAR:\n" + lines.join("\n"));
+  }
+  const proj = typeof pentestGetActive === "function" ? pentestGetActive() : null;
+  if (proj?.findings?.length) {
+    parts.push("FINDINGS SO FAR:\n" + proj.findings
+      .map(f => `- [${f.severity || "info"}] ${f.title || f.type} @ ${f.url || ""}`).join("\n"));
+  }
+  return parts.join("\n\n");
+}
+
+// Assemble the system prompt for a step: the step's agent (or its inline
+// override), plus the bodies of every skill the step selected.
+function wfStepSystemPrompt(step) {
+  let base = "";
+  if (step.agentOverride) base = step.agentOverride;
+  else if (step.agent) base = (window.VOID_AGENTS || []).find(a => a.id === step.agent)?.systemPrompt || "";
+  if (!base) base = getActiveSystemPrompt();
+
+  const blocks = [base];
+  for (const slug of (step.skills || [])) {
+    const body = step.skillOverrides?.[slug] || window.VOID_SKILLS?.[slug]?.body || "";
+    if (body) blocks.push(`# SKILL: ${window.VOID_SKILLS?.[slug]?.name || slug}\n${body}`);
+  }
+  return blocks.join("\n\n");
+}
+
+// Render the step's prompt template, falling back to its goal when none is set.
+function wfStepMessage(wf, step) {
+  const tpl = step.promptOverride
+    || (step.prompt ? (window.VOID_PROMPTS || []).find(p => p.id === step.prompt)?.template : "")
+    || "";
+  const proj = typeof pentestGetActive === "function" ? pentestGetActive() : null;
+  const target = proj?.scope?.inScope?.[0]?.target || proj?.name || "the target";
+  const vars = { target, goal: step.goal || "", step: step.name || step.id };
+  const rendered = tpl.replace(/\{\{(\w+)\}\}/g, (m, k) => vars[k] ?? m);
+
+  const parts = [];
+  const ctx = wfBuildContext(wf);
+  if (ctx) parts.push(ctx);
+  parts.push(`STEP: ${step.name || step.id}`);
+  if (step.goal) parts.push("GOAL: " + step.goal);
+  if (rendered) parts.push(rendered);
+  if (step.decisionTree?.length) {
+    parts.push("DECISION TREE — work through these in order:\n" + step.decisionTree.map((d, i) =>
+      `${i + 1}. ${d.action}` +
+      (d.ifPositive ? `\n   if yes: ${d.ifPositive}` : "") +
+      (d.ifNegative ? `\n   if no: ${d.ifNegative}` : "") +
+      (d.stopWhen ? `\n   stop when: ${d.stopWhen}` : "")).join("\n"));
+  }
+  if (step.validation?.contextCheck) parts.push("VALIDATE: " + step.validation.contextCheck);
+  return parts.join("\n\n");
+}
+
+// Ask the judge model a yes/no question about the run so far. Conditions and
+// triggers are both "does the log support this claim?", so they share this.
+async function wfEvaluate(question, context) {
+  const provider = settings.aiJudgeProvider || settings.aiPrimaryProvider || "ollama";
+  const model = settings.aiJudgeModel || settings.aiPrimaryModel || "";
+  const endpoint = settings.aiJudgeEndpoint || settings.aiPrimaryEndpoint || "";
+  const apiKey = settings.aiJudgeKey || settings.aiPrimaryKey || "";
+  const prompt = `You are evaluating a penetration-testing workflow.
+
+${context}
+
+QUESTION: ${question}
+
+Answer with a single JSON object and nothing else:
+{"answer": true|false, "reason": "one sentence"}`;
+
+  try {
+    // /api/judge builds its own vulnerability-specific prompt, so a free-form
+    // question goes through /api/chat with no tools instead.
+    const res = await fetch(VOID_PROXY_CHAT_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider,
+        apiKey,
+        model: model || undefined,
+        endpoint: (provider === "custom" || provider === "ollama") ? endpoint : undefined,
+        cliPath: provider === "claude-cli" ? "claude" : undefined,
+        messages: [{ role: "user", content: prompt }],
+        systemPrompt: "You answer questions about a penetration test with a single JSON object and nothing else.",
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return { answer: false, reason: "judge error: " + (err.error || res.statusText) };
+    }
+    const data = await res.json();
+    const m = String(data.content || "").match(/\{[\s\S]*\}/);
+    if (m) {
+      const parsed = JSON.parse(m[0]);
+      return { answer: !!parsed.answer, reason: parsed.reason || "" };
+    }
+    return { answer: false, reason: "unparseable judge response" };
+  } catch (e) {
+    // Fail closed: an unreachable judge must not silently take a branch.
+    return { answer: false, reason: "judge unavailable: " + (e?.message || e) };
+  }
+}
+
+// Triggers are checked after every step and can abort or divert the run.
+async function wfCheckTriggers(wf) {
+  for (const tr of (wf.triggers || [])) {
+    if (!tr.condition) continue;
+    const { answer, reason } = await wfEvaluate(tr.condition, wfBuildContext(wf));
+    if (!answer) continue;
+    wfLog("trigger", `${tr.name || tr.id} fired — ${reason}`, { trigger: tr.id });
+    if (tr.action === "goto" && tr.target && wfStepById(wf, tr.target)) {
+      wfRun.cursor = tr.target;
+      return "goto";
+    }
+    wfRun.status = "stopped";
+    return "stop";
+  }
+  return null;
+}
+
+// Resolve a CONDITION step to the next step id.
+async function wfResolveCondition(wf, step) {
+  const ctx = wfBuildContext(wf);
+  const check = step.check ? step.check + "\n\n" : "";
+  for (const br of (step.branches || [])) {
+    if (!br.condition) continue;
+    const { answer, reason } = await wfEvaluate(check + br.condition, ctx);
+    wfLog("condition", `${step.name || step.id}: "${br.condition}" → ${answer ? "yes" : "no"} (${reason})`,
+      { step: step.id, taken: answer });
+    if (answer) return br.goto || null;
+  }
+  wfLog("condition", `${step.name || step.id}: no branch matched, taking else`, { step: step.id });
+  return step.elseGoto || null;
+}
+
+// The step after `step` when nothing branches: an explicit `next`, else the one
+// following it in the list.
+function wfDefaultNext(wf, step) {
+  if (step.next && wfStepById(wf, step.next)) return step.next;
+  const i = (wf.steps || []).findIndex(s => s.id === step.id);
+  return wf.steps[i + 1]?.id || null;
+}
+
 function autoStart(workflowId) {
   if (autoRunning) return;
   autoRunning = true;
   autoPaused = false;
   autoStepIndex = 0;
 
-  // If a workflow is specified, load its steps
-  if (workflowId && window.VOID_WORKFLOWS) {
-    const wf = window.VOID_WORKFLOWS.find(w => w.id === workflowId);
-    if (wf) {
-      autoWorkflowSteps = wf.steps.slice();
-      autoMaxSteps = wf.steps.length;
-    }
+  const wf = workflowId ? (window.VOID_WORKFLOWS || []).find(w => w.id === workflowId) : null;
+  if (wf) {
+    wfRun = wfRunNew(wf);
+    autoWorkflowSteps = wf.steps.slice();
+    // A branching flow can revisit steps, so the cap is a runaway guard rather
+    // than the step count.
+    autoMaxSteps = Math.max(50, wf.steps.length * 4);
+    wfLog("start", `Workflow "${wf.name}" started`, { workflowId: wf.id });
+    if (wf.initialInstructions) wfLog("instructions", wf.initialInstructions);
   } else {
+    wfRun = null;
     autoWorkflowSteps = null;
     autoMaxSteps = 50;
   }
@@ -11153,6 +11436,10 @@ function autoStart(workflowId) {
 function autoStop() {
   autoRunning = false;
   autoPaused = false;
+  if (wfRun && wfRun.status === "running") {
+    wfRun.status = "stopped";
+    wfLog("stop", "Run stopped");
+  }
   autoWorkflowSteps = null;
   autoUpdateUI();
 }
@@ -11181,54 +11468,122 @@ function autoUpdateUI() {
     status.textContent = autoPaused ? 'Paused' : 'Autonomous';
     status.className = 'ai-auto-status' + (autoPaused ? ' paused' : '');
   }
-  if (step && autoWorkflowSteps) {
-    const current = autoWorkflowSteps[autoStepIndex];
-    step.textContent = current ? 'Step: ' + current.name : 'Complete';
-  } else if (step) {
-    step.textContent = '';
+  if (step) {
+    const wf = wfActiveWorkflow();
+    const cur = wf && wfRun ? wfStepById(wf, wfRun.cursor) : null;
+    step.textContent = cur ? 'Step: ' + (cur.name || cur.id) : (wfRun ? 'Complete' : '');
   }
-  if (count) {
-    count.textContent = 'Step ' + (autoStepIndex + 1) + '/' + autoMaxSteps;
-  }
+  if (count) count.textContent = 'Step ' + (autoStepIndex + 1) + '/' + autoMaxSteps;
 }
 
-function autoNext() {
+async function autoNext() {
   if (!autoRunning || autoPaused || aiSending) return;
 
   if (autoStepIndex >= autoMaxSteps) {
+    wfLog("stop", `Step budget exhausted after ${autoStepIndex} steps`);
     autoStop();
-    aiAddMessage('assistant', 'Autonomous scan complete (' + autoStepIndex + ' steps).');
+    aiAddMessage('assistant', 'Autonomous run stopped — step budget exhausted (' + autoStepIndex + ').');
     return;
   }
 
-  let message;
-  if (autoWorkflowSteps && autoWorkflowSteps[autoStepIndex]) {
-    const step = autoWorkflowSteps[autoStepIndex];
-    const skill = step.skill ? window.VOID_SKILLS?.[step.skill] : null;
-    if (skill) {
-      slashActiveSkill = step.skill;
-      message = 'Execute step "' + step.name + '": Test for ' + skill.name + ' vulnerabilities on the target. Follow the methodology.';
-    } else if (step.type === 'AGENT') {
-      message = 'Execute step "' + step.name + '": ' + (step.agent || step.name) + '. Use the appropriate methodology.';
-    } else {
-      message = 'Execute step "' + step.name + '".';
-    }
-  } else {
-    // Free-form autonomous — AI decides what to do next
-    if (autoStepIndex === 0) {
-      message = 'Start the pentest. Begin with reconnaissance of the target. Map endpoints, technologies, and attack surface.';
-    } else {
-      message = 'Continue the pentest. Review findings so far and test the next vulnerability class. If all classes are covered, generate a summary report.';
-    }
+  // Free-form autonomous mode: no workflow, the model decides what is next.
+  const wf = wfActiveWorkflow();
+  if (!wf || !wfRun) {
+    const message = autoStepIndex === 0
+      ? 'Start the pentest. Begin with reconnaissance of the target. Map endpoints, technologies, and attack surface.'
+      : 'Continue the pentest. Review findings so far and test the next vulnerability class. If all classes are covered, generate a summary report.';
+    autoStepIndex++;
+    autoUpdateUI();
+    const input = document.getElementById('ai-input');
+    if (input) input.value = message;
+    aiSendMessage();
+    return;
   }
 
+  const step = wfStepById(wf, wfRun.cursor);
+  if (!step) {
+    wfRun.status = "finished";
+    wfLog("finish", "No step left to run");
+    autoStop();
+    aiAddMessage('assistant', 'Workflow complete.');
+    return;
+  }
+
+  wfRun.visited.push(step.id);
   autoStepIndex++;
   autoUpdateUI();
 
-  // Inject the message into the chat input and send
+  if (step.type === "FINISH") {
+    wfRun.status = "finished";
+    wfLog("finish", step.summary || `Reached ${step.name || step.id}`, { step: step.id });
+    autoStop();
+    aiAddMessage('assistant', 'Workflow finished: ' + (step.summary || step.name || step.id));
+    return;
+  }
+
+  if (step.type === "CONDITION") {
+    wfLog("step", `Evaluating condition "${step.name || step.id}"`, { step: step.id });
+    const target = await wfResolveCondition(wf, step);
+    const fired = await wfCheckTriggers(wf);
+    if (fired === "stop") { autoStop(); return; }
+    if (fired !== "goto") wfRun.cursor = target || wfDefaultNext(wf, step);
+    if (!wfRun.cursor) {
+      wfRun.status = "finished";
+      wfLog("finish", "Flow ran off the end after a condition");
+      autoStop();
+      return;
+    }
+    autoUpdateUI();
+    autoNext();
+    return;
+  }
+
+  // AGENT step — run it through the chat with its own system prompt.
+  wfLog("step", `Running "${step.name || step.id}"` +
+    (step.agent ? ` as ${step.agent}` : "") +
+    (step.skills?.length ? ` with skills: ${step.skills.join(", ")}` : ""), { step: step.id });
+
+  wfPendingStep = step;
   const input = document.getElementById('ai-input');
-  if (input) input.value = message;
-  aiSendMessage();
+  if (input) input.value = wfStepMessage(wf, step);
+  aiSendMessage({ systemPrompt: wfStepSystemPrompt(step) });
+}
+
+// Called when the chat turn for an AGENT step finishes.
+async function wfOnStepComplete(assistantText) {
+  if (!wfRun || !wfPendingStep) return;
+  const wf = wfActiveWorkflow();
+  const step = wfPendingStep;
+  wfPendingStep = null;
+  if (!wf) return;
+
+  wfLog("result", `${step.name || step.id}: ${(assistantText || "").slice(0, 600)}`, { step: step.id });
+
+  const fired = await wfCheckTriggers(wf);
+  if (fired === "stop") { autoStop(); return; }
+  if (fired !== "goto") wfRun.cursor = wfDefaultNext(wf, step);
+
+  if (!wfRun.cursor) {
+    wfRun.status = "finished";
+    wfLog("finish", "Reached the end of the workflow");
+    autoStop();
+    aiAddMessage('assistant', 'Workflow complete.');
+    return;
+  }
+  autoUpdateUI();
+}
+
+function wfRenderLog() {
+  const box = document.getElementById('ai-wf-log');
+  if (!box || !wfRun) return;
+  box.replaceChildren();
+  for (const e of wfRun.log) {
+    const row = el('div', 'ai-wf-log-row ai-wf-log-' + e.kind);
+    row.appendChild(txt('span', 'ai-wf-log-kind', e.kind));
+    row.appendChild(txt('span', 'ai-wf-log-text', e.text));
+    box.appendChild(row);
+  }
+  box.scrollTop = box.scrollHeight;
 }
 
 // ── Judge / Refute Engine ────────────────────────────────────────────────────
@@ -11331,34 +11686,6 @@ async function runHybridScan(targetUrl, checkIds) {
     candidateHits: results.length,
     results: results,
   };
-}
-
-// Run passive checks (CSRF, session, CSP) against captured history
-function runPassiveHybridChecks() {
-  const checks = window.VOID_HYBRID_CHECKS;
-  if (!checks) return [];
-  const results = [];
-
-  // CSP check — look at response headers in history
-  if (checks.csp) {
-    const headers = typeof getHeadersAnalysis === 'function' ? getHeadersAnalysis() : [];
-    // Check each host's headers for CSP issues
-    for (const h of (Array.isArray(headers) ? headers : [])) {
-      const csp = h.headers?.['content-security-policy'] || '';
-      if (!csp) {
-        results.push({ checkId: 'csp', checkName: 'Missing CSP', severity: 'low', url: h.url || h.host, evidence: 'No Content-Security-Policy header', needsJudgment: false });
-      } else {
-        for (const pattern of checks.csp.patterns) {
-          if (pattern.test(csp)) {
-            results.push({ checkId: 'csp', checkName: 'Weak CSP', severity: 'low', url: h.url || h.host, evidence: 'CSP contains: ' + pattern.toString(), matchedPattern: pattern.toString(), needsJudgment: false });
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  return results;
 }
 
 // ── Chat session management ──────────────────────────────────────────────────
@@ -11610,7 +11937,9 @@ function aiAddMessage(type, text, skipPush) {
   if (!skipPush) aiMessages.push({ type, text });
 }
 
-async function aiSendMessage() {
+// opts.systemPrompt lets a workflow step run as its own agent with its own skills
+// injected, without disturbing the persona the user picked for chat.
+async function aiSendMessage(opts = {}) {
   const input = document.getElementById("ai-input");
   const text = input.value.trim();
   if (!text || aiSending) return;
@@ -11623,24 +11952,15 @@ async function aiSendMessage() {
   aiInputHistIdx = -1;
   aiInputDraft = "";
 
-  // Inject pending request context if present (from "→ AI Chat" buttons)
-  let userContent = text;
-  if (aiPendingRequestCtx) {
-    userContent = text + "\n\n```http\n" + aiPendingRequestCtx + "\n```";
-    aiPendingRequestCtx = null;
-    // Reset placeholder
-    input.placeholder = "Ask the AI to analyze traffic, test for vulns, encode payloads...";
-  }
-
   aiAddMessage("user", text);
-  aiLlmMessages.push({ role: "user", content: userContent });
+  aiLlmMessages.push({ role: "user", content: text });
   aiAddMessage("thinking", "Connecting\u2026");
 
   // Read config from Settings — use primary model config
   const provider = document.getElementById("ai-primary-provider")?.value || settings.aiPrimaryProvider || "claude-cli";
   const apiKey = document.getElementById("ai-primary-key")?.value || settings.aiPrimaryKey || "";
   const model = document.getElementById("ai-primary-model")?.value || settings.aiPrimaryModel || "";
-  const systemPrompt = getActiveSystemPrompt();
+  const systemPrompt = opts.systemPrompt || getActiveSystemPrompt();
   const customUrl = document.getElementById("ai-primary-endpoint")?.value || settings.aiPrimaryEndpoint || "";
   const cliPath = "claude";
 
@@ -11691,6 +12011,13 @@ async function aiSendMessage() {
   aiSending = false;
   document.getElementById("ai-send").disabled = false;
   input.focus();
+
+  // Record the step's outcome and pick the next cursor before scheduling the next
+  // turn — the branch decision depends on what this step just produced.
+  if (wfPendingStep) {
+    const last = [...aiMessages].reverse().find(m => m.role === "assistant");
+    await wfOnStepComplete(last?.content || "");
+  }
 
   // Autonomous mode: auto-send next step after a short delay
   if (autoRunning && !autoPaused) {
@@ -12044,16 +12371,6 @@ document.addEventListener("DOMContentLoaded", () => {
     intrSendToIntruder({ ...editingReq, method: document.getElementById("ed-method").value, url: document.getElementById("ed-url").value, headers: rawToHeaders(document.getElementById("ed-headers").value), body: document.getElementById("ed-body").value });
     closeEditor();
   });
-  document.getElementById("ed-to-ai").addEventListener("click", () => {
-    if (!editingReq) return;
-    sendToAIChat({
-      method:     document.getElementById("ed-method").value,
-      url:        document.getElementById("ed-url").value,
-      rawHeaders: document.getElementById("ed-headers").value,
-      body:       document.getElementById("ed-body").value,
-    });
-    closeEditor();
-  });
   document.getElementById("ed-to-poc").addEventListener("click", () => { if (editingReq) pocLoadEntry(editingReq); });
   document.getElementById("ed-to-notes").addEventListener("click", () => { if (editingReq) notesFromEntry(editingReq); });
   document.getElementById("ed-open").addEventListener("click", () => { if (editingReq) chrome.tabs.create({ url: editingReq.url }); });
@@ -12362,11 +12679,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!tab) return null;
     return { method: tab.method, url: tab.url, headers: rawToHeaders(tab.headers || ""), body: tab.body || "", respBody: tab.response?.body || "", respHeaders: tab.response?.headers || {}, status: tab.response?.status };
   }
-  document.getElementById("rep-to-ai").addEventListener("click", () => {
-    saveRepTabState();
-    const tab = repTabs.find(t => t.id === repActiveTab);
-    if (tab) sendToAIChat({ method: tab.method, url: tab.url, rawHeaders: tab.headers, body: tab.body });
-  });
   document.getElementById("rep-to-poc").addEventListener("click", () => { const e = repCurrentEntry(); if (e) pocLoadEntry(e); });
   document.getElementById("rep-to-notes").addEventListener("click", () => { const e = repCurrentEntry(); if (e) notesFromEntry(e); });
   document.getElementById("rep-open").addEventListener("click", () => { const tab = repTabs.find(t => t.id === repActiveTab); if (tab?.url) chrome.tabs.create({ url: tab.url }); });
@@ -12409,9 +12721,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // Right Repeater action buttons
   document.getElementById("rep2-to-intr").addEventListener("click", () => {
     intrSendToIntruder({ method: document.getElementById("rep2-method").value, url: document.getElementById("rep2-url").value, rawHeaders: document.getElementById("rep2-headers").value, body: document.getElementById("rep2-body-ta").value });
-  });
-  document.getElementById("rep2-to-ai").addEventListener("click", () => {
-    sendToAIChat({ method: document.getElementById("rep2-method").value, url: document.getElementById("rep2-url").value, rawHeaders: document.getElementById("rep2-headers").value, body: document.getElementById("rep2-body-ta").value });
   });
   document.getElementById("rep2-to-poc").addEventListener("click", () => {
     const url = document.getElementById("rep2-url").value;
@@ -12456,14 +12765,6 @@ document.addEventListener("DOMContentLoaded", () => {
       rawHeaders: parsed.headers,
       body:       parsed.body,
     });
-  });
-  document.getElementById("intr-to-ai").addEventListener("click", () => {
-    const parsed = intrParseRaw(
-      intrStripPositions(document.getElementById("intr-request").value),
-      document.getElementById("intr-method").value,
-      document.getElementById("intr-url").value.trim()
-    );
-    sendToAIChat({ method: parsed.method, url: parsed.url, rawHeaders: parsed.headers, body: parsed.body });
   });
   document.getElementById("intr-reflect-only").addEventListener("change", e => {
     intrReflectOnly = e.target.checked;
@@ -12592,7 +12893,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("cfg-save").addEventListener("click", saveSettings);
   document.getElementById("cfg-reset").addEventListener("click", () => {
-    settings = { ...DEFAULT_SETTINGS };
+    // Resetting preferences must not silently empty the vault — keep the secrets
+    // and their ciphertext, since voidVault (and thus the passphrase) survives too.
+    const keptSecrets = Object.fromEntries(SECRET_SETTING_KEYS.map(k => [k, settings[k]]));
+    settings = { ...DEFAULT_SETTINGS, ...keptSecrets, __secrets: settings.__secrets };
     loadSettingsUI();
     saveSettings();
   });
@@ -12615,11 +12919,11 @@ document.addEventListener("DOMContentLoaded", () => {
     saveSettings(); // ensure current UI is captured
     const stored = await new Promise(r => chrome.storage.local.get("voidSettingsProfiles", r));
     const profiles = stored.voidSettingsProfiles || {};
-    profiles[name] = { ...settings };
+    profiles[name] = vaultRedact(settings); // never copy secrets into a profile
     await new Promise(r => chrome.storage.local.set({ voidSettingsProfiles: profiles }, r));
     document.getElementById("cfg-profile-name").value = "";
     cfgRefreshProfiles();
-    showToast(`Profile "${name}" saved`);
+    showToast(`Profile "${name}" saved (API keys excluded)`);
   });
   document.getElementById("cfg-profile-load").addEventListener("click", async () => {
     const name = document.getElementById("cfg-profiles").value;
@@ -12627,7 +12931,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const stored = await new Promise(r => chrome.storage.local.get("voidSettingsProfiles", r));
     const profiles = stored.voidSettingsProfiles || {};
     if (!profiles[name]) return;
-    settings = { ...DEFAULT_SETTINGS, ...profiles[name] };
+    // Profiles carry no secrets — keep the ones already unlocked in this session.
+    const keptSecrets = Object.fromEntries(SECRET_SETTING_KEYS.map(k => [k, settings[k]]));
+    settings = { ...DEFAULT_SETTINGS, ...vaultRedact(profiles[name]), ...keptSecrets, __secrets: settings.__secrets };
     loadSettingsUI();
     saveSettings();
     showToast(`Profile "${name}" loaded`);
@@ -12642,13 +12948,24 @@ document.addEventListener("DOMContentLoaded", () => {
     cfgRefreshProfiles();
     showToast(`Profile "${name}" deleted`);
   });
-  document.getElementById("cfg-profile-export").addEventListener("click", () => {
+  document.getElementById("cfg-profile-export").addEventListener("click", async () => {
     saveSettings();
-    const blob = new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" });
+    let payload = vaultRedact(settings);
+    // Vault secrets are already gone; M&R rules and auto-headers are not, so give
+    // the user the call before live credentials leave in a file.
+    const hits = scanForCredentials(payload);
+    let redacted = false;
+    if (hits.length) {
+      const choice = await confirmCredentialExport(hits);
+      if (choice === "cancel") { showToast("Export cancelled"); return; }
+      if (choice === "redact") { payload = redactCredentialFields(payload); redacted = true; }
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = el("a"); a.href = URL.createObjectURL(blob);
     a.download = `void-settings-${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(a.href);
-    showToast("Settings exported");
+    showToast(redacted ? "Settings exported (API keys + credentials excluded)"
+                       : "Settings exported (API keys excluded)");
   });
   document.getElementById("cfg-profile-import").addEventListener("click", () => {
     document.getElementById("cfg-profile-file").click();
@@ -12659,10 +12976,12 @@ document.addEventListener("DOMContentLoaded", () => {
     file.text().then(text => {
       try {
         const imported = JSON.parse(text);
-        settings = { ...DEFAULT_SETTINGS, ...imported };
+        // An imported file must never inject secrets, nor clobber the local vault.
+        const keptSecrets = Object.fromEntries(SECRET_SETTING_KEYS.map(k => [k, settings[k]]));
+        settings = { ...DEFAULT_SETTINGS, ...vaultRedact(imported), ...keptSecrets, __secrets: settings.__secrets };
         loadSettingsUI();
         saveSettings();
-        showToast("Settings imported");
+        showToast("Settings imported (API keys unchanged)");
       } catch { showToast("Invalid JSON file"); }
     });
     e.target.value = "";
@@ -13379,7 +13698,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ── AI Chat ─────────────────────────────────────────────────────────────────
   initBlock("ai-chat", () => {
-    document.getElementById("ai-send").addEventListener("click", aiSendMessage);
+    document.getElementById("ai-send").addEventListener("click", () => aiSendMessage());
     document.getElementById("ai-input").addEventListener("keydown", e => {
       if (slashHandleKey(e)) return;
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); aiSendMessage(); }
@@ -13413,23 +13732,16 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.getElementById("ai-new-chat").addEventListener("click", () => aiNewSession());
 
-    // Quick agent switch (dropdown)
-    const agentSel = document.getElementById('ai-chat-agent-sel');
-    if (agentSel && window.VOID_AGENTS) {
-      agentSel.replaceChildren();
-      for (const a of window.VOID_AGENTS) {
-        const opt = document.createElement('option');
-        opt.value = a.id;
-        opt.textContent = a.title;
-        agentSel.appendChild(opt);
-      }
-      agentSel.value = settings.aiPersona || 'pentester';
-      agentSel.addEventListener('change', () => {
-        settings.aiPersona = agentSel.value;
+    // Quick agent switch
+    document.querySelectorAll('.ai-agent-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const agentId = btn.dataset.agent;
+        settings.aiPersona = agentId;
         saveSettings();
         updatePersonaPreview();
+        document.querySelectorAll('.ai-agent-btn').forEach(b => b.classList.toggle('active', b.dataset.agent === agentId));
       });
-    }
+    });
 
     // Autonomous/Interactive mode toggle
     document.querySelectorAll('.ai-mode-btn').forEach(btn => {
@@ -13456,40 +13768,24 @@ document.addEventListener("DOMContentLoaded", () => {
     pentestLoadProjects().then(() => {
       pentestRenderProjectList();
       pentestRenderContextBar();
+      vaultRenderStatus(); // projects can contribute legacy-plaintext state
     });
 
     // New project button
     document.getElementById('ai-new-project')?.addEventListener('click', wizOpen);
 
-    // Project selector dropdown
-    document.getElementById('ai-project-sel')?.addEventListener('change', e => {
-      const val = e.target.value;
-      if (val) pentestActivateProject(val);
-      else pentestDeactivateProject();
-      pentestRenderProjectList();
-      pentestRenderContextBar();
-    });
-
-    // AI Chat subtab switching
-    document.querySelectorAll('.ai-main-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        document.querySelectorAll('.ai-main-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        const target = tab.dataset.aitab2;
-        document.querySelectorAll('.ai-main-pane').forEach(p => p.classList.toggle('hidden', p.dataset.aitab2 !== target));
-      });
-    });
-
-    // Edit project from config pane
-    document.getElementById('ai-rp-edit-btn')?.addEventListener('click', () => {
-      const proj = pentestGetActive();
-      if (proj) wizOpen(proj);
-    });
+    // Secret vault controls
+    wireVaultUI();
 
     // Context bar buttons
     document.getElementById('ai-ctx-deactivate')?.addEventListener('click', pentestDeactivateProject);
 
     // Autonomous mode controls
+    document.getElementById('ai-auto-log-btn')?.addEventListener('click', () => {
+      const box = document.getElementById('ai-wf-log');
+      box?.classList.toggle('hidden');
+      if (box && !box.classList.contains('hidden')) wfRenderLog();
+    });
     document.getElementById('ai-auto-pause')?.addEventListener('click', autoPause);
     document.getElementById('ai-auto-cancel')?.addEventListener('click', autoStop);
 
@@ -13546,7 +13842,6 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById('wiz-scope-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); wizAddInScope(); } });
     document.getElementById('wiz-out-add')?.addEventListener('click', wizAddOutScope);
     document.getElementById('wiz-out-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); wizAddOutScope(); } });
-    document.getElementById('wiz-workflow')?.addEventListener('change', wizUpdateWorkflowPreview);
     // Close wizard on overlay click
     document.getElementById('ai-wizard-overlay')?.addEventListener('click', e => { if (e.target === e.currentTarget) wizClose(); });
   });
@@ -13624,42 +13919,28 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Boot
+  // Snapshot the shipped data before anything can mutate it, then merge the user's
+  // overlay on top. Must precede loadSettingsUI, which reads window.VOID_AGENTS.
+  ucSnapshotBuiltins();
+  wireUserContent();
+  ucLoad().then(() => {
+    ucApply();
+    ucPopulatePersonaSelect();
+    updatePersonaPreview();
+    renderSkillsBrowser();
+    renderWorkflowsBrowser();
+    renderPromptsBrowser();
+  });
+
   loadSettings().then(() => {
     loadSettingsUI();
+    vaultRenderStatus();
     // Sync scope to Target tab
     document.getElementById("tgt-scope-include").value = settings.scopeInclude || "";
     document.getElementById("tgt-scope-exclude").value = settings.scopeExclude || "";
     bg({ type: "UPDATE_SETTINGS", settings });
   });
   loadAll();
-  loadCustomItems();
-
-  // ── Item Editor CRUD wiring ──────────────────────────────────────────────
-  document.getElementById('item-editor-close')?.addEventListener('click', editorClose);
-  document.getElementById('item-editor-cancel')?.addEventListener('click', editorClose);
-  document.getElementById('item-editor-save')?.addEventListener('click', editorSave);
-  document.getElementById('item-editor-delete')?.addEventListener('click', () => {
-    if (confirm('Delete this custom item?')) editorDelete();
-  });
-  document.getElementById('ai-agent-new')?.addEventListener('click', () => editorOpen('agent'));
-  document.getElementById('ai-agent-edit')?.addEventListener('click', () => {
-    const sel = document.getElementById('ai-persona');
-    if (!sel) return;
-    const agent = window.VOID_AGENTS.find(a => a.id === sel.value);
-    if (agent) editorOpen('agent', agent);
-  });
-  document.getElementById('ai-wf-new')?.addEventListener('click', () => editorOpen('workflow'));
-  document.getElementById('ai-prompt-new')?.addEventListener('click', () => editorOpen('prompt'));
-  document.getElementById('ai-skill-new')?.addEventListener('click', () => editorOpen('skill'));
-  document.getElementById('ai-wf-edit')?.addEventListener('click', () => {
-    const wf = window.VOID_WORKFLOWS.find(w => w.id === aiWfSelectedId);
-    if (wf) editorOpen('workflow', wf);
-  });
-  document.getElementById('ai-prompt-edit')?.addEventListener('click', () => {
-    const p = window.VOID_PROMPTS.find(pr => pr.id === aiPromptSelectedId);
-    if (p) editorOpen('prompt', p);
-  });
 
   // startPoll is called by showTab("intercept") — don't start it unconditionally
-
 });

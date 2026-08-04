@@ -2946,6 +2946,111 @@ html.theme-hacker {
 .ai-mem-step-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: color-mix(in srgb, transparent 85%, var(--accent) 15%); color: var(--accent); }
 
 /* ── Project creation wizard ────────────────────────────── */
+/* Workflow steps — Agent-zero shaped detail */
+.ai-wf-step { border-left: 2px solid var(--border); padding-left: 10px; margin-bottom: 14px; }
+.ai-wf-step-goal { font-size: 12px; margin: 4px 0 6px; opacity: 0.85; }
+.ai-wf-step-intrusive { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: rgba(229,85,85,0.15); color: var(--red, #e55); }
+.ai-wf-level { font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; border: 1px solid var(--border); opacity: 0.8; }
+.ai-wf-level-engagement { border-color: var(--accent); color: var(--accent); }
+.ai-wf-level-composite { border-color: var(--green, #3fb950); color: var(--green, #3fb950); }
+.ai-wf-step-includes { display: flex; flex-direction: column; gap: 3px; margin: 4px 0; }
+.ai-wf-include { font-size: 11px; padding: 3px 6px; background: var(--bg2); border-radius: 3px; }
+.ai-wf-include-name { font-weight: 600; margin-right: 6px; }
+.ai-wf-include-goal { opacity: 0.6; }
+.ai-wf-step-checks { font-size: 11px; opacity: 0.7; margin: 4px 0; font-family: var(--mono); }
+.ai-wf-dtree { margin: 6px 0; }
+.ai-wf-dnode { display: flex; gap: 6px; margin-bottom: 6px; font-size: 11px; }
+.ai-wf-dnode-idx { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--border); display: flex; align-items: center; justify-content: center; font-size: 9px; }
+.ai-wf-dnode-body { flex: 1; min-width: 0; }
+.ai-wf-dnode-action { font-weight: 600; }
+.ai-wf-dnode-approach { opacity: 0.6; font-style: italic; }
+.ai-wf-dnode-pos { color: var(--green, #3fb950); }
+.ai-wf-dnode-neg { color: var(--red, #e55); opacity: 0.85; }
+.ai-wf-dnode-stop { opacity: 0.7; font-family: var(--mono); }
+.ai-wf-step-guidance { font-size: 11px; opacity: 0.75; margin: 4px 0; padding-left: 6px; border-left: 2px solid var(--border); }
+.ai-wf-step-validation { font-size: 11px; opacity: 0.75; margin-top: 4px; }
+.ai-wf-badge { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: var(--bg2); margin-right: 6px; }
+
+/* Workflow run log */
+.ai-wf-log { max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--bg2); padding: 6px; font-size: 11px; font-family: var(--mono); }
+.ai-wf-log-row { display: flex; gap: 6px; padding: 2px 0; border-bottom: 1px solid rgba(128,128,128,0.08); }
+.ai-wf-log-kind { flex: none; width: 74px; opacity: 0.6; text-transform: uppercase; font-size: 9px; padding-top: 2px; }
+.ai-wf-log-text { flex: 1; min-width: 0; word-break: break-word; }
+.ai-wf-log-trigger .ai-wf-log-kind, .ai-wf-log-stop .ai-wf-log-kind { color: var(--red, #e55); }
+.ai-wf-log-finish .ai-wf-log-kind, .ai-wf-log-start .ai-wf-log-kind { color: var(--green, #3fb950); }
+.ai-wf-log-condition .ai-wf-log-kind { color: var(--accent); }
+
+/* Workflow step editor: types, skill picker, branches, triggers */
+.uc-step-condition { border-left: 3px solid var(--accent); }
+.uc-step-finish { border-left: 3px solid var(--green, #3fb950); }
+.uc-skill-picker { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; max-height: 110px; overflow-y: auto; }
+.uc-skill-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.uc-skill-tag.on { border-color: var(--accent); color: var(--accent); }
+.uc-skill-tag input { margin: 0; }
+.uc-skill-overrides { display: flex; flex-direction: column; gap: 4px; }
+.uc-branches { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.uc-branch { display: flex; align-items: center; gap: 6px; }
+.uc-branch-kw { flex: none; width: 50px; font-family: var(--mono); font-size: 11px; color: var(--accent); }
+.uc-branch-spacer { flex: 1; }
+.uc-branch-arrow { flex: none; opacity: 0.5; }
+.uc-branch > input { flex: 1; }
+.uc-triggers { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.uc-trigger { display: flex; align-items: center; gap: 6px; }
+.uc-trigger-name { width: 130px; flex: none; }
+.uc-trigger > input:nth-of-type(2) { flex: 1; }
+.uc-trigger-act { flex: none; }
+
+/* User content editor (agent / skill / workflow / prompt) */
+.uc-toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.uc-editor-modal { width: 780px; }
+.uc-editor-body { padding: 16px 20px; max-height: 62vh; overflow-y: auto; }
+.uc-field { margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+.uc-field .uc-input { width: 100%; }
+.uc-hint { font-size: 11px; opacity: 0.55; }
+.uc-steps { display: flex; flex-direction: column; gap: 10px; margin: 6px 0; }
+.uc-step { border: 1px solid var(--border); border-radius: 6px; background: var(--bg2); padding: 8px; }
+.uc-step-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.uc-step-idx { width: 20px; height: 20px; flex: none; border-radius: 50%; background: var(--border); display: flex; align-items: center; justify-content: center; font-size: 11px; }
+.uc-step-head .uc-step-id { width: 110px; }
+.uc-step-head .uc-step-name { flex: 1; }
+.uc-step-del:hover { color: var(--red, #e55); }
+.uc-step-body { display: flex; flex-direction: column; gap: 6px; }
+.uc-step-row { display: flex; align-items: flex-start; gap: 8px; }
+.uc-step-row > label { width: 96px; flex: none; padding-top: 5px; }
+.uc-step-row > input, .uc-step-row > textarea { flex: 1; }
+.uc-step-ta { min-height: 34px; }
+.uc-dtree { margin: 10px 0; padding: 8px; border: 1px dashed var(--border); border-radius: 4px; }
+.uc-dtree-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
+.uc-dtree-node { display: grid; grid-template-columns: 20px 1fr 20px; gap: 4px; }
+.uc-dtree-node > input:nth-of-type(n+2) { grid-column: 2 / 4; }
+.uc-dtree-idx { display: flex; align-items: center; justify-content: center; font-size: 10px; opacity: 0.5; }
+
+/* Credential warning before export */
+.export-scan-list { margin: 0; padding-left: 18px; font-size: 12px; }
+.export-scan-list li { margin-bottom: 4px; }
+.export-scan-list .export-scan-field { opacity: 0.6; }
+
+/* Intruder grep columns */
+.intr-td-grep { text-align: center; }
+.intr-grep-hit { color: var(--green, #3fb950); font-size: 13px; }
+.intr-td-extract { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; font-size: 11px; opacity: 0.85; }
+
+/* Secret vault */
+.ai-vault-bar { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg2); }
+.ai-vault-bar.unlocked { border-color: var(--green, #3fb950); }
+.ai-vault-icon { font-size: 20px; color: var(--muted); flex: none; margin-top: 2px; }
+.ai-vault-bar.unlocked .ai-vault-icon { color: var(--green, #3fb950); }
+.ai-vault-text { flex: 1; min-width: 0; }
+.ai-vault-status { font-size: 13px; font-weight: 600; }
+.ai-vault-desc { font-size: 11px; opacity: 0.6; margin-top: 2px; }
+.ai-vault-btn { flex: none; align-self: center; padding: 4px 10px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); cursor: pointer; }
+.ai-vault-btn:hover { border-color: var(--accent); color: var(--accent); }
+.vault-modal { width: 420px; }
+/* Deliberately NOT .ai-wizard-step — wizUpdateUI toggles `hidden` on every element
+   with that class, which would permanently hide this modal's body. */
+.vault-modal-body { padding: 16px 20px; }
+.vault-error { margin-top: 10px; font-size: 12px; color: var(--red, #e55); }
+
 .ai-wizard-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; }
 .ai-wizard-modal { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; width: 560px; max-width: 95vw; max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
 .ai-wizard-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }

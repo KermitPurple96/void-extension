@@ -395,12 +395,75 @@ if (hasOpenSSL) {
 
 const { execFile } = require("child_process");
 
+// data/prompts.js is the single source of truth for the judge and refute wording.
+// Keeping a second copy in here meant editing the prompt library changed what the
+// panel displayed and nothing about what the judge actually saw.
+const VOID_PROMPTS = (() => {
+  try {
+    const vm = require("vm");
+    const sandbox = { window: {} };
+    vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, "data", "prompts.js"), "utf8"), sandbox);
+    return sandbox.window.VOID_PROMPTS || [];
+  } catch (e) {
+    console.error("[Void Proxy] could not load data/prompts.js: " + e.message);
+    return [];
+  }
+})();
+
+function renderPrompt(id, vars) {
+  const tpl = VOID_PROMPTS.find(p => p.id === id);
+  if (!tpl) throw new Error("prompt template not found: " + id);
+  return tpl.template.replace(/\{\{(\w+)\}\}/g, (m, k) => (vars[k] ?? "not supplied"));
+}
+
 const AI_ENDPOINTS = {
   anthropic: "https://api.anthropic.com/v1/messages",
   openai: "https://api.openai.com/v1/chat/completions",
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
   ollama: "http://localhost:11434/v1/chat/completions",
 };
+
+// ── Model output parsing ─────────────────────────────────────────────────────
+// Small local models (gemma3, phi4, qwen3) fence their JSON, wrap it in prose, or
+// emit <think> blocks around it, and they routinely return booleans as the STRINGS
+// "false"/"no"/"0". Both of those broke verdicts here: a non-greedy /\{[\s\S]*?\}/
+// stops at the first "}" so any nested object or brace inside a string threw and
+// was swallowed into "not vulnerable", and `if (!result.vulnerable)` treated the
+// string "false" as true, inverting the verdict outright.
+
+// Extract the first balanced JSON object, ignoring braces inside strings.
+function extractJsonObject(text) {
+  const s = String(text || "").replace(/<think>[\s\S]*?<\/think>/gi, "");
+  const start = s.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) {
+      try { return JSON.parse(s.slice(start, i + 1)); } catch { return null; }
+    }
+  }
+  return null;
+}
+
+// Coerce a model's idea of a boolean. Returns null when it said nothing usable, so
+// callers can tell "answered no" apart from "did not answer".
+function asBool(v) {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  if (typeof v === "string") {
+    const t = v.trim().toLowerCase();
+    if (["true", "yes", "y", "1", "confirmed", "vulnerable"].includes(t)) return true;
+    if (["false", "no", "n", "0", "refuted", "not_vulnerable"].includes(t)) return false;
+  }
+  return null;
+}
 
 // Active tool calls waiting for panel results
 const pendingToolCalls = new Map(); // callId → { resolve }
@@ -739,17 +802,22 @@ const proxy = http.createServer((req, res) => {
         }
 
         // Pass 1: Judge
-        const judgePrompt = "You are a vulnerability judge. Given the HTTP exchange below, determine if " + (candidate.checkName || "a vulnerability") + " is present.\n\n" +
-          "Payload: " + (candidate.payload || "N/A") + "\n" +
-          "URL: " + (candidate.url || "N/A") + "\n" +
-          "Response (first 2000 chars): " + (candidate.responseSnippet || "").substring(0, 2000) + "\n" +
-          "Pattern matched: " + (candidate.matchedPattern || "N/A") + "\n\n" +
-          "Respond ONLY with JSON: {\"vulnerable\": true or false, \"evidence\": \"exact text from response proving it\", \"confidence\": 0.0 to 1.0}";
+        // The scanner's matched pattern is deliberately NOT passed to the judge: a
+        // regex hint is the surface cue a judge overfits to, and it is not evidence.
+        const judgePrompt = renderPrompt("judge-response", {
+          vuln_type: candidate.checkName || "vulnerability",
+          request: candidate.request || (candidate.url || "N/A"),
+          payload: candidate.payload || "N/A",
+          status: candidate.status || "unknown",
+          content_type: candidate.contentType || "unknown",
+          response: (candidate.responseSnippet || "").substring(0, 4000),
+          baseline: (candidate.baselineSnippet || "").substring(0, 4000) || "not supplied",
+        });
 
         const isAnthropic = provider === "anthropic";
         const judgeBody = isAnthropic
-          ? { model: model || "claude-sonnet-4-20250514", max_tokens: 512, temperature: 0, messages: [{ role: "user", content: judgePrompt }] }
-          : { model: model || "gemma3:12b", max_tokens: 512, temperature: 0, messages: [{ role: "user", content: judgePrompt }] };
+          ? { model: model || "claude-sonnet-4-20250514", max_tokens: 1024, temperature: 0, messages: [{ role: "user", content: judgePrompt }] }
+          : { model: model || "gemma3:12b", max_tokens: 1024, temperature: 0, messages: [{ role: "user", content: judgePrompt }] };
 
         let judgeRes;
         try {
@@ -767,15 +835,23 @@ const proxy = http.createServer((req, res) => {
         }
 
         // Parse judge JSON
-        let judgeResult;
-        try {
-          const jsonMatch = judgeText.match(/\{[\s\S]*?\}/);
-          judgeResult = jsonMatch ? JSON.parse(jsonMatch[0]) : { vulnerable: false, evidence: "", confidence: 0 };
-        } catch {
-          judgeResult = { vulnerable: false, evidence: judgeText.substring(0, 200), confidence: 0 };
+        const judgeParsed = extractJsonObject(judgeText);
+        const judgeResult = judgeParsed || { vulnerable: false, evidence: judgeText.substring(0, 200), confidence: 0, parseError: true };
+        const judgeSaysVulnerable = asBool(judgeResult.vulnerable);
+
+        // null means the model gave no usable verdict — that is not the same as "no",
+        // so surface it instead of silently reporting the candidate as clean.
+        if (judgeSaysVulnerable === null) {
+          res.writeHead(200).end(JSON.stringify({
+            verdict: "unknown",
+            error: "Judge returned no usable verdict",
+            judge: judgeResult,
+            refute: null,
+          }));
+          return;
         }
 
-        if (!judgeResult.vulnerable) {
+        if (!judgeSaysVulnerable) {
           res.writeHead(200).end(JSON.stringify({
             verdict: "not_vulnerable",
             judge: judgeResult,
@@ -785,15 +861,18 @@ const proxy = http.createServer((req, res) => {
         }
 
         // Pass 2: Refute
-        const refutePrompt = "A " + (candidate.checkName || "vulnerability") + " finding was reported at " + (candidate.url || "N/A") + ".\n" +
-          "Evidence: " + (judgeResult.evidence || "N/A") + "\n" +
-          "Payload: " + (candidate.payload || "N/A") + "\n\n" +
-          "Actively look for reasons this could be a FALSE POSITIVE. Consider: is the reflection in a safe context? Could the pattern match be coincidental? Is the behavior normal?\n\n" +
-          "Respond ONLY with JSON: {\"false_positive\": true or false, \"reason\": \"explanation\"}";
+        const refutePrompt = renderPrompt("refute-finding", {
+          vuln_type: candidate.checkName || "vulnerability",
+          url: candidate.url || "N/A",
+          request: candidate.request || (candidate.url || "N/A"),
+          payload: candidate.payload || "N/A",
+          response: (candidate.responseSnippet || "").substring(0, 4000),
+          baseline: (candidate.baselineSnippet || "").substring(0, 4000) || "not supplied",
+        });
 
         const refuteBody = isAnthropic
-          ? { model: model || "claude-sonnet-4-20250514", max_tokens: 512, temperature: 0, messages: [{ role: "user", content: refutePrompt }] }
-          : { model: model || "gemma3:12b", max_tokens: 512, temperature: 0, messages: [{ role: "user", content: refutePrompt }] };
+          ? { model: model || "claude-sonnet-4-20250514", max_tokens: 1024, temperature: 0, messages: [{ role: "user", content: refutePrompt }] }
+          : { model: model || "gemma3:12b", max_tokens: 1024, temperature: 0, messages: [{ role: "user", content: refutePrompt }] };
 
         let refuteRes;
         try {
@@ -818,14 +897,17 @@ const proxy = http.createServer((req, res) => {
 
         let refuteResult;
         try {
-          const jsonMatch = refuteText.match(/\{[\s\S]*?\}/);
-          refuteResult = jsonMatch ? JSON.parse(jsonMatch[0]) : { false_positive: false, reason: "" };
+          const parsed = extractJsonObject(refuteText);
+          refuteResult = parsed || { false_positive: false, reason: "" };
         } catch {
           refuteResult = { false_positive: false, reason: refuteText.substring(0, 200) };
         }
 
-        const verdict = refuteResult.false_positive ? "false_positive" : "vulnerable";
-        const confidence = refuteResult.false_positive ? 0 : (judgeResult.confidence || 0.8);
+        // Only a clear "yes, false positive" overturns the judge; an unparseable
+        // refutation leaves the finding standing rather than deleting it.
+        const refuted = asBool(refuteResult.false_positive) === true;
+        const verdict = refuted ? "false_positive" : "vulnerable";
+        const confidence = refuted ? 0 : (Number(judgeResult.confidence) || 0.8);
 
         res.writeHead(200).end(JSON.stringify({
           verdict,
