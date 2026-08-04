@@ -562,7 +562,7 @@ test.describe('Void Extension AI Pentest', () => {
       workflows: ucBuiltin.workflows.length,
       prompts: ucBuiltin.prompts.length,
     }));
-    expect(snap).toEqual({ agents: 12, skills: 32, workflows: 23, prompts: 20 });
+    expect(snap).toEqual({ agents: 12, skills: 49, workflows: 23, prompts: 20 });
   });
 
   test('UC: creating a prompt adds it to the live registry', async () => {
@@ -692,7 +692,7 @@ test.describe('Void Extension AI Pentest', () => {
     expect(await page.evaluate(() => window.VOID_PROMPTS.length)).toBe(20);
     expect(await page.evaluate(() => window.VOID_AGENTS.length)).toBe(12);
     expect(await page.evaluate(() => window.VOID_WORKFLOWS.length)).toBe(23);
-    expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS).length)).toBe(32);
+    expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS).length)).toBe(49);
   });
 
   test('Workflows: detail renders goals and decision trees', async () => {

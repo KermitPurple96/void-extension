@@ -395,7 +395,7 @@ test.describe('E2E — authoring through the UI', () => {
       workflows: window.VOID_WORKFLOWS.length,
       prompts: window.VOID_PROMPTS.length,
     }));
-    expect(counts).toEqual({ agents: 12, skills: 32, workflows: 23, prompts: 20 });
+    expect(counts).toEqual({ agents: 12, skills: 49, workflows: 23, prompts: 20 });
   });
 
   test('no uncaught errors were thrown during any of it', async () => {

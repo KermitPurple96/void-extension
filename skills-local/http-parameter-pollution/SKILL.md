@@ -59,11 +59,11 @@ with duplicates tells you which direction to send the attack value:
 | ASP.NET (`Request["id"]`)| **Concatenated with comma** — `id = "1,2"`    | .NET MVC, WebForms |
 | Java Servlet (`getParameter`) | **First wins** — `id = 1`               | Tomcat, Jetty, Spring |
 | Java Servlet (`getParameterValues`) | **Array** — `["1","2"]`           | Correct multi-value API |
-| Node.js / Express (`req.query.id`) | **Last wins** — `id = 2`          | Default qs parser |
+| Node.js / Express (`req.query.id`) | **Array** — `["1","2"]` (default qs) | qs parser; scalar with querystring |
 | Ruby on Rails            | **Last wins** — `id = 2`                      | Rack |
 | Go `net/http` (`r.FormValue`) | **First wins** — `id = 1`               | stdlib |
 | Python Flask (`request.args.get`) | **First wins** — `id = 1`           | Werkzeug |
-| Python Django (`request.GET.get`) | **First wins** — `id = 1`           | Django |
+| Python Django (`request.GET.get`) | **Last wins** — `id = 2`            | QueryDict |
 | Nginx (proxy_pass)       | **Both forwarded** unchanged to upstream       | Depends on upstream |
 
 When you do not know the stack, test empirically in Step 2.
