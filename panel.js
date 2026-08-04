@@ -4769,11 +4769,15 @@ function ucGet(kind, id) {
   return def.shape === "array" ? (g || []).find(o => o[def.idKey] === id) : (g || {})[id];
 }
 
+// These three re-render the affected browser themselves. Leaving that to callers
+// meant a programmatic change updated the registries while the visible list kept
+// showing stale entries.
 async function ucUpsert(kind, id, obj) {
   ucOverrides[kind][id] = obj;
   ucHidden[kind] = ucHidden[kind].filter(h => h !== id);
   await ucSave();
   ucApply();
+  ucRerender(kind);
 }
 
 // Removes a user-created entry outright; hides a shipped one so it can come back.
@@ -4782,6 +4786,7 @@ async function ucRemove(kind, id) {
   if (ucIsBuiltin(kind, id) && !ucHidden[kind].includes(id)) ucHidden[kind].push(id);
   await ucSave();
   ucApply();
+  ucRerender(kind);
 }
 
 // Drop the overlay entry so the shipped version shows through again.
@@ -4790,6 +4795,7 @@ async function ucRestore(kind, id) {
   ucHidden[kind] = ucHidden[kind].filter(h => h !== id);
   await ucSave();
   ucApply();
+  ucRerender(kind);
 }
 
 function ucRerender(kind) {
@@ -5102,7 +5108,7 @@ function ucBuildStepCard(step, idx) {
 function ucBuildAgentBody(step) {
   const b = el("div", "uc-step-body");
 
-  const agentSel = el("select", "filter-sel");
+  const agentSel = el("select", "filter-sel uc-step-agent");
   const none = el("option"); none.value = ""; none.textContent = "— inherit chat agent —";
   agentSel.appendChild(none);
   for (const a of (window.VOID_AGENTS || [])) {
@@ -5150,7 +5156,7 @@ function ucBuildAgentBody(step) {
   renderSkillOverrides();
   b.appendChild(overrideWrap);
 
-  const promptSel = el("select", "filter-sel");
+  const promptSel = el("select", "filter-sel uc-step-prompt");
   const pnone = el("option"); pnone.value = ""; pnone.textContent = "— no template —";
   promptSel.appendChild(pnone);
   for (const p of (window.VOID_PROMPTS || [])) {
@@ -5353,7 +5359,6 @@ async function ucSaveEditor() {
   if (ucEditOriginalId && ucEditOriginalId !== id) await ucRemove(kind, ucEditOriginalId);
 
   ucCloseEditor();
-  ucRerender(kind);
   showToast(`${def.label} "${id}" saved`);
 }
 
@@ -5384,7 +5389,6 @@ function ucWireToolbar(kind) {
     const id = ucSelectedId(kind);
     if (!id || !ucGet(kind, id)) { showToast(`Select a ${def.label.toLowerCase()} first`); return; }
     await ucRemove(kind, id);
-    ucRerender(kind);
     showToast(ucIsBuiltin(kind, id) ? `Built-in "${id}" hidden — Restore brings it back` : `"${id}" deleted`);
   });
   on(`uc-restore-${kind}`, async () => {
@@ -5392,7 +5396,6 @@ function ucWireToolbar(kind) {
     if (!id) { showToast(`Select a ${def.label.toLowerCase()} first`); return; }
     if (!ucIsBuiltin(kind, id)) { showToast(`"${id}" is user-created — nothing to restore`); return; }
     await ucRestore(kind, id);
-    ucRerender(kind);
     showToast(`"${id}" restored to the shipped version`);
   });
 }
@@ -11205,6 +11208,11 @@ let autoMaxSteps = 50;
 let autoWorkflowSteps = null; // array of workflow steps when running a workflow
 
 // ═══════════════════════════ WORKFLOW RUN ════════════════════════════════════
+// The proxy the panel talks to. Kept as a constant because a hand-written copy of
+// this URL had drifted to a nonexistent port, and the caller's fail-closed error
+// handling made that look like "the judge is offline" rather than a wrong URL.
+const VOID_PROXY_CHAT_URL = "http://localhost:8081/api/chat";
+
 // A run is a cursor over the workflow's steps plus a log of everything that has
 // happened. The log is what gives each agent context: a step does not see the
 // previous agent's chat, it sees the recorded outcome of every step before it.
@@ -11319,14 +11327,27 @@ Answer with a single JSON object and nothing else:
 {"answer": true|false, "reason": "one sentence"}`;
 
   try {
-    const res = await fetch("http://localhost:17590/ai/judge", {
+    // /api/judge builds its own vulnerability-specific prompt, so a free-form
+    // question goes through /api/chat with no tools instead.
+    const res = await fetch(VOID_PROXY_CHAT_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, apiKey, model, endpoint, candidate: { prompt } }),
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider,
+        apiKey,
+        model: model || undefined,
+        endpoint: (provider === "custom" || provider === "ollama") ? endpoint : undefined,
+        cliPath: provider === "claude-cli" ? "claude" : undefined,
+        messages: [{ role: "user", content: prompt }],
+        systemPrompt: "You answer questions about a penetration test with a single JSON object and nothing else.",
+      }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return { answer: false, reason: "judge error: " + (err.error || res.statusText) };
+    }
     const data = await res.json();
-    const raw = data.result || data.content || "";
-    const m = String(raw).match(/\{[\s\S]*\}/);
+    const m = String(data.content || "").match(/\{[\s\S]*\}/);
     if (m) {
       const parsed = JSON.parse(m[0]);
       return { answer: !!parsed.answer, reason: parsed.reason || "" };

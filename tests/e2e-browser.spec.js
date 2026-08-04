@@ -42,14 +42,18 @@ async function launchExt() {
   // DEVTOOLS_STUB reports a synthetic tabId because the harness has no inspected
   // page, so panel.js's chrome.tabs.get(TAB_ID) cannot resolve. Everything else —
   // including anything thrown while panel.js evaluates — must fail the suite.
-  const ENV_ONLY = [/No tab with id/, /Extension context/, /Permissions policy/, /favicon/,
-    // void-proxy-server.js is not started by the harness, so the judge endpoint
-    // refuses connections. The engine's fail-closed handling of exactly this is
-    // asserted by 'an unreachable judge fails closed'.
-    /ERR_CONNECTION_REFUSED/];
+  const ENV_ONLY = [/No tab with id/, /Extension context/, /Permissions policy/, /favicon/];
   page.on('console', m => {
+    if (m.type() !== 'error') return;
     const t = m.text();
-    if (m.type() === 'error' && !ENV_ONLY.some(re => re.test(t))) errors.push(t.substring(0, 200));
+    if (ENV_ONLY.some(re => re.test(t))) return;
+    // Resource failures against the panel's own proxy are environment, not code:
+    // the harness has no model configured, so a judge call fails at the socket
+    // (proxy down) or with a 502 (proxy up, provider unreachable). Matching on the
+    // resource URL rather than the message keeps every other failure visible. The
+    // engine's fail-closed handling of exactly this is asserted separately.
+    if (/^Failed to load resource/.test(t) && /127\.0\.0\.1:808[12]|localhost:808[12]/.test(m.location()?.url || '')) return;
+    errors.push(t.substring(0, 200));
   });
   page.on('pageerror', e => errors.push('UNCAUGHT:' + e.message.substring(0, 200)));
 
@@ -734,8 +738,14 @@ test.describe('Void Extension AI Pentest', () => {
     ],
   };
 
+  // Each engine test ensures its own fixture. Depending on a sibling test having
+  // created it means one unrelated failure cascades into all of them.
+  const ensureFlow = () => page.evaluate(async f => {
+    if (!window.VOID_WORKFLOWS.find(w => w.id === f.id)) await ucUpsert('workflows', f.id, f);
+  }, FLOW);
+
   test('Engine: workflow with all three step types round-trips', async () => {
-    await page.evaluate(f => ucUpsert('workflows', f.id, f), FLOW);
+    await ensureFlow();
     const wf = await page.evaluate(() => window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow'));
     expect(wf.steps.map(s => s.type)).toEqual(['AGENT', 'CONDITION', 'AGENT', 'FINISH']);
     expect(wf.initialInstructions).toContain('Stay in scope');
@@ -743,6 +753,7 @@ test.describe('Void Extension AI Pentest', () => {
   });
 
   test('Engine: a step assembles its own agent and skills into the system prompt', async () => {
+    await ensureFlow();
     const sp = await page.evaluate(() => {
       const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
       return wfStepSystemPrompt(wf.steps.find(s => s.id === 'inject'));
@@ -760,6 +771,7 @@ test.describe('Void Extension AI Pentest', () => {
   });
 
   test('Engine: a step message carries instructions, log and prompt override', async () => {
+    await ensureFlow();
     const msg = await page.evaluate(() => {
       const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
       wfRun = wfRunNew(wf);
@@ -776,6 +788,7 @@ test.describe('Void Extension AI Pentest', () => {
   });
 
   test('Engine: the run log records every kind of event', async () => {
+    await ensureFlow();
     const kinds = await page.evaluate(() => {
       const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
       wfRun = wfRunNew(wf);
@@ -789,6 +802,7 @@ test.describe('Void Extension AI Pentest', () => {
   });
 
   test('Engine: default next follows the list, explicit next wins', async () => {
+    await ensureFlow();
     const out = await page.evaluate(() => {
       const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
       return {
@@ -802,15 +816,19 @@ test.describe('Void Extension AI Pentest', () => {
     expect(out.end).toBe(null);          // ran off the end
   });
 
-  test('Engine: an unreachable judge fails closed instead of guessing a branch', async () => {
-    // The judge endpoint is not running in this harness, so evaluation must not
-    // silently return true and send the flow down an arbitrary branch.
+  test('Engine: a judge that cannot answer fails closed instead of guessing', async () => {
+    // No model is configured here, so the call cannot produce a verdict — whether
+    // it fails at the socket, at the provider, or on an unparseable body. In every
+    // one of those the answer must be false rather than sending the flow down an
+    // arbitrary branch, and the reason must say what went wrong.
     const verdict = await page.evaluate(() => wfEvaluate('anything at all', 'no context'));
     expect(verdict.answer).toBe(false);
-    expect(verdict.reason).toMatch(/unavailable|unparseable/);
+    expect(verdict.reason).toMatch(/unavailable|unparseable|judge error/);
+    expect(verdict.reason.length).toBeGreaterThan(0);
   });
 
   test('Engine: a condition with no matching branch takes else', async () => {
+    await ensureFlow();
     const target = await page.evaluate(async () => {
       const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
       wfRun = wfRunNew(wf);
@@ -822,6 +840,7 @@ test.describe('Void Extension AI Pentest', () => {
   });
 
   test('Engine: FINISH ends the run and records why', async () => {
+    await ensureFlow();
     await page.evaluate(() => {
       const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
       wfRun = wfRunNew(wf);
@@ -852,6 +871,7 @@ test.describe('Void Extension AI Pentest', () => {
   });
 
   test('Engine: the run log renders into the panel', async () => {
+    await ensureFlow();
     await page.evaluate(() => {
       const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
       wfRun = wfRunNew(wf);
@@ -867,6 +887,7 @@ test.describe('Void Extension AI Pentest', () => {
   });
 
   test('Editor: condition and trigger rows are authorable', async () => {
+    await ensureFlow();
     await page.evaluate(() => showTab('settings'));
     await page.locator('.ai-settings-tab[data-aitab="workflows"]').click();
     await page.evaluate(() => ucOpenEditor('workflows', 'e2e-flow'));
