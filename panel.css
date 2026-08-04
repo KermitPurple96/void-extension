@@ -3003,6 +3003,8 @@ html.theme-hacker {
 .uc-editor-body { padding: 16px 20px; max-height: 62vh; overflow-y: auto; }
 .uc-field { margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
 .uc-field .uc-input { width: 100%; }
+.uc-field textarea.uc-input { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; }
+.uc-field textarea.uc-input:focus { border-color: var(--accent); }
 .uc-hint { font-size: 11px; opacity: 0.55; }
 .uc-steps { display: flex; flex-direction: column; gap: 10px; margin: 6px 0; }
 .uc-step { border: 1px solid var(--border); border-radius: 6px; background: var(--bg2); padding: 8px; }
