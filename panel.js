@@ -10106,6 +10106,10 @@ function toggleSlidePanel(panelId) {
 
 // ── Project Wizard ──────────────────────────────────────────────────────────
 
+// Index of the final wizard step. Kept as a constant so adding or removing a step
+// only changes one number instead of three scattered literals.
+const WIZ_LAST_STEP = 3;
+
 let wizStep = 0;
 let wizInScope = [];
 let wizOutScope = [];
@@ -10132,14 +10136,6 @@ function wizOpen() {
   if (bruteChk) bruteChk.checked = !!settings.engagementBruteforce;
   const destChk = document.getElementById('wiz-destructive');
   if (destChk) destChk.checked = !!settings.engagementDestructive;
-  // Populate workflow dropdown
-  const wfSel = document.getElementById('wiz-workflow');
-  if (wfSel && window.VOID_WORKFLOWS) {
-    wfSel.innerHTML = window.VOID_WORKFLOWS.map(w =>
-      '<option value="' + esc(w.id) + '">' + esc(w.name) + '</option>'
-    ).join('');
-    wizUpdateWorkflowPreview();
-  }
   wizUpdateUI();
   document.getElementById('ai-wizard-overlay')?.classList.remove('hidden');
 }
@@ -10153,7 +10149,7 @@ function wizNext() {
     document.getElementById('wiz-name')?.focus();
     return;
   }
-  if (wizStep < 4) { wizStep++; wizUpdateUI(); }
+  if (wizStep < WIZ_LAST_STEP) { wizStep++; wizUpdateUI(); }
 }
 
 function wizBack() {
@@ -10174,8 +10170,8 @@ function wizUpdateUI() {
   });
   // Show/hide nav buttons
   document.getElementById('ai-wizard-back')?.classList.toggle('hidden', wizStep === 0);
-  document.getElementById('ai-wizard-next')?.classList.toggle('hidden', wizStep === 4);
-  document.getElementById('ai-wizard-create')?.classList.toggle('hidden', wizStep !== 4);
+  document.getElementById('ai-wizard-next')?.classList.toggle('hidden', wizStep === WIZ_LAST_STEP);
+  document.getElementById('ai-wizard-create')?.classList.toggle('hidden', wizStep !== WIZ_LAST_STEP);
   // Render scope lists
   wizRenderScopeList();
 }
@@ -10228,20 +10224,6 @@ function wizAddOutScope() {
   input.focus();
 }
 
-function wizUpdateWorkflowPreview() {
-  const sel = document.getElementById('wiz-workflow');
-  const descEl = document.getElementById('wiz-workflow-desc');
-  const stepsEl = document.getElementById('wiz-workflow-steps');
-  if (!sel || !window.VOID_WORKFLOWS) return;
-  const wf = window.VOID_WORKFLOWS.find(w => w.id === sel.value);
-  if (descEl) descEl.textContent = wf ? wf.description : '';
-  if (stepsEl && wf) {
-    stepsEl.innerHTML = (wf.steps || []).map(s =>
-      '<div class="ai-wizard-wf-step"><span class="ai-wizard-wf-step-name">' + esc(s.name) + '</span><span class="ai-wizard-wf-step-type">' + esc(s.type) + '</span></div>'
-    ).join('');
-  }
-}
-
 function wizCreate() {
   const name = wizVal('wiz-name').trim();
   if (!name) return;
@@ -10256,7 +10238,9 @@ function wizCreate() {
     authType: wizVal('wiz-auth-type') || 'FORM',
     apiToken: wizVal('wiz-api-token'),
     extraHeaders: wizVal('wiz-extra-headers'),
-    workflowId: wizVal('wiz-workflow') || 'full-pentest',
+    // No workflow is chosen at creation time — creating a project must not commit
+    // the user to running a scan. Pick one later from AI Settings -> Workflows.
+    workflowId: '',
     environment: wizVal('wiz-env') || 'unknown',
     mode: wizVal('wiz-mode') || 'ask',
     allowBruteforce: document.getElementById('wiz-bruteforce')?.checked || false,
@@ -12771,7 +12755,6 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById('wiz-scope-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); wizAddInScope(); } });
     document.getElementById('wiz-out-add')?.addEventListener('click', wizAddOutScope);
     document.getElementById('wiz-out-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); wizAddOutScope(); } });
-    document.getElementById('wiz-workflow')?.addEventListener('change', wizUpdateWorkflowPreview);
     // Close wizard on overlay click
     document.getElementById('ai-wizard-overlay')?.addEventListener('click', e => { if (e.target === e.currentTarget) wizClose(); });
   });

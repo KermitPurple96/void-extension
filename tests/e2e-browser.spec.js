@@ -128,12 +128,17 @@ test.describe('Void Extension AI Pentest', () => {
 
   // ═══ Wizard DOM ═══
   test('Wizard: overlay exists', async () => { expect(await page.locator('#ai-wizard-overlay').count()).toBe(1); });
-  test('Wizard: 5 step dots', async () => { expect(await page.locator('.ai-wizard-dot').count()).toBe(5); });
+  test('Wizard: 4 step dots', async () => { expect(await page.locator('.ai-wizard-dot').count()).toBe(4); });
+  test('Wizard: no workflow step', async () => {
+    // Creating a project must not ask the user to commit to a scan workflow.
+    expect(await page.locator('#wiz-workflow').count()).toBe(0);
+    const created = await page.evaluate(() => { wizOpen(); wizClose(); return 'ok'; });
+    expect(created).toBe('ok');
+  });
   test('Wizard: all step inputs', async () => {
     expect(await page.locator('#wiz-name').count()).toBe(1);
     expect(await page.locator('#wiz-scope-input').count()).toBe(1);
     expect(await page.locator('#wiz-username').count()).toBe(1);
-    expect(await page.locator('#wiz-workflow').count()).toBe(1);
     expect(await page.locator('#wiz-env').count()).toBe(1);
   });
 
