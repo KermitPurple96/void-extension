@@ -75,10 +75,10 @@ test.describe('Void Extension AI Pentest', () => {
   // ═══ Load + Data ═══
   test('Panel loads', async () => { expect(await page.textContent('body')).toBeTruthy(); });
   test('21+ tabs', async () => { expect(await page.locator('[data-tab]').count()).toBeGreaterThanOrEqual(20); });
-  test('VOID_AGENTS=11', async () => { expect(await page.evaluate(() => window.VOID_AGENTS?.length)).toBe(11); });
+  test('VOID_AGENTS=12', async () => { expect(await page.evaluate(() => window.VOID_AGENTS?.length)).toBe(12); });
   test('VOID_SKILLS=32', async () => { expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS||{}).length)).toBe(32); });
   test('VOID_WORKFLOWS=23', async () => { expect(await page.evaluate(() => window.VOID_WORKFLOWS?.length)).toBe(23); });
-  test('VOID_PROMPTS=8', async () => { expect(await page.evaluate(() => window.VOID_PROMPTS?.length)).toBe(8); });
+  test('VOID_PROMPTS=15', async () => { expect(await page.evaluate(() => window.VOID_PROMPTS?.length)).toBe(15); });
   test('VOID_PAYLOADS=10', async () => { expect(await page.evaluate(() => Object.keys(window.VOID_PAYLOADS||{}).length)).toBe(10); });
   test('VOID_VULN_CLASSES=25', async () => { expect(await page.evaluate(() => window.VOID_VULN_CLASSES?.length)).toBe(25); });
   test('VOID_HYBRID_CHECKS=16', async () => { expect(await page.evaluate(() => Object.keys(window.VOID_HYBRID_CHECKS||{}).length)).toBe(16); });
@@ -95,7 +95,11 @@ test.describe('Void Extension AI Pentest', () => {
     expect(await page.locator('#ai-utility-provider').count()).toBe(1);
   });
   test('Models: 3 exec mode buttons', async () => { expect(await page.locator('.ai-exec-mode-btn').count()).toBe(3); });
-  test('Persona: 12 options', async () => { expect(await page.locator('#ai-persona option').count()).toBe(12); });
+  test('Agents: every persona plus Custom is selectable', async () => {
+    // Populated from VOID_AGENTS at load, so a new persona needs no markup change.
+    expect(await page.locator('#ai-persona option').count()).toBe(13);
+    expect(await page.locator('#ai-persona option[value="verifier"]').count()).toBe(1);
+  });
   test('Engagement: env + mode + toggles exist', async () => {
     expect(await page.locator('#ai-engagement-env').count()).toBe(1);
     expect(await page.locator('#ai-engagement-mode').count()).toBe(1);
@@ -558,7 +562,7 @@ test.describe('Void Extension AI Pentest', () => {
       workflows: ucBuiltin.workflows.length,
       prompts: ucBuiltin.prompts.length,
     }));
-    expect(snap).toEqual({ agents: 11, skills: 32, workflows: 23, prompts: 8 });
+    expect(snap).toEqual({ agents: 12, skills: 32, workflows: 23, prompts: 15 });
   });
 
   test('UC: creating a prompt adds it to the live registry', async () => {
@@ -685,8 +689,8 @@ test.describe('Void Extension AI Pentest', () => {
   test('UC: cleanup leaves no test entries behind', async () => {
     await page.evaluate(() => ucRemove('prompts', 'e2e-custom'));
     expect(await page.evaluate(() => window.VOID_PROMPTS.some(p => p.id === 'e2e-custom'))).toBe(false);
-    expect(await page.evaluate(() => window.VOID_PROMPTS.length)).toBe(8);
-    expect(await page.evaluate(() => window.VOID_AGENTS.length)).toBe(11);
+    expect(await page.evaluate(() => window.VOID_PROMPTS.length)).toBe(15);
+    expect(await page.evaluate(() => window.VOID_AGENTS.length)).toBe(12);
     expect(await page.evaluate(() => window.VOID_WORKFLOWS.length)).toBe(23);
     expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS).length)).toBe(32);
   });

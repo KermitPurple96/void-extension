@@ -4502,14 +4502,23 @@ function getActiveSystemPrompt() {
     // Config
     ctx += '\n\nEngagement config:';
     ctx += '\n- Environment: ' + (proj.config?.environment || 'unknown');
-    ctx += '\n- Mode: ' + (proj.config?.mode || 'ask');
+    const MODE_MEANING = {
+      ask: 'ask — detect only. Prove the issue exists with the least invasive evidence possible (alert(1), one extra row, a 5s delay). Do NOT extract data, dump tables, write files, or run exploitation tools.',
+      manual: 'manual — detect and exploit conservatively by hand. Prove impact on one record, never at scale.',
+      tool: 'tool — detect, then use the automated tools (run_hybrid_scan, run_intruder_attack) to establish depth.',
+    };
+    const mode = proj.config?.mode || 'ask';
+    ctx += '\n- Mode: ' + (MODE_MEANING[mode] || mode);
     if (!proj.config?.allowBruteforce) ctx += '\n- Bruteforce/fuzzing: DISABLED';
     if (!proj.config?.allowDestructive) ctx += '\n- Destructive testing: DISABLED';
     // Credentials hint (never expose usernames or passwords to LLM)
     if (proj.credentials?.username || proj.credentials?.apiToken) {
       ctx += '\n\nCredentials configured: auth type=' + (proj.credentials.authType || 'FORM');
       if (proj.credentials.loginUrl) ctx += ', login URL=' + proj.credentials.loginUrl;
-      ctx += '\nUse the authenticated_request tool to send requests with stored credentials.';
+      // Deliberately no tool name here: there is no tool that injects stored
+      // credentials, and naming one the model cannot call invites a hallucinated
+      // call and a wasted turn.
+      ctx += '\nAuthenticate by sending the login request yourself with send_request, then reuse the session cookie it returns.';
     }
     // Workflow
     if (proj.workflow?.selectedId) {
