@@ -2715,7 +2715,7 @@ body {
 .ai-input-row {
   display: flex; gap: 8px; padding: 8px 10px; align-items: flex-end;
 }
-.ai-input-ta { flex: 1; resize: none; font: 12px var(--mono); min-height: 36px; max-height: 120px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--bg2); color: var(--text); }
+.ai-input-ta { flex: 1; resize: none; font: 12px var(--mono); min-height: 36px; max-height: 120px; max-width: 50%; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--bg2); color: var(--text); }
 .ai-input-ta:focus { border-color: var(--accent); outline: none; }
 .ai-send-btn { padding: 8px 16px; border-radius: 6px; font-weight: 600; flex-shrink: 0; align-self: flex-end; }
 
