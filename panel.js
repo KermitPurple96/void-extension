@@ -4476,6 +4476,12 @@ function getActiveSystemPrompt() {
   } else {
     const agent = window.VOID_AGENTS?.find(a => a.id === personaId);
     prompt = agent ? agent.systemPrompt : AI_SYSTEM_PROMPT;
+    // Prepend shared preamble blocks for non-custom personas
+    const pre = window.VOID_PREAMBLE;
+    if (pre) {
+      const preamble = [pre.execution, pre.scope, pre.evidence, pre.severity, pre.stop].join('\n\n');
+      prompt = preamble + '\n\n' + prompt;
+    }
   }
 
   // Inject active skill if set
@@ -11280,9 +11286,22 @@ function wfBuildContext(wf) {
 // override), plus the bodies of every skill the step selected.
 function wfStepSystemPrompt(step) {
   let base = "";
-  if (step.agentOverride) base = step.agentOverride;
-  else if (step.agent) base = (window.VOID_AGENTS || []).find(a => a.id === step.agent)?.systemPrompt || "";
-  if (!base) base = getActiveSystemPrompt();
+  let needsPreamble = false;
+  if (step.agentOverride) {
+    base = step.agentOverride;
+  } else if (step.agent) {
+    base = (window.VOID_AGENTS || []).find(a => a.id === step.agent)?.systemPrompt || "";
+    needsPreamble = !!base;
+  }
+  if (!base) {
+    base = getActiveSystemPrompt(); // already has preamble
+  } else if (needsPreamble) {
+    const pre = window.VOID_PREAMBLE;
+    if (pre) {
+      const preamble = [pre.execution, pre.scope, pre.evidence, pre.severity, pre.stop].join('\n\n');
+      base = preamble + '\n\n' + base;
+    }
+  }
 
   const blocks = [base];
   for (const slug of (step.skills || [])) {
