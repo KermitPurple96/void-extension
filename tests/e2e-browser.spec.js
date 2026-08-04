@@ -42,7 +42,11 @@ async function launchExt() {
   // DEVTOOLS_STUB reports a synthetic tabId because the harness has no inspected
   // page, so panel.js's chrome.tabs.get(TAB_ID) cannot resolve. Everything else —
   // including anything thrown while panel.js evaluates — must fail the suite.
-  const ENV_ONLY = [/No tab with id/, /Extension context/, /Permissions policy/, /favicon/];
+  const ENV_ONLY = [/No tab with id/, /Extension context/, /Permissions policy/, /favicon/,
+    // void-proxy-server.js is not started by the harness, so the judge endpoint
+    // refuses connections. The engine's fail-closed handling of exactly this is
+    // asserted by 'an unreachable judge fails closed'.
+    /ERR_CONNECTION_REFUSED/];
   page.on('console', m => {
     const t = m.text();
     if (m.type() === 'error' && !ENV_ONLY.some(re => re.test(t))) errors.push(t.substring(0, 200));
@@ -651,7 +655,7 @@ test.describe('Void Extension AI Pentest', () => {
     // add a step through the real button and assert the card renders.
     expect(await page.locator('#uc-steps-list').count()).toBe(1);
     expect(await page.locator('.uc-step').count()).toBe(0);
-    await page.getByRole('button', { name: '+ Add step' }).click();
+    await page.getByRole('button', { name: '+ AGENT', exact: true }).click();
     await expect(page.locator('.uc-step').first()).toBeVisible();
     await expect(page.locator('#uc-steps-list')).toBeVisible();
     const step = await page.evaluate(() => ucEditSteps[ucEditSteps.length - 1]);
@@ -712,6 +716,198 @@ test.describe('Void Extension AI Pentest', () => {
     // Phases inline the goals of the workflows they pull in.
     expect(await page.locator('.ai-wf-include').count()).toBeGreaterThan(3);
     await expect(page.locator('.ai-wf-step-checks').first()).toContainText('csrf');
+  });
+
+  // ═══ Workflow engine: steps, branching, triggers, finish, run log ═══
+  const FLOW = {
+    id: 'e2e-flow', name: 'E2E Flow', description: 'branching test', level: 'engagement',
+    category: 'test', initialInstructions: 'Stay in scope. Report everything.',
+    triggers: [{ id: 'trig-1', name: 'out of scope', condition: 'the target is out of scope', action: 'stop', target: '' }],
+    steps: [
+      { id: 'recon', name: 'Recon', type: 'AGENT', agent: 'recon', skills: ['basic-recon'],
+        prompt: 'recon-target', goal: 'Map the surface', skillOverrides: {}, next: '' },
+      { id: 'gate', name: 'Injectable?', type: 'CONDITION', check: 'Did recon find any input parameters?',
+        branches: [{ condition: 'parameters were found', goto: 'inject' }], elseGoto: 'done' },
+      { id: 'inject', name: 'Injection', type: 'AGENT', agent: 'injector', skills: ['xss', 'sqli'],
+        prompt: '', promptOverride: 'Attack {{target}} now', goal: 'Find injection', next: 'done' },
+      { id: 'done', name: 'Done', type: 'FINISH', summary: 'Flow finished' },
+    ],
+  };
+
+  test('Engine: workflow with all three step types round-trips', async () => {
+    await page.evaluate(f => ucUpsert('workflows', f.id, f), FLOW);
+    const wf = await page.evaluate(() => window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow'));
+    expect(wf.steps.map(s => s.type)).toEqual(['AGENT', 'CONDITION', 'AGENT', 'FINISH']);
+    expect(wf.initialInstructions).toContain('Stay in scope');
+    expect(wf.triggers).toHaveLength(1);
+  });
+
+  test('Engine: a step assembles its own agent and skills into the system prompt', async () => {
+    const sp = await page.evaluate(() => {
+      const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
+      return wfStepSystemPrompt(wf.steps.find(s => s.id === 'inject'));
+    });
+    // The injector agent's prompt plus both selected skill bodies.
+    expect(sp).toContain('SKILL:');
+    expect(sp.match(/# SKILL:/g).length).toBe(2);
+
+    // An inline override replaces the shared agent prompt without editing it.
+    const overridden = await page.evaluate(() =>
+      wfStepSystemPrompt({ agent: 'injector', agentOverride: 'ONLY DO WHAT I SAY', skills: [] }));
+    expect(overridden).toBe('ONLY DO WHAT I SAY');
+    const shared = await page.evaluate(() => window.VOID_AGENTS.find(a => a.id === 'injector').systemPrompt);
+    expect(shared).not.toBe('ONLY DO WHAT I SAY');
+  });
+
+  test('Engine: a step message carries instructions, log and prompt override', async () => {
+    const msg = await page.evaluate(() => {
+      const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
+      wfRun = wfRunNew(wf);
+      wfLog('result', 'Recon found 12 endpoints');
+      return wfStepMessage(wf, wf.steps.find(s => s.id === 'inject'));
+    });
+    expect(msg).toContain('INITIAL INSTRUCTIONS');
+    expect(msg).toContain('Stay in scope');
+    // Later steps see the log, which is what gives each agent context.
+    expect(msg).toContain('Recon found 12 endpoints');
+    expect(msg).toContain('Attack ');   // the prompt override, with {{target}} rendered
+    expect(msg).not.toContain('{{target}}');
+    expect(msg).toContain('GOAL: Find injection');
+  });
+
+  test('Engine: the run log records every kind of event', async () => {
+    const kinds = await page.evaluate(() => {
+      const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
+      wfRun = wfRunNew(wf);
+      wfLog('start', 'x'); wfLog('step', 'y'); wfLog('result', 'z');
+      wfLog('condition', 'c'); wfLog('trigger', 't'); wfLog('finish', 'f');
+      return wfRun.log.map(e => e.kind);
+    });
+    expect(kinds).toEqual(['start', 'step', 'result', 'condition', 'trigger', 'finish']);
+    const stamped = await page.evaluate(() => wfRun.log.every(e => typeof e.t === 'string' && e.t.length > 10));
+    expect(stamped).toBe(true);
+  });
+
+  test('Engine: default next follows the list, explicit next wins', async () => {
+    const out = await page.evaluate(() => {
+      const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
+      return {
+        implicit: wfDefaultNext(wf, wf.steps.find(s => s.id === 'recon')),
+        explicit: wfDefaultNext(wf, wf.steps.find(s => s.id === 'inject')),
+        end: wfDefaultNext(wf, wf.steps.find(s => s.id === 'done')),
+      };
+    });
+    expect(out.implicit).toBe('gate');   // next in the list
+    expect(out.explicit).toBe('done');   // step.next
+    expect(out.end).toBe(null);          // ran off the end
+  });
+
+  test('Engine: an unreachable judge fails closed instead of guessing a branch', async () => {
+    // The judge endpoint is not running in this harness, so evaluation must not
+    // silently return true and send the flow down an arbitrary branch.
+    const verdict = await page.evaluate(() => wfEvaluate('anything at all', 'no context'));
+    expect(verdict.answer).toBe(false);
+    expect(verdict.reason).toMatch(/unavailable|unparseable/);
+  });
+
+  test('Engine: a condition with no matching branch takes else', async () => {
+    const target = await page.evaluate(async () => {
+      const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
+      wfRun = wfRunNew(wf);
+      return wfResolveCondition(wf, wf.steps.find(s => s.id === 'gate'));
+    });
+    expect(target).toBe('done');
+    const logged = await page.evaluate(() => wfRun.log.some(e => e.kind === 'condition'));
+    expect(logged).toBe(true);
+  });
+
+  test('Engine: FINISH ends the run and records why', async () => {
+    await page.evaluate(() => {
+      const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
+      wfRun = wfRunNew(wf);
+      wfRun.cursor = 'done';
+      autoRunning = true; autoPaused = false; autoStepIndex = 0; autoMaxSteps = 10;
+      return autoNext();
+    });
+    expect(await page.evaluate(() => wfRun.status)).toBe('finished');
+    expect(await page.evaluate(() => autoRunning)).toBe(false);
+    expect(await page.evaluate(() => wfRun.log.some(e => e.kind === 'finish' && e.text.includes('Flow finished')))).toBe(true);
+  });
+
+  test('Engine: the step budget stops a flow that loops forever', async () => {
+    await page.evaluate(async () => {
+      // A step that points at itself would otherwise never terminate.
+      await ucUpsert('workflows', 'e2e-loop', {
+        id: 'e2e-loop', name: 'Loop', description: '', level: 'atomic', category: 'test',
+        steps: [{ id: 'a', name: 'A', type: 'CONDITION', check: '', branches: [], elseGoto: 'a' }],
+      });
+      const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-loop');
+      wfRun = wfRunNew(wf);
+      autoRunning = true; autoPaused = false; autoStepIndex = 0; autoMaxSteps = 5;
+      return autoNext();
+    });
+    expect(await page.evaluate(() => autoRunning)).toBe(false);
+    expect(await page.evaluate(() => wfRun.visited.length)).toBeLessThanOrEqual(6);
+    await page.evaluate(() => ucRemove('workflows', 'e2e-loop'));
+  });
+
+  test('Engine: the run log renders into the panel', async () => {
+    await page.evaluate(() => {
+      const wf = window.VOID_WORKFLOWS.find(w => w.id === 'e2e-flow');
+      wfRun = wfRunNew(wf);
+      wfLog('start', 'Workflow started');
+      wfLog('trigger', 'out of scope fired');
+      document.getElementById('ai-wf-log').classList.remove('hidden');
+      wfRenderLog();
+    });
+    expect(await page.locator('#ai-wf-log .ai-wf-log-row').count()).toBe(2);
+    await expect(page.locator('#ai-wf-log')).toContainText('out of scope fired');
+    expect(await page.locator('.ai-wf-log-trigger').count()).toBe(1);
+    await page.evaluate(() => document.getElementById('ai-wf-log').classList.add('hidden'));
+  });
+
+  test('Editor: condition and trigger rows are authorable', async () => {
+    await page.evaluate(() => showTab('settings'));
+    await page.locator('.ai-settings-tab[data-aitab="workflows"]').click();
+    await page.evaluate(() => ucOpenEditor('workflows', 'e2e-flow'));
+    await expect(page.locator('#uc-editor-overlay')).toBeVisible();
+
+    // Four steps, one of each kind styled distinctly.
+    expect(await page.locator('.uc-step').count()).toBe(4);
+    expect(await page.locator('.uc-step-condition').count()).toBe(1);
+    expect(await page.locator('.uc-step-finish').count()).toBe(1);
+
+    // The goto dropdowns offer every step in the flow.
+    const opts = await page.locator('.uc-branch select').first().locator('option').allTextContents();
+    expect(opts.join(' ')).toContain('Recon');
+    expect(opts.join(' ')).toContain('Done');
+
+    // A trigger row exists with its condition and action.
+    expect(await page.locator('.uc-trigger').count()).toBe(1);
+    await expect(page.locator('.uc-trigger input').nth(1)).toHaveValue('the target is out of scope');
+
+    // Skills are multi-select and reflect what the step already had.
+    const checked = await page.locator('.uc-step').nth(2).locator('.uc-skill-tag.on').count();
+    expect(checked).toBe(2);
+    await page.evaluate(() => ucCloseEditor());
+  });
+
+  test('Editor: adding a step of each type works from the buttons', async () => {
+    await page.evaluate(() => ucOpenEditor('workflows', null));
+    for (const type of ['AGENT', 'CONDITION', 'FINISH']) {
+      await page.getByRole('button', { name: '+ ' + type, exact: true }).click();
+    }
+    expect(await page.locator('.uc-step').count()).toBe(3);
+    const types = await page.evaluate(() => ucEditSteps.map(s => s.type));
+    expect(types).toEqual(['AGENT', 'CONDITION', 'FINISH']);
+    await page.getByRole('button', { name: '+ Add trigger' }).click();
+    expect(await page.evaluate(() => ucEditTriggers.length)).toBe(1);
+    await page.evaluate(() => ucCloseEditor());
+  });
+
+  test('Engine: cleanup', async () => {
+    await page.evaluate(() => { wfRun = null; autoRunning = false; return ucRemove('workflows', 'e2e-flow'); });
+    expect(await page.evaluate(() => window.VOID_WORKFLOWS.length)).toBe(23);
   });
 
   // ═══ Console health ═══

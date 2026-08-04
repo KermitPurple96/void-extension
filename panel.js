@@ -4679,7 +4679,7 @@ function applyModelPreset(preset) {
 // a matter of dropping the overlay entry.
 
 const UC_KINDS = {
-  agents:    { label: "Persona",  global: "VOID_AGENTS",    shape: "array",  idKey: "id" },
+  agents:    { label: "Agent",    global: "VOID_AGENTS",    shape: "array",  idKey: "id" },
   skills:    { label: "Skill",    global: "VOID_SKILLS",    shape: "object", idKey: "slug" },
   workflows: { label: "Workflow", global: "VOID_WORKFLOWS", shape: "array",  idKey: "id" },
   prompts:   { label: "Prompt",   global: "VOID_PROMPTS",   shape: "array",  idKey: "id" },
@@ -4852,19 +4852,40 @@ const UC_FIELDS = {
     { key: "level", label: "Level", type: "select", options: ["atomic", "composite", "engagement"],
       hint: "atomic = one technique · composite = a chain · engagement = phases" },
     { key: "category", label: "Category", type: "text" },
+    { key: "initialInstructions", label: "Initial instructions", type: "textarea", rows: 4,
+      hint: "Given to every agent before the first step runs" },
+    { key: "triggers", label: "Triggers", type: "triggers" },
     { key: "steps", label: "Steps", type: "steps" },
   ],
 };
 
-let ucEditKind = null, ucEditOriginalId = null, ucEditSteps = [];
+let ucEditKind = null, ucEditOriginalId = null, ucEditSteps = [], ucEditTriggers = [];
 
-function ucNewStep() {
+// A step is one of three things: an AGENT does work, a CONDITION branches on what
+// the AI concludes from everything logged so far, and FINISH ends the run.
+const WF_STEP_TYPES = ["AGENT", "CONDITION", "FINISH"];
+
+function ucNewStep(type = "AGENT") {
+  const base = { id: "step-" + (ucEditSteps.length + 1), name: "", type, next: "" };
+  if (type === "CONDITION") {
+    return { ...base, check: "", branches: [{ condition: "", goto: "" }], elseGoto: "" };
+  }
+  if (type === "FINISH") return { ...base, summary: "" };
   return {
-    id: "step-" + (ucEditSteps.length + 1), name: "", type: "SKILL", skill: "", agent: "",
+    ...base,
+    // What the step runs as. Each may be overridden inline for this workflow only,
+    // so tuning a step never edits the shared agent/skill/prompt.
+    agent: "", agentOverride: "",
+    skills: [], skillOverrides: {},
+    prompt: "", promptOverride: "",
     dependsOn: [], goal: "", intrusive: false,
     decisionTree: [], toolGuidance: { aiShould: "", useToolWhen: {} },
     techniqueRefs: [], validation: { mustReproduce: false, contextCheck: "", impactAssessment: "" },
   };
+}
+
+function ucNewTrigger() {
+  return { id: "trigger-" + (ucEditTriggers.length + 1), name: "", condition: "", action: "stop", target: "" };
 }
 
 function ucOpenEditor(kind, id, { duplicate = false } = {}) {
@@ -4883,11 +4904,15 @@ function ucOpenEditor(kind, id, { duplicate = false } = {}) {
   if (kind === "skills" && id && !duplicate) data.slug = id;
   if (duplicate && data[def.idKey]) data[def.idKey] = data[def.idKey] + "-copy";
 
-  ucEditSteps = kind === "workflows" ? (data.steps || []).map(s => ({ ...ucNewStep(), ...s })) : [];
+  ucEditSteps = kind === "workflows"
+    ? (data.steps || []).map(s => ({ ...ucNewStep(s.type === "PHASE" ? "AGENT" : (s.type || "AGENT")), ...s }))
+    : [];
+  ucEditTriggers = kind === "workflows" ? (data.triggers || []).map(t => ({ ...ucNewTrigger(), ...t })) : [];
 
   body.replaceChildren();
   for (const f of UC_FIELDS[kind]) {
     if (f.type === "steps") { body.appendChild(ucBuildStepsField()); continue; }
+    if (f.type === "triggers") { body.appendChild(ucBuildTriggersField()); continue; }
     body.appendChild(ucBuildField(f, data[f.key]));
   }
   document.getElementById("uc-editor-error")?.classList.add("hidden");
@@ -4935,7 +4960,7 @@ function ucCollect() {
       ? v.split(",").map(s => s.trim()).filter(Boolean)
       : v;
   }
-  if (ucEditKind === "workflows") out.steps = ucEditSteps;
+  if (ucEditKind === "workflows") { out.steps = ucEditSteps; out.triggers = ucEditTriggers; }
   return out;
 }
 
@@ -4946,13 +4971,21 @@ function ucBuildStepsField() {
   const lab = el("label", "settings-label-sm");
   lab.textContent = "Steps";
   wrap.appendChild(lab);
+  const hint = el("div", "uc-hint");
+  hint.textContent = "AGENT does work · CONDITION branches on what the AI concludes so far · FINISH ends the run";
+  wrap.appendChild(hint);
   const list = el("div", "uc-steps"); list.id = "uc-steps-list";
   wrap.appendChild(list);
-  const add = el("button", "btn btn-sm btn-ghost");
-  add.type = "button";
-  add.textContent = "+ Add step";
-  add.addEventListener("click", () => { ucEditSteps.push(ucNewStep()); ucRenderSteps(); });
-  wrap.appendChild(add);
+
+  const bar = el("div", "uc-toolbar");
+  for (const type of WF_STEP_TYPES) {
+    const b = el("button", "btn btn-sm btn-ghost");
+    b.type = "button";
+    b.textContent = "+ " + type;
+    b.addEventListener("click", () => { ucEditSteps.push(ucNewStep(type)); ucRenderSteps(); });
+    bar.appendChild(b);
+  }
+  wrap.appendChild(bar);
   setTimeout(ucRenderSteps, 0);
   return wrap;
 }
@@ -4962,102 +4995,288 @@ function ucRenderSteps() {
   if (!list) return;
   list.replaceChildren();
   ucEditSteps.forEach((s, i) => list.appendChild(ucBuildStepCard(s, i)));
+  ucRefreshGotoTargets();
+}
+
+// Every "go to" dropdown offers the current set of steps. Rebuilt after any
+// add/remove/rename so a branch can never point at a step that no longer exists.
+function ucRefreshGotoTargets() {
+  const opts = ucEditSteps.map(s => ({ v: s.id, t: (s.name || s.id) + "  (" + s.type + ")" }));
+  for (const sel of document.querySelectorAll("#uc-steps-list select[data-goto], #uc-triggers-list select[data-goto]")) {
+    const cur = sel.dataset.value || sel.value;
+    sel.replaceChildren();
+    const none = el("option"); none.value = ""; none.textContent = "— next step —";
+    sel.appendChild(none);
+    for (const o of opts) {
+      const op = el("option"); op.value = o.v; op.textContent = o.t;
+      sel.appendChild(op);
+    }
+    sel.value = opts.some(o => o.v === cur) ? cur : "";
+  }
+}
+
+function ucStepInput(step, key, ph, { area = false, rows = 2 } = {}) {
+  const i = el(area ? "textarea" : "input", area ? "raw-ta uc-step-ta" : "settings-inp");
+  if (area) i.rows = rows; else i.type = "text";
+  i.placeholder = ph || ""; i.spellcheck = false;
+  i.value = key.split(".").reduce((o, k) => o?.[k], step) || "";
+  i.addEventListener("input", () => {
+    const parts = key.split("."); const last = parts.pop();
+    const tgt = parts.reduce((o, k) => (o[k] = o[k] || {}), step);
+    tgt[last] = i.value;
+  });
+  return i;
+}
+
+function ucStepRow(label, node) {
+  const r = el("div", "uc-step-row");
+  const l = el("label", "settings-label-sm"); l.textContent = label;
+  r.append(l, node);
+  return r;
+}
+
+function ucGotoSelect(obj, key) {
+  const sel = el("select", "filter-sel");
+  sel.dataset.goto = "1";
+  sel.dataset.value = obj[key] || "";
+  sel.addEventListener("change", () => { obj[key] = sel.value; sel.dataset.value = sel.value; });
+  return sel;
 }
 
 function ucBuildStepCard(step, idx) {
-  const card = el("div", "uc-step");
+  const card = el("div", "uc-step uc-step-" + step.type.toLowerCase());
 
   const head = el("div", "uc-step-head");
   const num = el("span", "uc-step-idx"); num.textContent = String(idx + 1);
   head.appendChild(num);
 
-  const mk = (ph, key, cls) => {
-    const i = el("input", "settings-inp " + (cls || ""));
-    i.type = "text"; i.placeholder = ph; i.value = step[key] || ""; i.spellcheck = false;
-    i.addEventListener("input", () => { step[key] = i.value; });
-    return i;
-  };
-  head.appendChild(mk("step id", "id", "uc-step-id"));
-  head.appendChild(mk("step name", "name", "uc-step-name"));
+  const idInp = ucStepInput(step, "id", "step id");
+  idInp.className = "settings-inp uc-step-id";
+  idInp.addEventListener("input", ucRefreshGotoTargets);
+  const nameInp = ucStepInput(step, "name", "step name");
+  nameInp.className = "settings-inp uc-step-name";
+  nameInp.addEventListener("input", ucRefreshGotoTargets);
+  head.append(idInp, nameInp);
 
   const type = el("select", "filter-sel uc-step-type");
-  for (const o of ["SKILL", "AGENT", "PHASE"]) {
+  for (const o of WF_STEP_TYPES) {
     const opt = el("option"); opt.value = o; opt.textContent = o; type.appendChild(opt);
   }
-  type.value = step.type || "SKILL";
-  type.addEventListener("change", () => { step.type = type.value; });
+  type.value = step.type;
+  type.addEventListener("change", () => {
+    // Rebuild from a fresh template so the card only shows fields its type uses.
+    const fresh = ucNewStep(type.value);
+    ucEditSteps[idx] = { ...fresh, id: step.id, name: step.name, type: type.value };
+    ucRenderSteps();
+  });
   head.appendChild(type);
 
-  const up = el("button", "btn btn-xs btn-ghost"); up.type = "button"; up.textContent = "↑";
+  const up = el("button", "btn btn-xs btn-ghost"); up.type = "button"; up.textContent = "\u2191";
   up.addEventListener("click", () => { if (idx > 0) { [ucEditSteps[idx - 1], ucEditSteps[idx]] = [ucEditSteps[idx], ucEditSteps[idx - 1]]; ucRenderSteps(); } });
-  const down = el("button", "btn btn-xs btn-ghost"); down.type = "button"; down.textContent = "↓";
+  const down = el("button", "btn btn-xs btn-ghost"); down.type = "button"; down.textContent = "\u2193";
   down.addEventListener("click", () => { if (idx < ucEditSteps.length - 1) { [ucEditSteps[idx + 1], ucEditSteps[idx]] = [ucEditSteps[idx], ucEditSteps[idx + 1]]; ucRenderSteps(); } });
-  const del = el("button", "btn btn-xs btn-ghost uc-step-del"); del.type = "button"; del.textContent = "×";
+  const del = el("button", "btn btn-xs btn-ghost uc-step-del"); del.type = "button"; del.textContent = "\u00d7";
   del.addEventListener("click", () => { ucEditSteps.splice(idx, 1); ucRenderSteps(); });
   head.append(up, down, del);
   card.appendChild(head);
 
-  const grid = el("div", "uc-step-body");
-  const addRow = (label, key, ph, area) => {
-    const r = el("div", "uc-step-row");
-    const l = el("label", "settings-label-sm"); l.textContent = label; r.appendChild(l);
-    const i = el(area ? "textarea" : "input", area ? "raw-ta uc-step-ta" : "settings-inp");
-    if (area) i.rows = 2; else i.type = "text";
-    i.placeholder = ph || ""; i.spellcheck = false;
-    i.value = key.split(".").reduce((o, k) => o?.[k], step) || "";
-    i.addEventListener("input", () => {
-      const parts = key.split(".");
-      const last = parts.pop();
-      const tgt = parts.reduce((o, k) => (o[k] = o[k] || {}), step);
-      tgt[last] = i.value;
-    });
-    r.appendChild(i);
-    grid.appendChild(r);
-  };
-  addRow("Goal", "goal", "What this step is trying to establish", true);
-  addRow("Skill", "skill", "skill slug (when type is SKILL)");
-  addRow("Agent", "agent", "agent id (when type is AGENT)");
+  if (step.type === "FINISH") {
+    const b = el("div", "uc-step-body");
+    b.appendChild(ucStepRow("Summary", ucStepInput(step, "summary", "What to report when the flow ends", { area: true })));
+    card.appendChild(b);
+    return card;
+  }
 
-  const depRow = el("div", "uc-step-row");
-  const depLab = el("label", "settings-label-sm"); depLab.textContent = "Depends on";
-  const depInp = el("input", "settings-inp");
-  depInp.type = "text"; depInp.placeholder = "comma-separated step ids"; depInp.spellcheck = false;
-  depInp.value = (step.dependsOn || []).join(", ");
-  depInp.addEventListener("input", () => { step.dependsOn = depInp.value.split(",").map(s => s.trim()).filter(Boolean); });
-  depRow.append(depLab, depInp);
-  grid.appendChild(depRow);
+  if (step.type === "CONDITION") {
+    card.appendChild(ucBuildConditionBody(step));
+    return card;
+  }
+
+  card.appendChild(ucBuildAgentBody(step));
+  card.appendChild(ucBuildDecisionTree(step));
+  return card;
+}
+
+// ── AGENT step: agent + skills + prompt, each overridable inline ────────────
+
+function ucBuildAgentBody(step) {
+  const b = el("div", "uc-step-body");
+
+  const agentSel = el("select", "filter-sel");
+  const none = el("option"); none.value = ""; none.textContent = "— inherit chat agent —";
+  agentSel.appendChild(none);
+  for (const a of (window.VOID_AGENTS || [])) {
+    const o = el("option"); o.value = a.id; o.textContent = a.title; agentSel.appendChild(o);
+  }
+  agentSel.value = step.agent || "";
+  agentSel.addEventListener("change", () => { step.agent = agentSel.value; });
+  b.appendChild(ucStepRow("Agent", agentSel));
+  b.appendChild(ucStepRow("Agent override", ucStepInput(step, "agentOverride",
+    "Replace this agent's system prompt for this step only", { area: true, rows: 3 })));
+
+  // Skills are multi-select: a step commonly needs more than one methodology.
+  const skillsBox = el("div", "uc-skill-picker");
+  const chosen = new Set(step.skills || []);
+  for (const [slug, sk] of Object.entries(window.VOID_SKILLS || {})) {
+    const tag = el("label", "uc-skill-tag" + (chosen.has(slug) ? " on" : ""));
+    const cb = el("input"); cb.type = "checkbox"; cb.checked = chosen.has(slug);
+    cb.addEventListener("change", () => {
+      if (cb.checked) chosen.add(slug); else chosen.delete(slug);
+      step.skills = [...chosen];
+      tag.classList.toggle("on", cb.checked);
+      renderSkillOverrides();
+    });
+    tag.append(cb, document.createTextNode(sk.name || slug));
+    skillsBox.appendChild(tag);
+  }
+  b.appendChild(ucStepRow("Skills", skillsBox));
+
+  const overrideWrap = el("div", "uc-skill-overrides");
+  const renderSkillOverrides = () => {
+    overrideWrap.replaceChildren();
+    for (const slug of (step.skills || [])) {
+      const ta = el("textarea", "raw-ta uc-step-ta");
+      ta.rows = 2;
+      ta.placeholder = "Override the " + slug + " methodology for this step only";
+      ta.spellcheck = false;
+      ta.value = step.skillOverrides?.[slug] || "";
+      ta.addEventListener("input", () => {
+        step.skillOverrides = step.skillOverrides || {};
+        if (ta.value) step.skillOverrides[slug] = ta.value; else delete step.skillOverrides[slug];
+      });
+      overrideWrap.appendChild(ucStepRow(slug, ta));
+    }
+  };
+  renderSkillOverrides();
+  b.appendChild(overrideWrap);
+
+  const promptSel = el("select", "filter-sel");
+  const pnone = el("option"); pnone.value = ""; pnone.textContent = "— no template —";
+  promptSel.appendChild(pnone);
+  for (const p of (window.VOID_PROMPTS || [])) {
+    const o = el("option"); o.value = p.id; o.textContent = p.name; promptSel.appendChild(o);
+  }
+  promptSel.value = step.prompt || "";
+  promptSel.addEventListener("change", () => { step.prompt = promptSel.value; });
+  b.appendChild(ucStepRow("Prompt", promptSel));
+  b.appendChild(ucStepRow("Prompt override", ucStepInput(step, "promptOverride",
+    "Replace the template for this step only — {{tag}} placeholders still work", { area: true, rows: 3 })));
+
+  b.appendChild(ucStepRow("Goal", ucStepInput(step, "goal", "What this step must establish", { area: true })));
 
   const intrRow = el("div", "uc-step-row");
   const intrLab = el("label", "settings-label");
   const intrChk = el("input"); intrChk.type = "checkbox"; intrChk.checked = !!step.intrusive;
   intrChk.addEventListener("change", () => { step.intrusive = intrChk.checked; });
-  const track = el("span", "toggle-track");
-  intrLab.append(intrChk, track, document.createTextNode(" Intrusive"));
+  intrLab.append(intrChk, el("span", "toggle-track"), document.createTextNode(" Intrusive"));
   intrRow.appendChild(intrLab);
-  grid.appendChild(intrRow);
+  b.appendChild(intrRow);
 
-  card.appendChild(grid);
-  card.appendChild(ucBuildDecisionTree(step));
+  b.appendChild(ucStepRow("Then go to", ucGotoSelect(step, "next")));
+  return b;
+}
 
-  const val = el("div", "uc-step-body");
-  const vGrid = (label, key, ph) => {
-    const r = el("div", "uc-step-row");
-    const l = el("label", "settings-label-sm"); l.textContent = label; r.appendChild(l);
-    const i = el("input", "settings-inp"); i.type = "text"; i.placeholder = ph || ""; i.spellcheck = false;
-    i.value = key.split(".").reduce((o, k) => o?.[k], step) || "";
-    i.addEventListener("input", () => {
-      const parts = key.split("."); const last = parts.pop();
-      const tgt = parts.reduce((o, k) => (o[k] = o[k] || {}), step);
-      tgt[last] = i.value;
+// ── CONDITION step: the AI judges, the user defines the branches ────────────
+
+function ucBuildConditionBody(step) {
+  const b = el("div", "uc-step-body");
+  b.appendChild(ucStepRow("Check", ucStepInput(step, "check",
+    "What the AI must determine from everything logged so far", { area: true, rows: 3 })));
+
+  const rows = el("div", "uc-branches");
+  const render = () => {
+    rows.replaceChildren();
+    (step.branches || []).forEach((br, i) => {
+      const r = el("div", "uc-branch");
+      const kw = el("span", "uc-branch-kw"); kw.textContent = i === 0 ? "if" : "else if";
+      const cond = el("input", "settings-inp");
+      cond.type = "text"; cond.placeholder = "condition, e.g. a SQL error was returned"; cond.spellcheck = false;
+      cond.value = br.condition || "";
+      cond.addEventListener("input", () => { br.condition = cond.value; });
+      const arrow = el("span", "uc-branch-arrow"); arrow.textContent = "\u2192";
+      const goto = ucGotoSelect(br, "goto");
+      const del = el("button", "btn btn-xs btn-ghost uc-step-del");
+      del.type = "button"; del.textContent = "\u00d7";
+      del.addEventListener("click", () => { step.branches.splice(i, 1); render(); ucRefreshGotoTargets(); });
+      r.append(kw, cond, arrow, goto, del);
+      rows.appendChild(r);
     });
-    r.appendChild(i); val.appendChild(r);
+    const elseRow = el("div", "uc-branch");
+    const kw = el("span", "uc-branch-kw"); kw.textContent = "else";
+    const spacer = el("span", "uc-branch-spacer");
+    const arrow = el("span", "uc-branch-arrow"); arrow.textContent = "\u2192";
+    elseRow.append(kw, spacer, arrow, ucGotoSelect(step, "elseGoto"));
+    rows.appendChild(elseRow);
+    ucRefreshGotoTargets();
   };
-  vGrid("AI should", "toolGuidance.aiShould", "How the model should reason through this step");
-  vGrid("Context check", "validation.contextCheck", "How to confirm the finding is real");
-  vGrid("Impact", "validation.impactAssessment", "What proves exploitability");
-  card.appendChild(val);
+  b.appendChild(rows);
 
-  return card;
+  const add = el("button", "btn btn-xs btn-ghost");
+  add.type = "button"; add.textContent = "+ Add branch";
+  add.addEventListener("click", () => {
+    step.branches = step.branches || [];
+    step.branches.push({ condition: "", goto: "" });
+    render();
+  });
+  b.appendChild(add);
+  render();
+  return b;
+}
+
+// ── Triggers: checked after every step, can abort or divert the run ─────────
+
+function ucBuildTriggersField() {
+  const wrap = el("div", "uc-field");
+  const lab = el("label", "settings-label-sm"); lab.textContent = "Triggers";
+  wrap.appendChild(lab);
+  const hint = el("div", "uc-hint");
+  hint.textContent = "Evaluated after every step — a match stops the run or jumps to a step";
+  wrap.appendChild(hint);
+  const list = el("div", "uc-triggers"); list.id = "uc-triggers-list";
+  wrap.appendChild(list);
+
+  const add = el("button", "btn btn-sm btn-ghost");
+  add.type = "button"; add.textContent = "+ Add trigger";
+  add.addEventListener("click", () => { ucEditTriggers.push(ucNewTrigger()); ucRenderTriggers(); });
+  wrap.appendChild(add);
+  setTimeout(ucRenderTriggers, 0);
+  return wrap;
+}
+
+function ucRenderTriggers() {
+  const list = document.getElementById("uc-triggers-list");
+  if (!list) return;
+  list.replaceChildren();
+  ucEditTriggers.forEach((tr, i) => {
+    const row = el("div", "uc-trigger");
+    const name = el("input", "settings-inp uc-trigger-name");
+    name.type = "text"; name.placeholder = "trigger name"; name.spellcheck = false;
+    name.value = tr.name || "";
+    name.addEventListener("input", () => { tr.name = name.value; });
+
+    const cond = el("input", "settings-inp");
+    cond.type = "text"; cond.placeholder = "stop if\u2026 e.g. the target returned 5xx three times"; cond.spellcheck = false;
+    cond.value = tr.condition || "";
+    cond.addEventListener("input", () => { tr.condition = cond.value; });
+
+    const act = el("select", "filter-sel uc-trigger-act");
+    for (const [v, t] of [["stop", "stop the run"], ["goto", "jump to step"]]) {
+      const o = el("option"); o.value = v; o.textContent = t; act.appendChild(o);
+    }
+    act.value = tr.action || "stop";
+    const goto = ucGotoSelect(tr, "target");
+    const syncGoto = () => { goto.classList.toggle("hidden", act.value !== "goto"); };
+    act.addEventListener("change", () => { tr.action = act.value; syncGoto(); });
+    syncGoto();
+
+    const del = el("button", "btn btn-xs btn-ghost uc-step-del");
+    del.type = "button"; del.textContent = "\u00d7";
+    del.addEventListener("click", () => { ucEditTriggers.splice(i, 1); ucRenderTriggers(); });
+
+    row.append(name, cond, act, goto, del);
+    list.appendChild(row);
+  });
+  ucRefreshGotoTargets();
 }
 
 function ucBuildDecisionTree(step) {
@@ -10985,20 +11204,197 @@ let autoStepIndex = 0;
 let autoMaxSteps = 50;
 let autoWorkflowSteps = null; // array of workflow steps when running a workflow
 
+// ═══════════════════════════ WORKFLOW RUN ════════════════════════════════════
+// A run is a cursor over the workflow's steps plus a log of everything that has
+// happened. The log is what gives each agent context: a step does not see the
+// previous agent's chat, it sees the recorded outcome of every step before it.
+
+let wfRun = null;
+// Set while an AGENT step is in flight so the completion handler knows which step
+// to record against and where to go next.
+let wfPendingStep = null;
+
+function wfRunNew(wf) {
+  return {
+    workflowId: wf.id,
+    workflowName: wf.name,
+    startedAt: new Date().toISOString(),
+    status: "running",        // running | finished | stopped
+    cursor: wf.steps?.[0]?.id || null,
+    visited: [],              // step ids in execution order, for loop detection
+    log: [],
+  };
+}
+
+// Everything the run does lands here, and nothing else is the source of context.
+function wfLog(kind, text, data) {
+  if (!wfRun) return;
+  wfRun.log.push({ t: new Date().toISOString(), kind, text, data });
+  wfRenderLog();
+}
+
+function wfStepById(wf, id) { return (wf.steps || []).find(s => s.id === id); }
+
+function wfActiveWorkflow() {
+  if (!wfRun) return null;
+  return (window.VOID_WORKFLOWS || []).find(w => w.id === wfRun.workflowId) || null;
+}
+
+// The context block handed to the next agent. Deliberately the log rather than the
+// chat transcript, so a step is reproducible regardless of what the user typed.
+function wfBuildContext(wf) {
+  const parts = [];
+  if (wf.initialInstructions) parts.push("INITIAL INSTRUCTIONS:\n" + wf.initialInstructions);
+  if (wfRun?.log.length) {
+    const lines = wfRun.log
+      .filter(e => e.kind !== "note")
+      .map(e => `[${e.kind}] ${e.text}`);
+    parts.push("WORKFLOW LOG SO FAR:\n" + lines.join("\n"));
+  }
+  const proj = typeof pentestGetActive === "function" ? pentestGetActive() : null;
+  if (proj?.findings?.length) {
+    parts.push("FINDINGS SO FAR:\n" + proj.findings
+      .map(f => `- [${f.severity || "info"}] ${f.title || f.type} @ ${f.url || ""}`).join("\n"));
+  }
+  return parts.join("\n\n");
+}
+
+// Assemble the system prompt for a step: the step's agent (or its inline
+// override), plus the bodies of every skill the step selected.
+function wfStepSystemPrompt(step) {
+  let base = "";
+  if (step.agentOverride) base = step.agentOverride;
+  else if (step.agent) base = (window.VOID_AGENTS || []).find(a => a.id === step.agent)?.systemPrompt || "";
+  if (!base) base = getActiveSystemPrompt();
+
+  const blocks = [base];
+  for (const slug of (step.skills || [])) {
+    const body = step.skillOverrides?.[slug] || window.VOID_SKILLS?.[slug]?.body || "";
+    if (body) blocks.push(`# SKILL: ${window.VOID_SKILLS?.[slug]?.name || slug}\n${body}`);
+  }
+  return blocks.join("\n\n");
+}
+
+// Render the step's prompt template, falling back to its goal when none is set.
+function wfStepMessage(wf, step) {
+  const tpl = step.promptOverride
+    || (step.prompt ? (window.VOID_PROMPTS || []).find(p => p.id === step.prompt)?.template : "")
+    || "";
+  const proj = typeof pentestGetActive === "function" ? pentestGetActive() : null;
+  const target = proj?.scope?.inScope?.[0]?.target || proj?.name || "the target";
+  const vars = { target, goal: step.goal || "", step: step.name || step.id };
+  const rendered = tpl.replace(/\{\{(\w+)\}\}/g, (m, k) => vars[k] ?? m);
+
+  const parts = [];
+  const ctx = wfBuildContext(wf);
+  if (ctx) parts.push(ctx);
+  parts.push(`STEP: ${step.name || step.id}`);
+  if (step.goal) parts.push("GOAL: " + step.goal);
+  if (rendered) parts.push(rendered);
+  if (step.decisionTree?.length) {
+    parts.push("DECISION TREE — work through these in order:\n" + step.decisionTree.map((d, i) =>
+      `${i + 1}. ${d.action}` +
+      (d.ifPositive ? `\n   if yes: ${d.ifPositive}` : "") +
+      (d.ifNegative ? `\n   if no: ${d.ifNegative}` : "") +
+      (d.stopWhen ? `\n   stop when: ${d.stopWhen}` : "")).join("\n"));
+  }
+  if (step.validation?.contextCheck) parts.push("VALIDATE: " + step.validation.contextCheck);
+  return parts.join("\n\n");
+}
+
+// Ask the judge model a yes/no question about the run so far. Conditions and
+// triggers are both "does the log support this claim?", so they share this.
+async function wfEvaluate(question, context) {
+  const provider = settings.aiJudgeProvider || settings.aiPrimaryProvider || "ollama";
+  const model = settings.aiJudgeModel || settings.aiPrimaryModel || "";
+  const endpoint = settings.aiJudgeEndpoint || settings.aiPrimaryEndpoint || "";
+  const apiKey = settings.aiJudgeKey || settings.aiPrimaryKey || "";
+  const prompt = `You are evaluating a penetration-testing workflow.
+
+${context}
+
+QUESTION: ${question}
+
+Answer with a single JSON object and nothing else:
+{"answer": true|false, "reason": "one sentence"}`;
+
+  try {
+    const res = await fetch("http://localhost:17590/ai/judge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, apiKey, model, endpoint, candidate: { prompt } }),
+    });
+    const data = await res.json();
+    const raw = data.result || data.content || "";
+    const m = String(raw).match(/\{[\s\S]*\}/);
+    if (m) {
+      const parsed = JSON.parse(m[0]);
+      return { answer: !!parsed.answer, reason: parsed.reason || "" };
+    }
+    return { answer: false, reason: "unparseable judge response" };
+  } catch (e) {
+    // Fail closed: an unreachable judge must not silently take a branch.
+    return { answer: false, reason: "judge unavailable: " + (e?.message || e) };
+  }
+}
+
+// Triggers are checked after every step and can abort or divert the run.
+async function wfCheckTriggers(wf) {
+  for (const tr of (wf.triggers || [])) {
+    if (!tr.condition) continue;
+    const { answer, reason } = await wfEvaluate(tr.condition, wfBuildContext(wf));
+    if (!answer) continue;
+    wfLog("trigger", `${tr.name || tr.id} fired — ${reason}`, { trigger: tr.id });
+    if (tr.action === "goto" && tr.target && wfStepById(wf, tr.target)) {
+      wfRun.cursor = tr.target;
+      return "goto";
+    }
+    wfRun.status = "stopped";
+    return "stop";
+  }
+  return null;
+}
+
+// Resolve a CONDITION step to the next step id.
+async function wfResolveCondition(wf, step) {
+  const ctx = wfBuildContext(wf);
+  const check = step.check ? step.check + "\n\n" : "";
+  for (const br of (step.branches || [])) {
+    if (!br.condition) continue;
+    const { answer, reason } = await wfEvaluate(check + br.condition, ctx);
+    wfLog("condition", `${step.name || step.id}: "${br.condition}" → ${answer ? "yes" : "no"} (${reason})`,
+      { step: step.id, taken: answer });
+    if (answer) return br.goto || null;
+  }
+  wfLog("condition", `${step.name || step.id}: no branch matched, taking else`, { step: step.id });
+  return step.elseGoto || null;
+}
+
+// The step after `step` when nothing branches: an explicit `next`, else the one
+// following it in the list.
+function wfDefaultNext(wf, step) {
+  if (step.next && wfStepById(wf, step.next)) return step.next;
+  const i = (wf.steps || []).findIndex(s => s.id === step.id);
+  return wf.steps[i + 1]?.id || null;
+}
+
 function autoStart(workflowId) {
   if (autoRunning) return;
   autoRunning = true;
   autoPaused = false;
   autoStepIndex = 0;
 
-  // If a workflow is specified, load its steps
-  if (workflowId && window.VOID_WORKFLOWS) {
-    const wf = window.VOID_WORKFLOWS.find(w => w.id === workflowId);
-    if (wf) {
-      autoWorkflowSteps = wf.steps.slice();
-      autoMaxSteps = wf.steps.length;
-    }
+  const wf = workflowId ? (window.VOID_WORKFLOWS || []).find(w => w.id === workflowId) : null;
+  if (wf) {
+    wfRun = wfRunNew(wf);
+    autoWorkflowSteps = wf.steps.slice();
+    // A branching flow can revisit steps, so the cap is a runaway guard rather
+    // than the step count.
+    autoMaxSteps = Math.max(50, wf.steps.length * 4);
+    wfLog("start", `Workflow "${wf.name}" started`, { workflowId: wf.id });
+    if (wf.initialInstructions) wfLog("instructions", wf.initialInstructions);
   } else {
+    wfRun = null;
     autoWorkflowSteps = null;
     autoMaxSteps = 50;
   }
@@ -11010,6 +11406,10 @@ function autoStart(workflowId) {
 function autoStop() {
   autoRunning = false;
   autoPaused = false;
+  if (wfRun && wfRun.status === "running") {
+    wfRun.status = "stopped";
+    wfLog("stop", "Run stopped");
+  }
   autoWorkflowSteps = null;
   autoUpdateUI();
 }
@@ -11038,54 +11438,122 @@ function autoUpdateUI() {
     status.textContent = autoPaused ? 'Paused' : 'Autonomous';
     status.className = 'ai-auto-status' + (autoPaused ? ' paused' : '');
   }
-  if (step && autoWorkflowSteps) {
-    const current = autoWorkflowSteps[autoStepIndex];
-    step.textContent = current ? 'Step: ' + current.name : 'Complete';
-  } else if (step) {
-    step.textContent = '';
+  if (step) {
+    const wf = wfActiveWorkflow();
+    const cur = wf && wfRun ? wfStepById(wf, wfRun.cursor) : null;
+    step.textContent = cur ? 'Step: ' + (cur.name || cur.id) : (wfRun ? 'Complete' : '');
   }
-  if (count) {
-    count.textContent = 'Step ' + (autoStepIndex + 1) + '/' + autoMaxSteps;
-  }
+  if (count) count.textContent = 'Step ' + (autoStepIndex + 1) + '/' + autoMaxSteps;
 }
 
-function autoNext() {
+async function autoNext() {
   if (!autoRunning || autoPaused || aiSending) return;
 
   if (autoStepIndex >= autoMaxSteps) {
+    wfLog("stop", `Step budget exhausted after ${autoStepIndex} steps`);
     autoStop();
-    aiAddMessage('assistant', 'Autonomous scan complete (' + autoStepIndex + ' steps).');
+    aiAddMessage('assistant', 'Autonomous run stopped — step budget exhausted (' + autoStepIndex + ').');
     return;
   }
 
-  let message;
-  if (autoWorkflowSteps && autoWorkflowSteps[autoStepIndex]) {
-    const step = autoWorkflowSteps[autoStepIndex];
-    const skill = step.skill ? window.VOID_SKILLS?.[step.skill] : null;
-    if (skill) {
-      slashActiveSkill = step.skill;
-      message = 'Execute step "' + step.name + '": Test for ' + skill.name + ' vulnerabilities on the target. Follow the methodology.';
-    } else if (step.type === 'AGENT') {
-      message = 'Execute step "' + step.name + '": ' + (step.agent || step.name) + '. Use the appropriate methodology.';
-    } else {
-      message = 'Execute step "' + step.name + '".';
-    }
-  } else {
-    // Free-form autonomous — AI decides what to do next
-    if (autoStepIndex === 0) {
-      message = 'Start the pentest. Begin with reconnaissance of the target. Map endpoints, technologies, and attack surface.';
-    } else {
-      message = 'Continue the pentest. Review findings so far and test the next vulnerability class. If all classes are covered, generate a summary report.';
-    }
+  // Free-form autonomous mode: no workflow, the model decides what is next.
+  const wf = wfActiveWorkflow();
+  if (!wf || !wfRun) {
+    const message = autoStepIndex === 0
+      ? 'Start the pentest. Begin with reconnaissance of the target. Map endpoints, technologies, and attack surface.'
+      : 'Continue the pentest. Review findings so far and test the next vulnerability class. If all classes are covered, generate a summary report.';
+    autoStepIndex++;
+    autoUpdateUI();
+    const input = document.getElementById('ai-input');
+    if (input) input.value = message;
+    aiSendMessage();
+    return;
   }
 
+  const step = wfStepById(wf, wfRun.cursor);
+  if (!step) {
+    wfRun.status = "finished";
+    wfLog("finish", "No step left to run");
+    autoStop();
+    aiAddMessage('assistant', 'Workflow complete.');
+    return;
+  }
+
+  wfRun.visited.push(step.id);
   autoStepIndex++;
   autoUpdateUI();
 
-  // Inject the message into the chat input and send
+  if (step.type === "FINISH") {
+    wfRun.status = "finished";
+    wfLog("finish", step.summary || `Reached ${step.name || step.id}`, { step: step.id });
+    autoStop();
+    aiAddMessage('assistant', 'Workflow finished: ' + (step.summary || step.name || step.id));
+    return;
+  }
+
+  if (step.type === "CONDITION") {
+    wfLog("step", `Evaluating condition "${step.name || step.id}"`, { step: step.id });
+    const target = await wfResolveCondition(wf, step);
+    const fired = await wfCheckTriggers(wf);
+    if (fired === "stop") { autoStop(); return; }
+    if (fired !== "goto") wfRun.cursor = target || wfDefaultNext(wf, step);
+    if (!wfRun.cursor) {
+      wfRun.status = "finished";
+      wfLog("finish", "Flow ran off the end after a condition");
+      autoStop();
+      return;
+    }
+    autoUpdateUI();
+    autoNext();
+    return;
+  }
+
+  // AGENT step — run it through the chat with its own system prompt.
+  wfLog("step", `Running "${step.name || step.id}"` +
+    (step.agent ? ` as ${step.agent}` : "") +
+    (step.skills?.length ? ` with skills: ${step.skills.join(", ")}` : ""), { step: step.id });
+
+  wfPendingStep = step;
   const input = document.getElementById('ai-input');
-  if (input) input.value = message;
-  aiSendMessage();
+  if (input) input.value = wfStepMessage(wf, step);
+  aiSendMessage({ systemPrompt: wfStepSystemPrompt(step) });
+}
+
+// Called when the chat turn for an AGENT step finishes.
+async function wfOnStepComplete(assistantText) {
+  if (!wfRun || !wfPendingStep) return;
+  const wf = wfActiveWorkflow();
+  const step = wfPendingStep;
+  wfPendingStep = null;
+  if (!wf) return;
+
+  wfLog("result", `${step.name || step.id}: ${(assistantText || "").slice(0, 600)}`, { step: step.id });
+
+  const fired = await wfCheckTriggers(wf);
+  if (fired === "stop") { autoStop(); return; }
+  if (fired !== "goto") wfRun.cursor = wfDefaultNext(wf, step);
+
+  if (!wfRun.cursor) {
+    wfRun.status = "finished";
+    wfLog("finish", "Reached the end of the workflow");
+    autoStop();
+    aiAddMessage('assistant', 'Workflow complete.');
+    return;
+  }
+  autoUpdateUI();
+}
+
+function wfRenderLog() {
+  const box = document.getElementById('ai-wf-log');
+  if (!box || !wfRun) return;
+  box.replaceChildren();
+  for (const e of wfRun.log) {
+    const row = el('div', 'ai-wf-log-row ai-wf-log-' + e.kind);
+    row.appendChild(txt('span', 'ai-wf-log-kind', e.kind));
+    row.appendChild(txt('span', 'ai-wf-log-text', e.text));
+    box.appendChild(row);
+  }
+  box.scrollTop = box.scrollHeight;
 }
 
 // ── Judge / Refute Engine ────────────────────────────────────────────────────
@@ -11439,7 +11907,9 @@ function aiAddMessage(type, text, skipPush) {
   if (!skipPush) aiMessages.push({ type, text });
 }
 
-async function aiSendMessage() {
+// opts.systemPrompt lets a workflow step run as its own agent with its own skills
+// injected, without disturbing the persona the user picked for chat.
+async function aiSendMessage(opts = {}) {
   const input = document.getElementById("ai-input");
   const text = input.value.trim();
   if (!text || aiSending) return;
@@ -11460,7 +11930,7 @@ async function aiSendMessage() {
   const provider = document.getElementById("ai-primary-provider")?.value || settings.aiPrimaryProvider || "claude-cli";
   const apiKey = document.getElementById("ai-primary-key")?.value || settings.aiPrimaryKey || "";
   const model = document.getElementById("ai-primary-model")?.value || settings.aiPrimaryModel || "";
-  const systemPrompt = getActiveSystemPrompt();
+  const systemPrompt = opts.systemPrompt || getActiveSystemPrompt();
   const customUrl = document.getElementById("ai-primary-endpoint")?.value || settings.aiPrimaryEndpoint || "";
   const cliPath = "claude";
 
@@ -11511,6 +11981,13 @@ async function aiSendMessage() {
   aiSending = false;
   document.getElementById("ai-send").disabled = false;
   input.focus();
+
+  // Record the step's outcome and pick the next cursor before scheduling the next
+  // turn — the branch decision depends on what this step just produced.
+  if (wfPendingStep) {
+    const last = [...aiMessages].reverse().find(m => m.role === "assistant");
+    await wfOnStepComplete(last?.content || "");
+  }
 
   // Autonomous mode: auto-send next step after a short delay
   if (autoRunning && !autoPaused) {
@@ -13191,7 +13668,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ── AI Chat ─────────────────────────────────────────────────────────────────
   initBlock("ai-chat", () => {
-    document.getElementById("ai-send").addEventListener("click", aiSendMessage);
+    document.getElementById("ai-send").addEventListener("click", () => aiSendMessage());
     document.getElementById("ai-input").addEventListener("keydown", e => {
       if (slashHandleKey(e)) return;
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); aiSendMessage(); }
@@ -13274,6 +13751,11 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById('ai-ctx-deactivate')?.addEventListener('click', pentestDeactivateProject);
 
     // Autonomous mode controls
+    document.getElementById('ai-auto-log-btn')?.addEventListener('click', () => {
+      const box = document.getElementById('ai-wf-log');
+      box?.classList.toggle('hidden');
+      if (box && !box.classList.contains('hidden')) wfRenderLog();
+    });
     document.getElementById('ai-auto-pause')?.addEventListener('click', autoPause);
     document.getElementById('ai-auto-cancel')?.addEventListener('click', autoStop);
 

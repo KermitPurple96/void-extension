@@ -2037,10 +2037,14 @@
             <span class="ai-auto-count" id="ai-auto-count"></span>
           </div>
           <div class="ai-auto-controls">
+            <button id="ai-auto-log-btn" class="btn btn-xs btn-ghost" title="Show the run log fed to each agent">Log</button>
             <button id="ai-auto-pause" class="btn btn-xs btn-ghost">Pause</button>
             <button id="ai-auto-cancel" class="btn btn-xs btn-danger-ghost">Stop</button>
           </div>
         </div>
+        <!-- Everything the run does is recorded here; this log, not the chat
+             transcript, is what later steps receive as context. -->
+        <div id="ai-wf-log" class="ai-wf-log hidden"></div>
 
         <div id="ai-messages" class="ai-messages"></div>
         <!-- Slash command autocomplete -->
@@ -2129,7 +2133,7 @@
     </div>
   </div>
 
-  <!-- ═══ User Content Editor (persona / skill / workflow / prompt) ═════════ -->
+  <!-- ═══ User Content Editor (agent / skill / workflow / prompt) ══════════ -->
   <div id="uc-editor-overlay" class="ai-wizard-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="uc-editor-title">
     <div class="ai-wizard-modal uc-editor-modal">
       <div class="ai-wizard-header">
@@ -2763,7 +2767,7 @@
       <!-- AI Settings subtab bar -->
       <div class="ai-settings-tabs">
         <button class="ai-settings-tab active" data-aitab="models">Models</button>
-        <button class="ai-settings-tab" data-aitab="persona">Persona</button>
+        <button class="ai-settings-tab" data-aitab="agents">Agents</button>
         <button class="ai-settings-tab" data-aitab="engagement">Engagement</button>
         <button class="ai-settings-tab" data-aitab="vulns">Vulns</button>
         <button class="ai-settings-tab" data-aitab="skills">Skills</button>
@@ -2903,13 +2907,13 @@
 
         </div><!-- end models pane -->
 
-        <!-- ═══ TAB: Persona ══════════════════════════════════ -->
-        <div class="ai-settings-pane hidden" data-aitab="persona">
+        <!-- ═══ TAB: Agents ═══════════════════════════════════ -->
+        <div class="ai-settings-pane hidden" data-aitab="agents">
           <div class="settings-section">
-            <div class="settings-section-title">Agent Persona</div>
-            <div class="settings-section-desc">Select the AI personality and system prompt used in chat.</div>
+            <div class="settings-section-title">Agents</div>
+            <div class="settings-section-desc">Agents are the personalities and system prompts the AI runs as, in chat and in each workflow step.</div>
             <div class="settings-row">
-              <label class="settings-label-sm">Persona</label>
+              <label class="settings-label-sm">Agent</label>
               <select id="ai-persona" class="filter-sel">
                 <option value="pentester">AI Pentester</option>
                 <option value="analyst">Analyst</option>
@@ -2938,7 +2942,7 @@
               <textarea id="ai-custom-system" class="raw-ta settings-ta" rows="6" spellcheck="false" placeholder="Custom system prompt..."></textarea>
             </div>
           </div>
-        </div><!-- end persona pane -->
+        </div><!-- end agents pane -->
 
         <!-- ═══ TAB: Engagement ═══════════════════════════════ -->
         <div class="ai-settings-pane hidden" data-aitab="engagement">

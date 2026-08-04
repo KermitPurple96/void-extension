@@ -2925,7 +2925,36 @@ html.theme-hacker {
 .ai-wf-step-validation { font-size: 11px; opacity: 0.75; margin-top: 4px; }
 .ai-wf-badge { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: var(--bg2); margin-right: 6px; }
 
-/* User content editor (persona / skill / workflow / prompt) */
+/* Workflow run log */
+.ai-wf-log { max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--bg2); padding: 6px; font-size: 11px; font-family: var(--mono); }
+.ai-wf-log-row { display: flex; gap: 6px; padding: 2px 0; border-bottom: 1px solid rgba(128,128,128,0.08); }
+.ai-wf-log-kind { flex: none; width: 74px; opacity: 0.6; text-transform: uppercase; font-size: 9px; padding-top: 2px; }
+.ai-wf-log-text { flex: 1; min-width: 0; word-break: break-word; }
+.ai-wf-log-trigger .ai-wf-log-kind, .ai-wf-log-stop .ai-wf-log-kind { color: var(--red, #e55); }
+.ai-wf-log-finish .ai-wf-log-kind, .ai-wf-log-start .ai-wf-log-kind { color: var(--green, #3fb950); }
+.ai-wf-log-condition .ai-wf-log-kind { color: var(--accent); }
+
+/* Workflow step editor: types, skill picker, branches, triggers */
+.uc-step-condition { border-left: 3px solid var(--accent); }
+.uc-step-finish { border-left: 3px solid var(--green, #3fb950); }
+.uc-skill-picker { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; max-height: 110px; overflow-y: auto; }
+.uc-skill-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.uc-skill-tag.on { border-color: var(--accent); color: var(--accent); }
+.uc-skill-tag input { margin: 0; }
+.uc-skill-overrides { display: flex; flex-direction: column; gap: 4px; }
+.uc-branches { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.uc-branch { display: flex; align-items: center; gap: 6px; }
+.uc-branch-kw { flex: none; width: 50px; font-family: var(--mono); font-size: 11px; color: var(--accent); }
+.uc-branch-spacer { flex: 1; }
+.uc-branch-arrow { flex: none; opacity: 0.5; }
+.uc-branch > input { flex: 1; }
+.uc-triggers { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.uc-trigger { display: flex; align-items: center; gap: 6px; }
+.uc-trigger-name { width: 130px; flex: none; }
+.uc-trigger > input:nth-of-type(2) { flex: 1; }
+.uc-trigger-act { flex: none; }
+
+/* User content editor (agent / skill / workflow / prompt) */
 .uc-toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .uc-editor-modal { width: 780px; }
 .uc-editor-body { padding: 16px 20px; max-height: 62vh; overflow-y: auto; }
