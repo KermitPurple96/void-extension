@@ -230,12 +230,15 @@ The `\n\n` breaks the prompt boundary - the LLM reads the injected text as a
 system instruction.
 
 ### MCP path traversal
-Known CVEs in MCP server implementations:
-- CVE-2025-53109: File read via path traversal in MCP file server
-- CVE-2025-53110: File write via path traversal
-- CVE-2025-5273: Directory traversal in resource access
+MCP servers that expose file or resource access tools are vulnerable to path
+traversal if they do not validate paths:
 
-Test any MCP server's file/resource access tools with traversal payloads.
+Test any MCP server's file/resource access tools with traversal payloads:
+```
+../../../etc/passwd
+..%2f..%2f..%2fetc%2fpasswd
+```
+Check whether the MCP server restricts access to its declared root directory.
 
 ### MCP credential exposure
 Check if MCP server configurations expose:
@@ -275,20 +278,22 @@ LLMs may hallucinate. To distinguish real exfiltration from confabulation:
 1. Ask for the same sensitive data twice in separate conversations.
 2. If both responses match, it is real data. If they differ, likely confabulation.
 
-## Step 8: OWASP ASI Top 10 (2026)
+## Step 8: OWASP Top 10 for LLM Applications
+
+Reference the OWASP Top 10 for LLM Applications (v2.0, 2025) as a checklist:
 
 | ID | Risk | What to test |
 |---|---|---|
-| ASI01 | Prompt Injection | Steps 2-4 above |
-| ASI02 | Tool Misuse | Step 5: unauthorized tool calls |
-| ASI03 | Privilege Escalation | AI accessing admin tools or other users' data |
-| ASI04 | Data Exfiltration | Step 7: markdown image, DNS, links |
-| ASI05 | Insecure Credential Storage | API keys in client-side code, MCP configs |
-| ASI06 | Supply Chain | Compromised MCP servers, poisoned models |
-| ASI07 | Excessive Permissions | AI has more tool access than needed |
-| ASI08 | Logging Gaps | AI actions not logged for audit |
-| ASI09 | Resource Exhaustion | Infinite loops, large context, repeated tool calls |
-| ASI10 | Improper Error Handling | Error messages revealing internals |
+| LLM01 | Prompt Injection | Steps 2-4 above |
+| LLM02 | Sensitive Information Disclosure | Step 7: data exfiltration channels |
+| LLM03 | Supply Chain | Compromised MCP servers, poisoned models |
+| LLM04 | Data and Model Poisoning | Step 4: RAG poisoning |
+| LLM05 | Improper Output Handling | Markdown image rendering, unescaped output |
+| LLM06 | Excessive Agency | Step 5: tool abuse, excessive permissions |
+| LLM07 | System Prompt Leakage | Step 3: system prompt extraction |
+| LLM08 | Vector and Embedding Weaknesses | RAG corpus poisoning |
+| LLM09 | Misinformation | Run-twice verification for confabulation |
+| LLM10 | Unbounded Consumption | Resource exhaustion, infinite loops |
 
 ## Step 9: Record the finding
 

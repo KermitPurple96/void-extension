@@ -166,7 +166,7 @@ submits credentials to attacker endpoint. This is CSS-only clickjacking.
 Confirm that exfiltrated data arrives at your callback.
 
 ### Actions
-1. Set up an Interactsh or OOB listener with `get_oob_url`.
+1. Set up an Interactsh or OOB listener.
 2. Inject the exfiltration CSS for the first character position.
 3. Visit the page (or have it rendered — email, PDF, etc.).
 4. Check for callbacks — each callback URL reveals one character.
@@ -183,7 +183,7 @@ value on the page.
 | CSS injection + | Result |
 |---|---|
 | CSRF token exfiltration | Full CSRF bypass → any state-changing action |
-| No HttpOnly flag | Session cookie theft via `url()` in computed style |
+| Hidden input values (API keys, tokens) | Data theft without any JavaScript execution |
 | PDF generator (wkhtmltopdf, Puppeteer) | SSRF via `url(http://169.254.169.254/)` in CSS |
 | Email template (HTML email) | Phishing via layout manipulation, tracking via `url()` |
 | Stored injection (profile, comments) | Persistent exfiltration from every visitor |

