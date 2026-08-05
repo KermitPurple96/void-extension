@@ -76,7 +76,7 @@ test.describe('Void Extension AI Pentest', () => {
   test('Panel loads', async () => { expect(await page.textContent('body')).toBeTruthy(); });
   test('21+ tabs', async () => { expect(await page.locator('[data-tab]').count()).toBeGreaterThanOrEqual(20); });
   test('VOID_AGENTS=12', async () => { expect(await page.evaluate(() => window.VOID_AGENTS?.length)).toBe(12); });
-  test('VOID_SKILLS=49', async () => { expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS||{}).length)).toBe(49); });
+  test('VOID_SKILLS=55', async () => { expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS||{}).length)).toBe(55); });
   test('VOID_WORKFLOWS=23', async () => { expect(await page.evaluate(() => window.VOID_WORKFLOWS?.length)).toBe(23); });
   test('VOID_PROMPTS=20', async () => { expect(await page.evaluate(() => window.VOID_PROMPTS?.length)).toBe(20); });
   test('VOID_PAYLOADS=10', async () => { expect(await page.evaluate(() => Object.keys(window.VOID_PAYLOADS||{}).length)).toBe(10); });
@@ -692,7 +692,7 @@ test.describe('Void Extension AI Pentest', () => {
     expect(await page.evaluate(() => window.VOID_PROMPTS.length)).toBe(20);
     expect(await page.evaluate(() => window.VOID_AGENTS.length)).toBe(12);
     expect(await page.evaluate(() => window.VOID_WORKFLOWS.length)).toBe(23);
-    expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS).length)).toBe(49);
+    expect(await page.evaluate(() => Object.keys(window.VOID_SKILLS).length)).toBe(55);
   });
 
   test('Workflows: detail renders goals and decision trees', async () => {

@@ -1,231 +1,222 @@
----
-name: "oauth"
-description: "OAuth 2.0 / OpenID Connect Security Testing"
-version: "1.0.0"
-author: "void-extension"
-tags: ["pentest", "oauth", "oidc", "authorization", "token", "pkce", "redirect-uri", "jwk"]
-trigger_patterns:
-  - "/oauth"
-  - "test oauth"
-  - "test oidc"
-  - "oauth security"
-  - "test redirect_uri"
-  - "test authorization flow"
-  - "pkce bypass"
-  - "token theft"
----
-
-# OAuth 2.0 / OIDC Security Testing Methodology
-
-Test OAuth 2.0 and OpenID Connect implementations for redirect URI manipulation,
-state parameter CSRF, PKCE bypass, authorization code replay, token theft via
-referrer, scope escalation, and JWK/JWKS abuse.
+# OAuth / OpenID Connect Testing
 
 ## Scope and preconditions
 
-Applies to any application that uses OAuth 2.0 (authorization code, implicit,
-client credentials) or OpenID Connect for authentication/authorization — both as
-a client (relying party) and as a provider (authorization server).
+Applies to any application implementing OAuth 2.0 or OpenID Connect for
+authentication or authorization: social login (Google, Facebook, GitHub),
+SSO integrations, API authorization, or any endpoint exchanging authorization
+codes or tokens. Covers Authorization Code, Implicit, Device, and Client
+Credentials flows.
 
-You need at least one valid OAuth client registration and the ability to observe
-the authorization flow (redirects, tokens, codes).
-
-It does **not** cover: JWT cryptographic attacks in isolation (use `jwt`), or
-general session management (use `auth`).
+It does **not** cover: SAML SSO (use `saml`), JWT token format attacks outside
+OAuth (use `jwt`), or session management after OAuth login (use `session-management`).
 
 ## Rules of engagement
 
-- NEVER use stolen tokens to access real user data. Prove token theft by
-  demonstrating the redirect to an attacker-controlled URI, then stop.
-- Record every authorization URL, redirect, and token exchange with
-  `add_pentest_finding`.
-- In mode `ask`: confirm the flaw and stop before accessing protected resources.
+- MUST use only test accounts you control on both the application and the OAuth
+  provider.
+- NEVER intercept or redirect authorization flows for accounts you do not own.
+- MUST NOT register rogue OAuth applications on the provider unless authorized.
+- MUST handle tokens carefully — revoke test tokens after testing.
 
 ## Workflow
 
-- [ ] 1. Map the OAuth flow (grant type, endpoints, parameters)
-- [ ] 2. Test redirect_uri manipulation
-- [ ] 3. Test state parameter (CSRF)
+- [ ] 1. Map the OAuth flow and identify grant type
+- [ ] 2. Test redirect_uri validation
+- [ ] 3. Test state parameter (CSRF protection)
 - [ ] 4. Test PKCE enforcement
-- [ ] 5. Test authorization code handling
-- [ ] 6. Test token security
-- [ ] 7. Test scope escalation
-- [ ] 8. Test JWK/JWKS abuse
+- [ ] 5. Test token handling and leakage
+- [ ] 6. Test scope escalation
+- [ ] 7. Test account linking attacks
+- [ ] 8. Test implicit flow token theft
+- [ ] 9. Test device flow abuse
+- [ ] 10. Record findings
 
 ## Step 1: Map the OAuth flow
 
-Use `search_responses` and `get_endpoints` to find OAuth-related endpoints:
-
-- `/authorize`, `/oauth/authorize`, `/auth`
-- `/token`, `/oauth/token`
-- `/callback`, `/oauth/callback`
-- `/.well-known/openid-configuration`
-- `/.well-known/jwks.json`
-
-Use `send_request` to fetch `/.well-known/openid-configuration` — it reveals
-all endpoints, supported grant types, and token signing algorithms.
-
-Identify: grant type (code, implicit, hybrid), client_id, redirect_uri,
-response_type, scope, and whether PKCE is used.
-
-## Step 2: redirect_uri manipulation
-
-The most impactful OAuth attack. If the authorization server does not strictly
-validate redirect_uri, an attacker can steal authorization codes or tokens.
-
-### Payloads
-
-Use `send_request` to submit authorization requests with modified redirect_uri:
-
-| Technique | Payload |
-|-----------|---------|
-| Open redirect on client | `redirect_uri=https://client.com/callback/../redirect?url=https://evil.com` |
-| Subdomain | `redirect_uri=https://evil.client.com/callback` |
-| Path traversal | `redirect_uri=https://client.com/callback/../../attacker-page` |
-| Parameter injection | `redirect_uri=https://client.com/callback?next=https://evil.com` |
-| Port manipulation | `redirect_uri=https://client.com:8443/callback` |
-| URL encoding | `redirect_uri=https://client.com%40evil.com/callback` |
-| Fragment | `redirect_uri=https://client.com/callback#@evil.com` |
-| Localhost | `redirect_uri=http://localhost/callback` |
-| Exact match bypass | `redirect_uri=https://client.com/callbackevil` |
-| Removed entirely | Omit redirect_uri — does the server use a default? |
-
-### Detection
-
-If the authorization server redirects to your modified URI with a `code=` or
-`access_token=` parameter, the redirect_uri validation is broken.
-
-Use `compare_responses` between a valid and invalid redirect_uri to see if error
-handling differs (some servers silently accept bad URIs).
-
-## Step 3: State parameter CSRF
+### Goal
+Identify the OAuth implementation details.
 
 ### Actions
+Use `search_responses` to find OAuth-related endpoints:
+- Authorization: `/authorize`, `/oauth/authorize`, `/auth`
+- Token exchange: `/token`, `/oauth/token`, `/api/oauth/callback`
+- JWKS: `/.well-known/jwks.json`, `/.well-known/openid-configuration`
+- Callback: `/callback`, `/auth/callback`, `/login/callback`
 
-1. Initiate an OAuth flow and capture the authorization URL. Note the `state`
-   parameter.
+Capture a full login flow and identify:
+- Grant type: Authorization Code, Implicit, Device, Client Credentials
+- `response_type`: `code` (auth code), `token` (implicit), `id_token`
+- `redirect_uri`: the registered callback URL
+- `state`: CSRF token (if present)
+- `code_challenge` / `code_challenge_method`: PKCE (if present)
+- `scope`: requested permissions
+- `nonce`: replay protection for OpenID Connect
 
-2. Test without state: remove the `state` parameter entirely from the
-   authorization URL. If the flow completes, the application is vulnerable to
-   OAuth CSRF — an attacker can force a victim to link the attacker's account.
+## Step 2: Test redirect_uri validation
 
-3. Test state reuse: complete a flow, capture the state value, then replay it
-   in a new flow. If accepted, state is not single-use.
+### Goal
+Bypass redirect_uri restrictions to steal authorization codes or tokens.
 
-4. Test state predictability: collect 10+ state values and look for patterns
-   (sequential, timestamp-based, short values).
+### 11 bypass techniques
 
-## Step 4: PKCE enforcement
+| # | Technique | Payload |
+|---|---|---|
+| 1 | Path traversal | `/callback/../evil` |
+| 2 | Double URL encode | `/callback%252f..%252fevil` |
+| 3 | @ bypass | `https://legit.com@evil.com/callback` |
+| 4 | Fragment injection | `https://legit.com/callback#@evil.com` |
+| 5 | Backslash | `https://legit.com\@evil.com/callback` |
+| 6 | Whitespace | `https://legit.com%20.evil.com/callback` |
+| 7 | Subdomain match bypass | `https://evil-legit.com/callback` if check is `contains('legit.com')` |
+| 8 | URL-encoded dots | `https://legit%2Ecom.evil.com/callback` |
+| 9 | Regex bypass | `https://legitimate.com/callback` if regex is `/legit.com/` (unescaped dot) |
+| 10 | Parameter pollution | `?redirect_uri=legit&redirect_uri=evil` |
+| 11 | Open redirect chain | `redirect_uri=https://legit.com/redirect?url=https://evil.com` |
 
-PKCE (Proof Key for Code Exchange) prevents code interception.
+Test each with `send_request`. Use `compare_responses` to see how the redirect_uri
+is reflected. The authorization server may validate differently than the application.
 
-1. Initiate a flow with `code_challenge` and `code_challenge_method=S256`.
-2. At the token exchange, omit `code_verifier`. If the token is issued, PKCE
-   is not enforced.
-3. Send a wrong `code_verifier`. If the token is still issued, PKCE validation
-   is broken.
-4. Try `code_challenge_method=plain` — if accepted, an attacker who intercepts
-   the challenge can derive the verifier.
+### Impact
+A bypassed redirect_uri allows stealing the authorization code (in auth code flow)
+or the token directly (in implicit flow). Combined with a legitimate-looking phishing
+page, this is a Critical ATO.
 
-## Step 5: Authorization code handling
+## Step 3: Test state parameter
 
-### Code replay
+### Goal
+Determine if CSRF protection exists on the OAuth callback.
 
-1. Complete an OAuth flow and capture the authorization code.
-2. Exchange it for a token via `send_request`.
-3. Replay the same code in another token request. If a second token is issued,
-   codes are not single-use.
+### Actions
+1. Start an OAuth login flow. Note the `state` parameter value.
+2. Complete the flow. Remove the `state` parameter from the callback URL.
+   If login succeeds — state is not validated. CSRF attack possible.
+3. Use a different `state` value. If accepted — state is not bound to session.
+4. Reuse the same `state` in a different browser session. If accepted — state
+   is not session-bound.
 
-### Code lifetime
+### Impact
+Without state validation, an attacker can initiate an OAuth flow, get the callback
+URL with their authorization code, and trick the victim into visiting it. The
+victim's account gets linked to the attacker's OAuth account.
 
-Wait 60+ seconds before exchanging. Long-lived codes widen the attack window.
+## Step 4: Test PKCE enforcement
 
-### Code-to-token binding
+### Goal
+Determine if Proof Key for Code Exchange prevents code interception.
 
-Exchange a code obtained for client_A using client_B's credentials. If it works,
-codes are not bound to clients.
+### Actions
+1. Normal flow: send `code_challenge` in authorization request, `code_verifier`
+   in token exchange.
+2. Remove PKCE entirely: no `code_challenge`, no `code_verifier`. If the flow
+   succeeds — PKCE not enforced.
+3. Wrong verifier: correct `code_challenge` but different `code_verifier`.
+   If it succeeds — PKCE not validated.
+4. Downgrade to plain: change `code_challenge_method` from `S256` to `plain`.
+   If accepted — weaker protection.
 
-## Step 6: Token security
+### Impact
+Without PKCE, an intercepted authorization code (via redirect_uri bypass, Referer
+leak, or network interception) can be exchanged for tokens.
 
-### Access token leakage
+## Step 5: Test token handling and leakage
 
-Use `search_responses` to check if tokens appear in:
-- URL query strings (Referer header leakage)
-- Browser history
-- Server logs (if observable)
-- Error messages
+### Goal
+Find places where OAuth tokens leak.
 
-### Token in implicit flow
+### Actions
+**Referer header leakage**: After callback, check if subsequent requests to
+third-party domains include the callback URL (with code/token) in Referer.
 
-If `response_type=token`, the access token is in the URL fragment. Check if the
-application has open redirects that could leak it via Referer.
+**Token in URL**: Implicit flow puts tokens in fragments. Check if the page
+loads external resources that receive the fragment.
 
-### Refresh token rotation
+**Token in server logs**: Error pages or debug endpoints may reflect the token.
 
-Exchange a refresh token, then try reusing the old one. If it still works,
-refresh tokens are not rotated — a leaked token gives indefinite access.
+**Token lifetime**: Request a token and note `expires_in`. Is it too long?
+(Days or weeks for an access token is excessive.)
 
-### Token scope
+**Refresh token rotation**: Use refresh token, get new access token. Can you
+reuse the old refresh token? (It should be invalidated.)
 
-Request a token with `scope=openid profile email`. Then use the token to access
-resources outside that scope. If it works, scope enforcement is broken.
+## Step 6: Test scope escalation
 
-## Step 7: Scope escalation
+### Goal
+Obtain higher permissions than the application requests.
 
-1. Request authorization with elevated scope:
-   `scope=openid profile email admin` — does the server grant it?
+### Actions
+1. Note the original `scope` parameter.
+2. Add higher scopes: `scope=email profile admin openid`.
+3. If additional scopes are granted — scope not restricted by app registration.
+4. Test scope modification during token refresh with broader scope.
+5. Test if the token works for APIs beyond its intended scope.
 
-2. Modify the scope in the token request (after receiving the code):
-   `grant_type=authorization_code&code=X&scope=admin`
+## Step 7: Test account linking attacks
 
-3. Check if downscoped tokens can be upgraded by requesting a new token with
-   broader scope using a refresh token.
+### Goal
+Link an attacker's OAuth identity to a victim's application account.
 
-## Step 8: JWK/JWKS abuse
+### Actions
+1. Start OAuth linking flow as attacker.
+2. Intercept the callback URL with authorization code. Don't complete.
+3. Craft a page that forces victim's browser to visit your callback URL.
+4. If state/CSRF is missing, victim's account links to attacker's OAuth.
+5. Attacker logs in via OAuth as victim.
 
-If tokens are JWTs signed with RS256/ES256:
+### Pre-authentication linking
+1. Register with victim's email (unverified).
+2. Link attacker's OAuth account.
+3. Log in via OAuth — bypasses email verification.
 
-1. Fetch `/.well-known/jwks.json` with `send_request`.
-2. Check if the server accepts `alg: none` (remove signature, set alg to none).
-3. Check if the server accepts `alg: HS256` with the RSA public key as the
-   HMAC secret (algorithm confusion).
-4. Check if `jku` or `x5u` headers in the JWT can be pointed to an
-   attacker-controlled URL.
-5. Try injecting a crafted JWK in the JWT header (`jwk` parameter) — if the
-   server trusts embedded keys, you can forge tokens.
+## Step 8: Test implicit flow token theft
 
-Use `decode` to inspect JWT structure, then craft modified tokens with `encode`.
+### Goal
+Steal tokens from URL fragment in implicit flow.
 
-## Severity reference
+### Technique
+If `response_type=token` is supported:
+1. Find an open redirect on the registered domain.
+2. Set `redirect_uri` to the open redirect.
+3. Token arrives in fragment: `https://evil.com/#access_token=...`
+4. Attacker's JavaScript reads `location.hash`.
 
-| Finding | Severity |
-|---------|----------|
-| redirect_uri bypass → token/code theft | Critical |
-| Algorithm confusion (RS256→HS256/none) | Critical |
-| PKCE not enforced (code interception possible) | High |
-| Missing state parameter (OAuth CSRF) | High |
-| Authorization code replay | High |
-| JWK injection in JWT header | High |
-| Scope escalation to admin | High |
-| Refresh token not rotated | Medium |
-| Token in URL query string (Referer leak) | Medium |
-| Long-lived authorization codes (> 60s) | Medium |
-| State parameter predictable but present | Low |
+Even if the app uses auth code flow, test if implicit flow is also accepted
+(`response_type=token`). Many servers support both.
+
+## Step 9: Test device flow abuse
+
+### Goal
+Exploit device authorization flow for phishing.
+
+### Technique
+1. Attacker: `POST /device/code` → gets `user_code` and `device_code`.
+2. Attacker sends `user_code` + verification URL to victim.
+3. Victim enters code, authorizes the "device".
+4. Attacker polls `POST /token` with `device_code` → victim's token.
+
+Check: is there clear disclosure of what permissions are granted?
+Is the `user_code` short enough to brute force (< 8 chars)?
+Is the polling interval enforced?
+
+## Step 10: Record the finding
+
+Use `add_pentest_finding` with:
+- The specific OAuth vulnerability
+- The authorization request showing the attack
+- The callback showing the stolen code/token
+- Impact: ATO, unauthorized API access, scope escalation
 
 ## Known false positives
 
-- The authorization server returns an error page for an invalid redirect_uri —
-  this is correct behavior, not a bypass. Only report if it redirects WITH a
-  code/token.
-- `state` parameter is missing but the application uses a separate CSRF token
-  in the callback — this may be an alternative mitigation. Verify the CSRF token
-  is validated before downgrading.
-- PKCE is optional because the client is a confidential client with a
-  client_secret — this is acceptable per RFC 7636 but worth noting.
+- redirect_uri validated at token exchange even if not at authorization — the
+  code is useless without matching redirect_uri. Still test both steps.
+- State missing but callback uses SameSite cookies or other CSRF protection.
+- Scope granted in response but token actually has restricted permissions.
+- Device code that works once — correct behavior, not a vulnerability.
 
-## Tooling note
+## Reminder
 
-This methodology is designed for the Void panel tools (`send_request`,
-`compare_responses`, `search_responses`, `get_endpoints`, `decode`, `encode`,
-`add_pentest_finding`). These are browser-extension APIs, not shell commands.
-Do not attempt to run CLI tools.
+OAuth's top three bugs: **redirect_uri bypass** (#1 OAuth finding), **missing
+state** (CSRF), and **token leakage** (Referer, logs, URL). Test redirect_uri
+first. Always check if implicit flow is enabled even when the app uses auth code.
+The chain that matters: redirect_uri bypass + phishing = ATO.

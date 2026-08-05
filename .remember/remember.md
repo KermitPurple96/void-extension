@@ -7,7 +7,10 @@ Phases 1-6 COMPLETE: 8 data files (651KB skills, 519 payloads, 11 agents, 6 work
 
 Since then, on 2026-08-04: secret vault, the wizard's workflow step removed, all four
 content types made user-editable, workflows rebuilt as a real flow engine, an E2E pass
-that caught a dead judge URL, and a deep-research pass over agents/skills/prompts.
+that caught a dead judge URL, a deep-research pass over agents/skills/prompts, per-step
+agent bindings for all 23 workflows (43 steps), 11 new pentesting skills (auth, api,
+oauth, cache, host-header, prototype-pollution, clickjacking, web-llm, cspt,
+supply-chain, cloud-storage), and 5 stale skill updates.
 Tests: **654 Node** (`npm test`) + **116 Playwright** (`npm run test:browser`), all passing.
 
 ## Next
@@ -15,17 +18,12 @@ Tests: **654 Node** (`npm test`) + **116 Playwright** (`npm run test:browser`), 
    configured. Nothing in the AI path has ever executed against a real model here: the
    judge, the workflow conditions and the triggers are all verified only structurally
    and on their failure paths. This is the biggest untested surface.
-2. **Bind workflow steps to agents.** All 23 shipped workflows leave `step.agent` unset,
-   so every step runs as whatever persona the user happened to pick. `panel.js` already
-   supports per-step agents — wiring `full-pentest` as recon → injector → authhunter →
-   verifier → auditor is what turns the persona set into an actual pipeline.
-3. **Skill coverage gaps** (researched, not yet written). Ranked: `auth` (whole
-   PortSwigger Authentication topic missing), `api` (REST/BOLA/mass-assignment — only
-   GraphQL exists), `oauth`, `cache` (poisoning + deception, zero coverage),
-   `host-header`, `prototype-pollution`, `clickjacking`, `web-llm`, `cspt`,
-   `cloud-storage`, `supply-chain`. Stale bodies: `http-smuggling` (no CL.0/0.CL/TE.0 or
-   browser-powered desync), `race-condition` (no single-packet attack), `ssti` (no
-   error-based blind), `ssrf` (IMDSv2 named but no attack path), `jwt` (no JWE).
+2. ~~**Bind workflow steps to agents.**~~ DONE — all 43 steps across 23 workflows now
+   have per-step agent assignments (recon, injector, authhunter, apihunter, pentester, auditor).
+3. ~~**Skill coverage gaps**~~ DONE — 11 new skills added (auth, api, oauth, cache,
+   host-header, prototype-pollution, clickjacking, web-llm, cspt, supply-chain,
+   cloud-storage). 5 stale skills updated (http-smuggling, race-condition, ssti, ssrf, jwt).
+   Total: 43 skills.
 4. **WindowsDevEnv repo** — verify on a fresh machine.
 
 ## Context
